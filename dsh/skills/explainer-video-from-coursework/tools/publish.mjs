@@ -37,7 +37,7 @@ if (!WORK) {
   process.exit(1);
 }
 
-const workDir = resolve(ROOT, WORK);
+const workDir = resolve(WORK);
 const timelinePath = join(workDir, 'timeline.json');
 const publishPath = join(workDir, 'publish.json');
 if (!existsSync(timelinePath)) { console.error(`no timeline at ${timelinePath} — run build-audio first`); process.exit(1); }
@@ -123,7 +123,7 @@ for (let i = 1; i < cues.length; i++) {
 
 /* ---- optional cross-check against the script ---- */
 if (SCRIPT) {
-  const scriptPath = resolve(ROOT, SCRIPT);
+  const scriptPath = resolve(SCRIPT);
   if (!existsSync(scriptPath)) warnings.push(`--script not found: ${scriptPath}`);
   else {
     const script = JSON.parse(readFileSync(scriptPath, 'utf8'));

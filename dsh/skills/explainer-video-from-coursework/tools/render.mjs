@@ -8,7 +8,7 @@
 
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, rmSync, existsSync, renameSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { chromiumBinOrExit } from './chromium.mjs';
 import { requireNode, requireCmd } from './env.mjs';
@@ -78,7 +78,7 @@ async function connect(port) {
 const BIN = chromiumBinOrExit('render');
 const [sceneFile, sceneQuery] = SCENE.split('?');
 let urlQuery = sceneQuery || '';
-if (WORK) urlQuery = urlQuery ? urlQuery + '&work=' + encodeURIComponent(WORK) : 'work=' + encodeURIComponent(WORK);
+if (WORK) { const workUrl = pathToFileURL(resolve(WORK)).href; urlQuery = urlQuery ? urlQuery + '&work=' + encodeURIComponent(workUrl) : 'work=' + encodeURIComponent(workUrl); }
 const sceneUrl = 'file://' + join(ROOT, sceneFile) + (urlQuery ? '?' + urlQuery : '');
 console.log('[chromium]', BIN);
 
@@ -122,7 +122,7 @@ try {
 
   /* ---- QA mode: a handful of stills ---- */
   if (SHOTS) {
-    const dir = join(ROOT, SHOT_DIR);
+    const dir = resolve(SHOT_DIR);
     mkdirSync(dir, { recursive: true });
     const times = String(SHOTS).split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
     for (const t of times) {
@@ -134,7 +134,7 @@ try {
     cdp.close();
   } else {
     /* ---- full render ---- */
-    const dir = join(ROOT, 'frames');
+    const dir = resolve('frames');
     mkdirSync(dir, { recursive: true });
     const slice = RANGE ? String(RANGE).split(',').map(Number) : [0, meta.total];
     const tStart = slice[0], tEnd = slice[1] == null ? meta.total : slice[1];
@@ -157,7 +157,7 @@ try {
 
     /* ---- encode ---- */
     requireCmd('ffmpeg');
-    const outDir = resolve(ROOT, OUTDIR);   // resolve, so an absolute --outdir is honoured
+    const outDir = resolve(OUTDIR);   // cwd-relative, so an absolute --outdir is honoured
     mkdirSync(outDir, { recursive: true });
     const silent = join(outDir, 'video-silent.mp4');
     console.log('[ffmpeg] encoding H.264…');

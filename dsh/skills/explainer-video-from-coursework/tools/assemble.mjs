@@ -91,7 +91,7 @@ if (errors.length) {
 }
 
 const order = script.segments.map(s => s.key).filter(k => !ONLY || k === ONLY);
-const partDir = join(ROOT, WORK, 'parts');
+const partDir = resolve(WORK, 'parts');
 mkdirSync(partDir, { recursive: true });
 
 console.log(`[assemble] ${order.length} segment(s) · timeline ${tl.total}s · narration ${existsSync(narration) ? 'present' : 'MISSING'}\n`);
@@ -122,7 +122,7 @@ if (parts.length !== order.length) {
 const listFile = join(partDir, 'concat.txt');
 writeFileSync(listFile, parts.map(p => `file '${resolve(p)}'`).join('\n') + '\n');
 
-const outDir = join(ROOT, WORK);
+const outDir = resolve(WORK);
 const silent = join(outDir, `${NAME}-silent.mp4`);
 const final = join(outDir, `${NAME}.mp4`);
 

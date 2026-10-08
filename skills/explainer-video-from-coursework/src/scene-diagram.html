@@ -28,10 +28,10 @@
   var NAME = Q.get('scene') || 'srp-split';
   var WORK = Q.get('work') || '';
   var tlEl = document.createElement('script');
-  tlEl.src = WORK ? '../' + WORK + '/timeline.js' : 'timeline.js';
+  tlEl.src = WORK ? WORK + '/timeline.js' : 'timeline.js';
   tlEl.onload = function () {
     var s = document.createElement('script');
-    s.src = WORK ? '../' + WORK + '/scenes/' + NAME + '.js' : '../scenes/' + NAME + '.js';
+    s.src = WORK ? WORK + '/scenes/' + NAME + '.js' : '../scenes/' + NAME + '.js';
     s.onload = function () {
       var TL = window.TIMELINE;
       var scene = window.SceneCore.createScene({
