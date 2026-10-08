@@ -1,6 +1,6 @@
 {
   "name": "explainer-video-from-coursework-dsh",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DSH bundle plugin that ships the explainer-video-from-coursework skill.",
   "type": "module",
   "main": "lib/index.js",
