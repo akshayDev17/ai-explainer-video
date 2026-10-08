@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Diagram scene host</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 1920px; height: 1080px;
+    overflow: hidden; background: #080e1a;
+  }
+  svg#stage { display: block; width: 1920px; height: 1080px; }
+  text { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+</style>
+</head>
+<body>
+<!--
+  Host for the DIAGRAM renderer. The scene config supplies the content and the
+  beat timings (relative to a narration segment); src/timeline.js supplies the
+  MEASURED segment windows produced by the audio stage.
+-->
+<svg id="stage" xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080"></svg>
+
+<script src="scene-core.js"></script>
+<script>
+  // ?scene=<name> names the config; ?work=<dir> scopes it to a video's own dir so
+  // multiple videos don't share a timeline or scene namespace (ROADMAP §1, "Work-dir layout").
+  var Q = new URLSearchParams(location.search);
+  var NAME = Q.get('scene') || 'srp-split';
+  var WORK = Q.get('work') || '';
+  var tlEl = document.createElement('script');
+  tlEl.src = WORK ? '../' + WORK + '/timeline.js' : 'timeline.js';
+  tlEl.onload = function () {
+    var s = document.createElement('script');
+    s.src = WORK ? '../' + WORK + '/scenes/' + NAME + '.js' : '../scenes/' + NAME + '.js';
+    s.onload = function () {
+      var TL = window.TIMELINE;
+      var scene = window.SceneCore.createScene({
+        svg: document.getElementById('stage'),
+        config: window.SCENE_CONFIG,
+        timeline: TL,
+      });
+      window.renderAt = function (t) { scene.renderAt(t); return true; };
+      window.VIDEO_META = { width: TL.width, height: TL.height, fps: TL.fps, total: TL.total };
+    };
+    document.head.appendChild(s);
+  };
+  document.head.appendChild(tlEl);
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "explainer-video-from-coursework",
+  "version": "0.1.0",
+  "description": "Turn structured coursework notes into a narrated, animated explainer-video series.",
+  "author": {
+    "name": "Akshay Prabhakant"
+  },
+  "license": "UNLICENSED",
+  "keywords": ["explainer-video", "coursework", "narration", "animation", "text-to-speech", "video"]
+}

@@ -1,0 +1,14 @@
+# explainer-video scratch — disposable, regenerable, never commit
+out/
+.explainer-video/
+frames/
+preview/
+parts/
+
+# the deliverable videos are large binaries — dump them somewhere you own, not into a code repo
+*.mp4
+
+.DS_Store
+
+# a stray .env must never be committed — the key now lives in the OS secret store
+.env
