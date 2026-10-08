@@ -1,0 +1,7 @@
+# DSH bundle patch — mounts this bundle's plugin in the global composition.
+# `insert` appends rows; a relative `name` is anchored beside this patch file
+# (see dsh-app-boot `anchorInsertedPluginNames`), so './lib/index.js' resolves
+# to this package's plugin module wherever it is installed.
+- insert:
+    - id: explainer-video-from-coursework-dsh
+      name: './lib/index.js'
