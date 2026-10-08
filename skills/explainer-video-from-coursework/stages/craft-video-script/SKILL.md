@@ -8,7 +8,7 @@ description: Write and validate the spoken narration for one explainer-video. St
 > Part of the `explainer-video-from-coursework` pipeline — **stage 3 of 8**, the first
 > per-video stage. Self-contained: it needs an enriched plan, not a full run.
 >
-> Run every command from the skill folder (where `tools/` lives).
+> Run every command from the **project** (where `out/` scratch lives), not the skill install folder — the tools self-locate `tools/` and `src/`.
 
 **Prerequisites:** `out/<name>/plan.enriched.json` from the enrich stage.
 

@@ -9,7 +9,7 @@ description: Render one scene config over one time window to an MP4 (or a handfu
 > **primitive**; the assemble stage drives it per segment. It can also run alone for QA
 > stills during scene authoring.
 >
-> Run every command from the skill folder (where `tools/` lives).
+> Run every command from the **project** (where `out/` scratch lives), not the skill install folder — the tools self-locate `tools/` and `src/`.
 
 **Prerequisites:** a scene config and, for windowed renders, `out/<name>/<NN>/timeline.json`; on the machine, `ffmpeg` + headless Chromium (see `SETUP.md`).
 

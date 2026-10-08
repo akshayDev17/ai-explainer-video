@@ -31,7 +31,7 @@ const QUALITY = flag('crf', '18');
 // Which scene file to render, and where stills go. Lets us render the hand-written
 // scene and the DSL-driven scene through an identical pipeline for comparison.
 const SCENE = String(flag("scene", "src/scene-diagram.html?scene=srp-split"));
-const SHOT_DIR = String(flag('shot-dir', 'preview'));
+const SHOT_DIR = flag('shot-dir');
 const OUT_NAME = String(flag('name', 'video'));
 const NARR = String(flag('narration', 'out/narration.wav'));
 // "t0,t1" — render only this slice of the timeline, for per-segment assembly
@@ -122,7 +122,7 @@ try {
 
   /* ---- QA mode: a handful of stills ---- */
   if (SHOTS) {
-    const dir = resolve(SHOT_DIR);
+    const dir = resolve(SHOT_DIR || (WORK ? join(WORK, 'preview') : 'preview'));
     mkdirSync(dir, { recursive: true });
     const times = String(SHOTS).split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
     for (const t of times) {
@@ -134,7 +134,7 @@ try {
     cdp.close();
   } else {
     /* ---- full render ---- */
-    const dir = resolve('frames');
+    const dir = resolve(WORK ? join(WORK, 'frames') : 'frames');
     mkdirSync(dir, { recursive: true });
     const slice = RANGE ? String(RANGE).split(',').map(Number) : [0, meta.total];
     const tStart = slice[0], tEnd = slice[1] == null ? meta.total : slice[1];

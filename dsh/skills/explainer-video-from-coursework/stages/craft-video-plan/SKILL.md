@@ -9,7 +9,7 @@ description: Decompose a coursework notes directory into an explainer-video plan
 > the two once-per-series stages. This skill is self-contained: it plans a directory
 > from scratch. For a full run, use the main skill instead.
 >
-> Run every command from the skill folder (where `tools/` lives).
+> Run every command from the **project** (where `out/` scratch lives), not the skill install folder — the tools self-locate `tools/` and `src/`.
 
 **Prerequisites:** a directory of markdown notes (`<notesDir>`).
 

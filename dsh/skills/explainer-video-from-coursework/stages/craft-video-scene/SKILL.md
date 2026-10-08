@@ -9,7 +9,7 @@ description: Author and iterate the animated visuals for one video's segments. S
 > **orchestrator** over the audio stage: it loops, and it re-invokes `build-audio` when a
 > beat cannot fit. The audio stage itself is one-shot and never loops back.
 >
-> Run every command from the skill folder (where `tools/` lives).
+> Run every command from the **project** (where `out/` scratch lives), not the skill install folder — the tools self-locate `tools/` and `src/`.
 
 **Prerequisites:** `out/<name>/<NN>/timeline.json` (from the audio stage) and the
 script for the video; headless Chromium for the `--shots` look (see `SETUP.md`).

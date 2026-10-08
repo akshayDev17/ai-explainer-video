@@ -12,9 +12,11 @@ run **once per video** — write the narration, TTS turns it into measured audio
 author the visuals, generate the publishing metadata, then render and assemble that
 video's finished cut.
 
-All paths below are relative to **this skill's folder** — the directory containing this
-`SKILL.md`; the harness supplies it as the base directory. The tools self-locate, so
-`node tools/<tool>.mjs …` works from any working directory.
+The skill's own files (`tools/`, `src/`, `stages/`, `scenes/`) live in **this skill's folder**;
+the tools self-locate them, so `node tools/<tool>.mjs …` runs regardless of cwd. But the
+work and scratch paths (`out/`, `--work`, `--out`, `<notesDir>`) resolve against the
+**current directory** — run every command from the **project** (where `out/` scratch and
+the source notes live), never from the skill's install folder.
 
 > **For maintainers — the dual-file rule.** This skill is deliberately **monolithic**:
 > the whole pipeline lives here, so a full run loads in one pass. Every stage *also* has

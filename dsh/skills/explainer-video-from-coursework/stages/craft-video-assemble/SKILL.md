@@ -8,7 +8,7 @@ description: Assemble one video from its segments — render each window silent,
 > Part of the `explainer-video-from-coursework` pipeline — **stage 8 of 8**. The
 > **orchestrator** over the render stage.
 >
-> Run every command from the skill folder (where `tools/` lives).
+> Run every command from the **project** (where `out/` scratch lives), not the skill install folder — the tools self-locate `tools/` and `src/`.
 
 **Prerequisites:** the script, `out/<name>/<NN>/timeline.json`, `manifest.json`, and
 `narration.wav`; on the machine, `ffmpeg` + headless Chromium (see `SETUP.md`).

@@ -7,7 +7,7 @@ description: Generate YouTube chapters and English captions for one finished vid
 
 > Part of the `explainer-video-from-coursework` pipeline — **stage 6 of 8**.
 >
-> Run every command from the skill folder (where `tools/` lives).
+> Run every command from the **project** (where `out/` scratch lives), not the skill install folder — the tools self-locate `tools/` and `src/`.
 
 **Prerequisites:** `out/<name>/<NN>/timeline.json` and `narration/<key>.src` — both
 final once the scene stage exits.

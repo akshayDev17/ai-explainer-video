@@ -9,7 +9,7 @@ description: Synthesize narration and build the measured timeline for one video.
 > **primitive**: it builds audio once and stops. The scene stage re-invokes it when a
 > beat needs a hold; this skill itself never loops.
 >
-> Run every command from the skill folder (where `tools/` lives).
+> Run every command from the **project** (where `out/` scratch lives), not the skill install folder — the tools self-locate `tools/` and `src/`.
 
 **Prerequisites:** `out/<name>/scripts/<NN>-*.json` from the script stage; on the machine, the Gemini key in the OS secret store (see `SETUP.md`).
 

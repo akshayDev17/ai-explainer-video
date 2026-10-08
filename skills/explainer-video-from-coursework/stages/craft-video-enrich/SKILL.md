@@ -9,7 +9,7 @@ description: Retitle and curate the videos in an explainer-video plan — write 
 > once-per-series stage. Self-contained: it operates on an existing `plan.json`. For a
 > full run, use the main skill instead.
 >
-> Run every command from the skill folder (where `tools/` lives).
+> Run every command from the **project** (where `out/` scratch lives), not the skill install folder — the tools self-locate `tools/` and `src/`.
 
 **Prerequisites:** `out/<name>/plan.json` from the plan stage.
 
