@@ -20,7 +20,14 @@ git tag v0.1.3
 git push origin main --tags
 ```
 
-Then approve what CI queued:
+Then approve what CI queued — **in the browser**:
+
+> **npmjs.com → the "Staged Packages" tab** → pick the version → click **Approve**.
+>
+> That is npm's own documented path, so no terminal is involved. You are prompted for 2FA
+> either way, and nothing is installable until you approve it.
+
+The CLI works too, if you'd rather:
 
 ```sh
 npx npm@latest stage list                      # each staged version, with its stage id
@@ -29,11 +36,10 @@ npx npm@latest stage approve <stage-id> --otp <6-digit code>
 ```
 
 `npx npm@latest` rather than plain `npm`, because the npm on this laptop is **10.9.8**,
-which predates the `stage` command. The `--otp` is the code from your authenticator app —
-approval is the step that requires 2FA, deliberately.
+which predates `npm stage` entirely.
 
-**Two approvals per release**, one per package. Nothing is installable until you approve it.
-`npm stage reject <stage-id>` drops a queued version instead.
+**Two approvals per release**, one per package. On the CLI, `npm stage reject <stage-id>`
+drops a queued version instead of approving it.
 
 ## Why staged rather than direct
 
@@ -68,6 +74,10 @@ The filename and environment must match the workflow exactly, or npm rejects the
 attached. Both already do (0.1.0, 0.1.1), so there is no chicken-and-egg here — a brand-new
 package name would need a first publish or `npm stage publish` to create it.
 
+Which also explains the `0.0.0-stage` version sitting on both packages: npm's docs state that
+staging a package that does not yet exist publishes a public *placeholder* at exactly that
+version. That is where those came from.
+
 ## Why OIDC instead of a token
 
 - **No long-lived secret.** Nothing to store, rotate, leak, or paste into a GitHub secret.
@@ -87,9 +97,11 @@ when a rollback workflow exists.
 
 ## Gotchas worth knowing
 
-- **CI npm must be ≥ 11.5.1.** Node 22 bundles npm 10, which cannot exchange the OIDC token —
-  hence the workflow pinning `npm@11.5.1` through `npx`. This laptop's npm 10.9.8 is also why
-  earlier manual publishes needed `--otp`.
+- **CI npm must be ≥ 11.15.0.** Two separate floors: the OIDC token exchange landed in
+  11.5.1, and `npm stage` needs 11.15.0 — so 11.15.0 is the real floor, hence the workflow
+  pinning `npm@11.15.0` through `npx`. Staging also requires Node ≥ 22.14.0; the workflow's
+  `node-version: "22"` resolves to the newest 22.x, which satisfies it. This laptop's npm
+  10.9.8 is why earlier manual publishes needed `--otp`.
 - **`registry-url` is required** in `setup-node`, or the publish fails with `ENEEDAUTH`.
 - **The two stages are serialized** by a `sleep`; a second registry write racing the first
   one's processing returns `409 Failed to save packument`.

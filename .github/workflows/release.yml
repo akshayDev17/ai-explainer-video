@@ -54,11 +54,13 @@ jobs:
           # deliberately omits "Allow npm publish", so a compromised run can ask to
           # ship but cannot ship.
           #
-          # npm 10 — the version bundled with Node 22 — cannot exchange the OIDC
-          # token for a publish credential; that landed in npm 11.5.1. Pin it via
-          # npx so the runner needs no write access to the hosted tool cache.
+          # npm 10 — the version bundled with Node 22 — is too old on both counts:
+          # the OIDC token exchange landed in 11.5.1, and `stage` needs 11.15.0.
+          # Pin via npx so the runner needs no write access to the hosted tool
+          # cache. Staging also requires Node >= 22.14.0; "22" resolves to the
+          # newest 22.x, which satisfies that.
           # Provenance needs no flag: trusted publishing emits it by default.
-          stage() { npx --yes npm@11.5.1 stage publish; }
+          stage() { npx --yes npm@11.15.0 stage publish; }
 
           # Root first: explainer-video-from-coursework-dsh depends on it, so a
           # consumer resolving the wrapper must find the root already published.
