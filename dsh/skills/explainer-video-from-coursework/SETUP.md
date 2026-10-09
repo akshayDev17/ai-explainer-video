@@ -1,8 +1,8 @@
 # Setup — what this skill needs on the machine
 
 One-time environment prerequisites. `SKILL.md` and the per-stage files point here; run
-everything else from the skill folder (where `tools/` lives). Everything the pipeline
-produces beyond this it makes itself under `out/`.
+everything else from the **project** (where `out/` scratch lives), not the skill install
+folder. Everything the pipeline produces beyond this it makes itself under `out/`.
 
 ## Node ≥ 22
 
