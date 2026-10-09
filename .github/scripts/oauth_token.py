@@ -23,7 +23,9 @@ import argparse
 import json
 import pathlib
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
+# SMTP/XOAUTH2 uses the full-mail scope, not the REST API's gmail.send. There is
+# no narrower scope for SMTP: this token can read and send.
+SCOPES = ["https://mail.google.com/"]
 
 
 def load_client(secrets_path: str) -> tuple[str, str]:

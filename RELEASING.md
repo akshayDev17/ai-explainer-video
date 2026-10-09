@@ -129,14 +129,15 @@ Four things it does deliberately:
 
 The notifier sends through a Gmail account. Two ways to authenticate — pick one. **OAuth** is
 recommended: no app password, works even when Google withholds app passwords (passkey-only 2FA), and
-the token is scoped to **send only**, so it cannot read the inbox. An **App Password** is simpler on
-paper but is gated behind the right 2FA method.
+its credential survives password changes and is revocable per-client. It is not narrower than an app
+password, though — SMTP has no send-only scope, so the token covers full Gmail (read and send). An
+**App Password** is simpler on paper but is gated behind the right 2FA method.
 
 #### Option A — OAuth (XOAUTH2)
 
 1. In the Google Cloud console: create a project, enable the **Gmail API**, configure the **OAuth
    consent screen** (user type **External**, add yourself as a test user, and add the
-   `https://www.googleapis.com/auth/gmail.send` scope), then create an **OAuth client** of type
+   `https://mail.google.com/` scope), then create an **OAuth client** of type
    **Desktop app** and download its `client_secret_*.json`. Google's own walkthrough — modulo the
    scope — is <https://ai.google.dev/gemini-api/docs/oauth>.
 
