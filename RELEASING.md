@@ -1,39 +1,56 @@
 # Releasing
 
-Two npm packages ship from this repo, and **GitHub Actions publishes both**. Nothing is
-published from a laptop any more.
+Two npm packages ship from this repo. GitHub Actions **stages** them; you **approve** them.
+No npm token exists anywhere, and no publish ever runs on a laptop.
 
 | package | source | consumers |
 |---|---|---|
 | `explainer-video-from-coursework` | repo root | Claude Code, Codex (npm) · Antigravity (git) |
 | `explainer-video-from-coursework-dsh` | `dsh/` | DeepSeek Harness |
 
-## A release is a tag
+## A release is a tag, then an approval
 
 ```sh
 # 1. bump the version in all four places it is duplicated
 #    package.json · plugin.json · .claude-plugin/plugin.json · dsh/package.json
 # 2. commit
 git commit -am "chore(release): v0.1.3"
-# 3. tag and push — this IS the release
+# 3. tag and push — CI stages both packages
 git tag v0.1.3
 git push origin main --tags
 ```
 
-Pushing the tag runs [`.github/workflows/release.yml`](./.github/workflows/release.yml),
-which publishes both packages **root first** (the wrapper depends on it) and **fails the
-run if the tag disagrees with either `package.json` version**.
+Then approve what CI queued:
 
-Watch it with `gh run watch`, or the Actions tab.
+```sh
+npx npm@latest stage list                      # each staged version, with its stage id
+npx npm@latest stage download <stage-id>       # optional: open the tarball and look
+npx npm@latest stage approve <stage-id> --otp <6-digit code>
+```
 
-The marketplace catalogs pin `"version": "^0.1.0"` as a *range*, so patch and minor bumps
-need no catalog edit — Claude Code and Codex pick the new version up on their next install
-or update.
+`npx npm@latest` rather than plain `npm`, because the npm on this laptop is **10.9.8**,
+which predates the `stage` command. The `--otp` is the code from your authenticator app —
+approval is the step that requires 2FA, deliberately.
+
+**Two approvals per release**, one per package. Nothing is installable until you approve it.
+`npm stage reject <stage-id>` drops a queued version instead.
+
+## Why staged rather than direct
+
+The trusted publisher is configured with **"Allow npm publish" unchecked**, so the
+workflow's OIDC credential can queue a version but cannot make it live. That closes a hole
+provenance does *not* close: if the release workflow were ever compromised, the provenance
+attestation would still verify perfectly — because the code really did come from this repo.
+Staging is the control that stops it, since a human sees the version before anyone can
+install it. `npm stage download` exists so you can inspect the tarball first.
+
+Checking that box instead would make a tag go live with no human in the loop; npm labels it
+"Not recommended" for exactly this reason.
 
 ## One-time setup: a Trusted Publisher per package
 
-npm has to be told which workflow is allowed to publish. Do this once for **each** package,
-under that package's settings on npmjs.com — `https://www.npmjs.com/package/<name>/access`:
+npm has to be told which workflow may stage. Do this once for **each** package, under that
+package's settings — `https://www.npmjs.com/package/<name>/access`:
 
 | field | value |
 |---|---|
@@ -42,59 +59,59 @@ under that package's settings on npmjs.com — `https://www.npmjs.com/package/<n
 | Repository | `ai-explainer-video` |
 | Workflow filename | `release.yml` |
 | Environment name | **leave empty** — the workflow declares no `environment:` |
+| Allow npm publish | **leave unchecked** — this is what forces staging |
+| Allow npm dist-tag | **leave unchecked** — see below |
 
-The filename must match exactly, and the environment must match the workflow, or npm
-rejects the publish. Each package needs its own entry.
+The filename and environment must match the workflow exactly, or npm rejects the request.
 
-**Why we can do this at all:** a package has to exist on npm before a Trusted Publisher can
-be attached. Both already do (0.1.0, 0.1.1), so there is no chicken-and-egg here — but a
-brand-new package name would need one manual publish first.
+**Why we can do this at all:** a package must exist on npm before a Trusted Publisher can be
+attached. Both already do (0.1.0, 0.1.1), so there is no chicken-and-egg here — a brand-new
+package name would need a first publish or `npm stage publish` to create it.
 
 ## Why OIDC instead of a token
 
 - **No long-lived secret.** Nothing to store, rotate, leak, or paste into a GitHub secret.
   The credential is minted per run and dies with it.
 - **Provenance comes free.** Under trusted publishing the npm CLI emits a provenance
-  attestation automatically — a cryptographic claim tying the tarball to this commit and
-  this workflow run, so `--provenance` is no longer needed. Provenance requires a public
-  source repo; this one is public.
-- **2FA is already satisfied.** Publishing these packages requires 2FA, which is why local
-  publishes needed `--otp`. OIDC is accepted as 2FA-equivalent, so CI passes no OTP.
+  attestation automatically, so `--provenance` is no longer needed. Provenance requires a
+  public source repo; this one is public.
+- **2FA moves to the approval**, where a human is — instead of a token that bypasses it.
+
+## Dist-tags, and what that permission is not
+
+`Allow npm dist-tag` is for re-pointing tags on **already-published** versions — "promoting a
+version to `latest`", moving `next`/`beta`. It is **not** how a release acquires `latest`:
+`npm publish` sets `latest` as part of publishing, which is covered by the publish path.
+Leave it unchecked. The one thing it would buy is a token-free **rollback**; enable it if and
+when a rollback workflow exists.
 
 ## Gotchas worth knowing
 
-- **CI npm must be ≥ 11.5.1.** Node 22 bundles npm 10, which cannot exchange the OIDC token
-  — hence the workflow pinning `npm@11.5.1` through `npx`. The npm on this laptop is
-  **10.9.8**, which is precisely why manual publishes needed `--otp`.
-- **The two publishes are serialized** by a `sleep`. A second publish PUT racing the first
-  one's registry processing returns `409 Failed to save packument`.
-- **`registry-url` is required** in `setup-node`, or `npm publish` fails with `ENEEDAUTH`.
-- **A tag without a matching version fails the run**, deliberately: shipping the wrong
+- **CI npm must be ≥ 11.5.1.** Node 22 bundles npm 10, which cannot exchange the OIDC token —
+  hence the workflow pinning `npm@11.5.1` through `npx`. This laptop's npm 10.9.8 is also why
+  earlier manual publishes needed `--otp`.
+- **`registry-url` is required** in `setup-node`, or the publish fails with `ENEEDAUTH`.
+- **The two stages are serialized** by a `sleep`; a second registry write racing the first
+  one's processing returns `409 Failed to save packument`.
+- **A tag without a matching version fails the run**, deliberately — shipping the wrong
   version is the one mistake a tag-triggered release makes cheap to commit.
-- **The workflow only works once the Trusted Publisher exists.** Tagging before then gives a
-  red run, not a publish.
+- **Nothing is live until you approve.** A green workflow run means "queued", not "released".
 
 ## If a release fails
 
-The root publish runs first, so a failure is one of:
-
-- **Before either publish** (the guard) — fix it, then delete and re-push the tag:
+- **Before staging** (the version guard) — fix it, then delete and re-push the tag:
   `git push --delete origin v0.1.3 && git tag -d v0.1.3`, then re-tag.
-- **Between the two** — the root is live, the wrapper is not. Re-run the job from the
-  Actions tab; the root publish will report a version-exists error, which is expected and
-  harmless. Confirm the wrapper lands.
-- **A bad version is already live** — npm will not let you republish it. Deprecate and move
-  forward: `npm deprecate explainer-video-from-coursework@0.1.3 "broken — use 0.1.4"`.
-
-The manual path still works as a fallback — `npm publish --otp <2FA_OTP>` from a machine
-with the right npm — but it produces no provenance, and the laptop-publish era is ending
-anyway.
+- **Between the two stages** — the root is queued and the wrapper is not. Re-run the job from
+  the Actions tab; the root stage may error as a duplicate, which is harmless.
+- **Staged but wrong** — `npm stage reject <stage-id>`, fix, re-tag. Nothing was ever
+  installable, so there is nothing to un-publish.
+- **Already approved and bad** — npm will not let you republish that version. Deprecate and
+  move forward: `npm deprecate explainer-video-from-coursework@0.1.3 "broken — use 0.1.4"`.
+  Moving `latest` back would need the dist-tag permission above.
 
 ## Deliberately not wired
 
 - **A GitHub Release per tag** — add `contents: write` plus a `gh release create` step.
 - **Tag protection** — a repository rule on `v*` stops a tag being moved or deleted.
-- **An approval gate** — `environment: npm-production` on the job, mirrored in the npmjs.com
-  config, turns a release into an approved action.
-- **A post-publish smoke test** — `npm view <pkg> version` plus a clean install in a scratch
-  directory, so a bad tarball is caught before anyone consumes it.
+- **A post-publish smoke test** — `npm view <pkg> version` and a clean install in a scratch
+  directory, after approval, so a bad tarball is caught before anyone consumes it.

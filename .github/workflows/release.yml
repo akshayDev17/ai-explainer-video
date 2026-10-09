@@ -46,20 +46,25 @@ jobs:
           [ "$TAG" = "$ROOT" ] || { echo "::error::tag $TAG != root package version $ROOT"; exit 1; }
           [ "$TAG" = "$DSH" ]  || { echo "::error::tag $TAG != dsh package version $DSH"; exit 1; }
 
-      - name: Publish both packages (root first)
+      - name: Stage both packages (root first)
         run: |
           set -e
+          # Staged publishing: this queues each version and a maintainer approves it
+          # on npm before it becomes installable. The trusted-publisher config
+          # deliberately omits "Allow npm publish", so a compromised run can ask to
+          # ship but cannot ship.
+          #
           # npm 10 — the version bundled with Node 22 — cannot exchange the OIDC
           # token for a publish credential; that landed in npm 11.5.1. Pin it via
           # npx so the runner needs no write access to the hosted tool cache.
-          # Provenance needs no flag here: trusted publishing emits it by default.
-          publish() { npx --yes npm@11.5.1 publish; }
+          # Provenance needs no flag: trusted publishing emits it by default.
+          stage() { npx --yes npm@11.5.1 stage publish; }
 
           # Root first: explainer-video-from-coursework-dsh depends on it, so a
           # consumer resolving the wrapper must find the root already published.
-          publish
+          stage
 
-          # Serialize the two publishes: a second PUT racing the first one's
-          # registry processing returns 409 "Failed to save packument".
+          # Serialize the two: a second registry write racing the first one's
+          # processing returns 409 "Failed to save packument".
           sleep 5
-          cd dsh && publish
+          cd dsh && stage
