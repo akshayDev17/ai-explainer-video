@@ -208,25 +208,35 @@ of one vendor's REST API:
 - **MailerSend** — wants a card even on the free plan: *"we just ask that you provide this information
   to prevent abuse of the platform."*
 
-If you ever do want a provider, these were still genuinely free-forever at the time of writing. And
-because the transport is plain SMTP, moving to one is a change of repository variables, not of code:
+If you ever do want a provider, the free tier being generous tells you nothing about whether they
+will let you in the door — so the table below is about **admission**, not pricing. Everything in it
+was checked against the providers' own signup forms and docs. Because the transport is plain SMTP,
+moving to one is a change of repository variables, not of code:
 
-| Provider | Free tier | Sending without a domain |
+| Provider | Free tier | Signing up and sending from a personal address |
 |---|---|---|
-| Elastic Email | 3,000/mo, 100/day, no card | Verify a single sender address |
-| Mailjet | 6,000/mo, 200/day, no card | Activate a single sender by email link |
-| Brevo | 300/day, no card, no stated time limit | Single sender by OTP — but they require domain authentication for Gmail/Yahoo/Microsoft senders |
-| Postmark | 100/mo, unlimited/day, no card | Sender Signature; accounts are approved by hand |
-| Resend | 3,000/mo, 100/day | Without a domain it can only mail the account's own address |
+| **Mailjet** | 6,000/mo, 200/day, no card | ✅ The frictionless one. No phone step; the sender validates with a confirmation link. Caveat: new accounts can land in a "Test Mode" capped at 10 emails/hour until support verifies your details, and upgrading does *not* lift it. |
+| **Resend** | 3,000/mo, 100/day | ⚠️ Open signup, but **no DNS-free sending at all** — without a verified domain the `resend.dev` test domain delivers only to your own account address. Perfect for a notifier like this one, useless for anything broader. |
+| **Elastic Email** | 3,000/mo, 100/day, no card, no expiry | ⚠️ Doesn't block the signup, blocks *activation*: *"You need to verify your phone number before you can send."* A Gmail/Yahoo address also may not be the `From`. |
+| **Brevo** | 300/day, no card, no time limit | ⚠️ A phone/identity step sits in the default onboarding, and generating the SMTP key itself demands *"the verification code sent to your device"* — so a fully hands-off setup breaks there. |
+| **Postmark** | 100/mo, unlimited/day, no card | ❌ Refuses Gmail, Yahoo, Outlook, iCloud, AOL and Proton at signup — same wording as SMTP2GO — *and* the sender signature *"needs to be a private domain that you have access to"*. Despite the generous numbers, it is unreachable without a domain. |
+| **Mailgun** | 100/day, no card | ❌ *"Do I have to use a domain to send email? Yes."* Without one you get a sandbox domain capped at **5 Authorized Recipients**, plus mandatory phone OTP at activation. |
 
-Two of those matter if you ever switch: **`SMTP_USER` is not always your email address** (Resend uses
-the literal string `resend` with an API key as the password), and several providers allow only **one
-SMTP user or key on the free plan**. Run `--check-smtp` after any change — it reports exactly which of
-those you got wrong.
+`SMTP_USER` is the field that trips people up, and at most of these it is **not** your email address:
 
-One warning before you pick: **read the signup form before you commit.** SMTP2GO's rejection above is
-not unique — these providers sell to businesses, so a personal address can be turned away at the door
-even when the free tier itself would have suited you perfectly.
+- **Resend** — the literal string `resend`, with your API key as the password.
+- **Mailjet** — the **API key** as username, the **Secret key** as password.
+- **Brevo** — either your account email or a generated `[ID]@smtp-brevo.com`, with a generated **SMTP
+  key** (not its API key). Changing your login email does not change the SMTP login.
+- **Elastic Email** — your account email, with a generated SMTP credential as the password.
+- **Postmark** — the Server API Token is *both* the username and the password.
+
+Run `--check-smtp` after any change; it reports which of those you got wrong.
+
+One claim to be careful of if you go looking: the idea that free plans allow only **one SMTP user or
+key** is not true of any provider checked here. Elastic Email documents 15 credentials per account,
+Mailjet's one-subaccount limit is a different thing, and Resend and Postmark have no SMTP-user concept
+at all.
 
 ### Why not just GitHub's own email
 
