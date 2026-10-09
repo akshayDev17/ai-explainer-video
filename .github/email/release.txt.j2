@@ -1,0 +1,27 @@
+{# Plain-text twin of release.html.j2. Multipart is what keeps this out of spam,
+   and it is what anyone reading in a text-only client (or a terminal) will see. #}
+{{ heading }}
+{{ package }} {{ version }}
+{{ subhead }}
+
+  version       {{ version }}
+  tag           {{ tag_display }}
+  commit        {{ commit_short }} on {{ branch }}
+  triggered by  {{ event }} by {{ actor }}
+{% if duration %}  duration      {{ duration }}
+{% endif %}{% if failed_step %}  failed at     {{ failed_step }}
+{% endif %}
+{% if error %}
+ERROR
+{% for line in error %}  {{ line }}
+{% endfor %}{% if truncated %}  ... truncated - the full log is in the run
+{% endif %}
+{% endif %}{% if hint %}
+WHAT TO DO
+  {{ hint }}
+
+{% endif %}{{ cta_label }}:
+{{ cta_url }}
+
+{{ footnote }}
+Run #{{ run_id }}: {{ run_url }}

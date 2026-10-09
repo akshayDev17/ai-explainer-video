@@ -1,0 +1,136 @@
+{#
+  Release notification — the "Signal" design.
+
+  Rendered by .github/scripts/notify.py and sent through SendGrid's v3 /mail/send.
+  Email constraints this file obeys: table layout, inline styles only (Gmail strips
+  <style>), no images (most clients block them), no scripting, 600px max width.
+
+  Variables are prepared in Python so this file stays close to state-agnostic —
+  the only branch is the failure-only Error row.
+#}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>{{ subject }}</title>
+</head>
+<body style="margin:0;padding:0;background:#f1f3f4;">
+
+<!-- Preheader: the line the inbox list shows next to the subject. Hidden in the body. -->
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;color:#f1f3f4;">{{ preheader }}</div>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f1f3f4;">
+  <tr>
+    <td align="center" style="padding:24px 12px;">
+
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background:#ffffff;border:1px solid #dadce0;border-radius:8px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+
+        <!-- ── status band ───────────────────────────────────────────── -->
+        <tr>
+          <td style="background:{{ accent }};padding:26px 32px;">
+            <div style="font-size:12px;font-weight:700;letter-spacing:2px;color:{{ accent_text }};">{{ heading }}</div>
+            <div style="font-size:23px;font-weight:700;color:#ffffff;line-height:1.25;margin-top:8px;">{{ package }} {{ version }}</div>
+            <div style="font-size:14px;color:{{ accent_text }};margin-top:6px;">{{ subhead }}</div>
+          </td>
+        </tr>
+
+        <!-- ── facts ─────────────────────────────────────────────────── -->
+        <tr>
+          <td style="padding:26px 32px {{ '4px' if error else '8px' }};">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;color:#202124;">
+              <tr>
+                <td style="padding:5px 0;color:#5f6368;width:120px;">Version</td>
+                <td style="padding:5px 0;font-weight:600;">{{ version }}</td>
+              </tr>
+              <tr>
+                <td style="padding:5px 0;color:#5f6368;">Tag</td>
+                <td style="padding:5px 0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;{{ 'color:#9aa0a6;' if not tag_created }}">{{ tag_display }}</td>
+              </tr>
+              <tr>
+                <td style="padding:5px 0;color:#5f6368;">Commit</td>
+                <td style="padding:5px 0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;">{{ commit_short }} on {{ branch }}</td>
+              </tr>
+              <tr>
+                <td style="padding:5px 0;color:#5f6368;">Triggered by</td>
+                <td style="padding:5px 0;">{{ event }} by {{ actor }}</td>
+              </tr>
+{% if duration %}
+              <tr>
+                <td style="padding:5px 0;color:#5f6368;">Duration</td>
+                <td style="padding:5px 0;">{{ duration }}</td>
+              </tr>
+{% endif %}
+{% if failed_step %}
+              <tr>
+                <td style="padding:5px 0;color:#5f6368;">Failed at</td>
+                <td style="padding:5px 0;font-weight:600;">{{ failed_step }}</td>
+              </tr>
+{% endif %}
+
+{% if error %}
+              <!-- Error row: failure only, and the body is truncated server-side so no
+                   client can hide it behind a scroll it refuses to perform. -->
+              <tr>
+                <td style="padding:5px 0;color:#5f6368;vertical-align:top;">Error</td>
+                <td style="padding:5px 0;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fce8e6;border-left:3px solid #b3261e;">
+                    <tr>
+                      <td style="padding:12px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.6;color:#601410;">
+{% for line in error %}
+                        <div>{{ line }}</div>
+{% endfor %}
+{% if truncated %}
+                        <div style="color:#9a3b34;margin-top:4px;">&hellip; truncated &mdash; the full log is in the run</div>
+{% endif %}
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+{% endif %}
+            </table>
+          </td>
+        </tr>
+
+{% if hint %}
+        <!-- ── what to do: only when a known signature matched ──────── -->
+        <tr>
+          <td style="padding:6px 32px 0;">
+            <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;color:#5f6368;margin-bottom:6px;">WHAT TO DO</div>
+            <div style="font-size:14px;line-height:1.65;color:#202124;">{{ hint }}</div>
+          </td>
+        </tr>
+{% endif %}
+
+        <!-- ── call to action ────────────────────────────────────────── -->
+        <tr>
+          <td style="padding:20px 32px 6px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="background:{{ accent }};border-radius:6px;">
+                  <a href="{{ cta_url }}" style="display:inline-block;padding:13px 24px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;">{{ cta_label }}&nbsp;&nbsp;&rarr;</a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- ── footnote ──────────────────────────────────────────────── -->
+        <tr>
+          <td style="padding:10px 32px 28px;">
+            <div style="font-size:13px;color:#5f6368;line-height:1.6;">
+              {{ footnote }}<br>
+              <a href="{{ run_url }}" style="color:#5f6368;">Run #{{ run_id }}</a>
+            </div>
+          </td>
+        </tr>
+
+      </table>
+
+    </td>
+  </tr>
+</table>
+</body>
+</html>

@@ -37,10 +37,18 @@ jobs:
           # registry. Without it the publish fails with ENEEDAUTH.
           registry-url: "https://registry.npmjs.org"
 
+      # setup-python gives a Python whose pip install works without the runner's
+      # system Python complaining about being externally managed (PEP 668).
+      - name: Set up Python (for the notification)
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
       - name: Release only if this version is untagged
         id: gate
         run: |
           set -e
+          echo "start=$(date +%s)" >> "$GITHUB_OUTPUT"
           V="$(node -p "require('./package.json').version")"
           echo "version=$V" >> "$GITHUB_OUTPUT"
           if git rev-parse -q --verify "refs/tags/v$V" >/dev/null; then
@@ -52,8 +60,10 @@ jobs:
           fi
 
       - name: Stage the package
+        id: stage
         if: steps.gate.outputs.release == 'true'
         run: |
+          set -o pipefail
           # Staged publishing: this queues the version, and a maintainer approves
           # it on npm before it becomes installable. The trusted-publisher config
           # deliberately omits "Allow npm publish", so a compromised run can ask to
@@ -64,9 +74,12 @@ jobs:
           # so the runner needs no write access to the hosted tool cache. Staging
           # also requires Node >= 22.14.0; "22" resolves to the newest 22.x.
           # Provenance needs no flag: trusted publishing emits it by default.
-          npx --yes npm@11.15.0 stage publish
+          # Capture the output: on failure the notification inlines its tail, and a
+          # job log is not something you can read from an email.
+          npx --yes npm@11.15.0 stage publish 2>&1 | tee "$RUNNER_TEMP/stage.log"
 
       - name: Tag the release
+        id: tag
         if: steps.gate.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -77,3 +90,29 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/git/refs" \
             -f ref="refs/tags/v$V" -f sha="$GITHUB_SHA" >/dev/null
           echo "tagged v$V at $GITHUB_SHA"
+
+      # Runs on every outcome, so a failure is reported too. notify.py works out the
+      # state from the step outcomes above, stays silent on a no-op run, and never
+      # fails the job: a notification problem must not mark a release that actually
+      # succeeded as failed.
+      #
+      # Needs SENDGRID_API_KEY (secret) and MAIL_FROM / MAIL_TO (variables).
+      # Missing config warns in the log and exits 0 — see RELEASING.md.
+      - name: Notify
+        if: always()
+        env:
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+          GATE_RELEASE: ${{ steps.gate.outputs.release }}
+          VERSION: ${{ steps.gate.outputs.version }}
+          START_EPOCH: ${{ steps.gate.outputs.start }}
+          STAGE_OUTCOME: ${{ steps.stage.outcome }}
+          TAG_OUTCOME: ${{ steps.tag.outcome }}
+          STAGE_LOG: ${{ runner.temp }}/stage.log
+          PACKAGE: explainer-video-from-coursework
+          NPM_USER: ${{ vars.NPM_USER }}
+          MAIL_FROM: ${{ vars.MAIL_FROM }}
+          MAIL_TO: ${{ vars.MAIL_TO }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+        run: |
+          python -m pip install --quiet jinja2
+          python .github/scripts/notify.py

@@ -100,6 +100,61 @@ The filename and environment must match the workflow exactly, or npm rejects the
   2FA are being restricted — account changes from August 2026, and **direct publishing from
   January 2027**. This setup is the destination, not a detour.
 
+## The release email
+
+The workflow ends with a **Notify** step that renders
+[`release.html.j2`](./.github/email/release.html.j2) — plus a `text/plain` twin — with Jinja, and
+sends it through SendGrid's v3 API. It runs under `if: always()`, so failures are reported too.
+
+Three things it does deliberately:
+
+- **It stays silent on a no-op run.** The workflow fires on every push to `main` but only acts on a
+  version bump, so a docs-only commit is green and releases nothing. Emailing that would be one mail
+  per commit.
+- **It says "staged", not "released".** A green run means the version is queued in npm's staging area,
+  so the most useful line in the mail is the approval link, not the commit hash.
+- **It never fails the job.** A notification problem must not mark a release that actually succeeded
+  as failed — missing configuration warns in the log and exits 0.
+
+### One-time setup
+
+1. Create a SendGrid account, then an API key with **Mail Send** permission:
+   <https://app.sendgrid.com/settings/api_keys>.
+2. Verify a **sender** — Single Sender Verification, or Domain Authentication if you have a domain.
+   SendGrid refuses an unverified from-address.
+3. Add these under *Settings → Secrets and variables → Actions*:
+
+   | kind | name | value |
+   |---|---|---|
+   | secret | `SENDGRID_API_KEY` | the API key |
+   | variable | `MAIL_FROM` | the **verified** sender address |
+   | variable | `MAIL_TO` | where it goes; comma-separated for several |
+   | variable | `NPM_USER` | your npm username, for the approval link (`akshaydev17`) |
+
+### Previewing without sending
+
+The renderer has a dry run that needs no credentials:
+
+```sh
+python -m pip install jinja2
+GITHUB_REPOSITORY=akshayDev17/ai-explainer-video GITHUB_RUN_ID=1 GITHUB_SHA=abc1234 \
+GITHUB_ACTOR=you GITHUB_REF_NAME=main VERSION=0.1.2 GATE_RELEASE=true \
+GATE_OUTCOME=success STAGE_OUTCOME=failure TAG_OUTCOME=skipped \
+STAGE_LOG=/tmp/err.log PACKAGE=explainer-video-from-coursework NPM_USER=yourname \
+python .github/scripts/notify.py --dry-run --out /tmp/preview
+```
+
+Open `/tmp/preview/render.html`. Point `STAGE_LOG` at any failed step's output to see how the Error
+row renders: it pulls the error lines out of the log, truncates **server-side** (rather than hiding
+them behind a scroll some clients can't perform), and matches them against a small table of known
+failures to fill the "what to do" row.
+
+### Why not just GitHub's own email
+
+GitHub will email you about workflow runs natively — *Settings → Notifications → System → Actions* —
+with no code at all. But the template is fixed: no version, no tag, no error text, and no link to the
+npm approval page. Turn it on as a safety net if you like, but it cannot replace this one.
+
 ## Dist-tags, and what that permission is not
 
 `Allow npm dist-tag` is for re-pointing tags on **already-published** versions — "promoting a
