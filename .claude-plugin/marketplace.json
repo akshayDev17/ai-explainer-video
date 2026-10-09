@@ -4,9 +4,6 @@
     "name": "akshayDev17"
   },
   "description": "AI explainer-video skills by akshayDev17",
-  "interface": {
-    "displayName": "akshayDev17 plugins"
-  },
   "plugins": [
     {
       "name": "explainer-video-from-coursework",
@@ -15,10 +12,6 @@
         "source": "npm",
         "package": "explainer-video-from-coursework",
         "version": "^0.1.0"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
       },
       "category": "Productivity"
     }
