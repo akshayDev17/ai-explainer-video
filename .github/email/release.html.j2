@@ -1,7 +1,8 @@
 {#
   Release notification — the "Signal" design.
 
-  Rendered by .github/scripts/notify.py and sent through SendGrid's v3 /mail/send.
+  Rendered by .github/scripts/notify.py and sent as a multipart/alternative message
+  over SMTP, so the text twin below is what non-HTML clients fall back to.
   Email constraints this file obeys: table layout, inline styles only (Gmail strips
   <style>), no images (most clients block them), no scripting, 600px max width.
 

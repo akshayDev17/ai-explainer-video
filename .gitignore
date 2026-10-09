@@ -12,3 +12,7 @@ parts/
 
 # a stray .env must never be committed — the key now lives in the OS secret store
 .env
+
+# bytecode: regenerated on every import, so it has no business in a repo
+__pycache__/
+*.pyc

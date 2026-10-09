@@ -104,32 +104,73 @@ The filename and environment must match the workflow exactly, or npm rejects the
 
 The workflow ends with a **Notify** step that renders
 [`release.html.j2`](./.github/email/release.html.j2) — plus a `text/plain` twin — with Jinja, and
-sends it through SendGrid's v3 API. It runs under `if: always()`, so failures are reported too.
+sends it over **plain SMTP**. It runs under `if: always()`, so failures are reported too.
 
-Three things it does deliberately:
+The transport is deliberately generic rather than one vendor's REST API. Every provider worth using
+speaks SMTP, so changing provider is a change of repository variables rather than a change of code —
+which matters, because most of the free email tiers have quietly stopped being free (see
+[Why not a dedicated email API](#why-not-a-dedicated-email-api)).
+
+Four things it does deliberately:
 
 - **It stays silent on a no-op run.** The workflow fires on every push to `main` but only acts on a
   version bump, so a docs-only commit is green and releases nothing. Emailing that would be one mail
   per commit.
 - **It says "staged", not "released".** A green run means the version is queued in npm's staging area,
   so the most useful line in the mail is the approval link, not the commit hash.
-- **It never fails the job.** A notification problem must not mark a release that actually succeeded
-  as failed — missing configuration warns in the log and exits 0.
+- **Unconfigured is not broken.** With no SMTP settings it warns in the log and exits 0: a notifier
+  you have not set up yet must not fail a release that did succeed.
+- **A configured send that fails exits 1.** The opposite case is worth a red run. You asked to be
+  told about every release, and silence is the one outcome you cannot debug — so if the mail cannot
+  go out, the run should say so. GitHub emails the actor when a run fails, which makes that mail the
+  backstop telling you the notifier itself broke. Either way the release is unaffected: it was staged
+  and tagged before this step ran.
 
-### One-time setup
+### One-time setup (Gmail SMTP)
 
-1. Create a SendGrid account, then an API key with **Mail Send** permission:
-   <https://app.sendgrid.com/settings/api_keys>.
-2. Verify a **sender** — Single Sender Verification, or Domain Authentication if you have a domain.
-   SendGrid refuses an unverified from-address.
+The notifier sends through a Gmail account using an **App Password**. It is the one option that costs
+nothing and needs no new account, no domain, no card and no signup review — which is more than can be
+said for most of the email APIs now (see [Why not a dedicated email API](#why-not-a-dedicated-email-api)).
+
+1. Turn on **2-Step Verification** for the Google account: <https://myaccount.google.com/security>.
+   App passwords do not exist without it, and the page in the next step will simply not offer them.
+
+2. Create an **App Password**: <https://myaccount.google.com/apppasswords>. Google shows the
+   16-character password once. The spaces it displays are cosmetic — keep them or drop them, both work.
+
 3. Add these under *Settings → Secrets and variables → Actions*:
 
    | kind | name | value |
    |---|---|---|
-   | secret | `SENDGRID_API_KEY` | the API key |
-   | variable | `MAIL_FROM` | the **verified** sender address |
+   | secret | `SMTP_PASS` | the 16-character app password |
+   | variable | `SMTP_HOST` | `smtp.gmail.com` |
+   | variable | `SMTP_USER` | your full Gmail address |
+   | variable | `MAIL_FROM` | the same address — Gmail sends as the authenticated account |
    | variable | `MAIL_TO` | where it goes; comma-separated for several |
    | variable | `NPM_USER` | your npm username, for the approval link (`akshaydev17`) |
+
+   Leave `SMTP_PORT` and `SMTP_TLS` unset: the defaults are `587` and `starttls`, which is what Gmail
+   wants.
+
+4. Prove the credentials without sending anything:
+
+   ```sh
+   SMTP_HOST=smtp.gmail.com SMTP_USER=you@gmail.com SMTP_PASS='abcd efgh ijkl mnop' \
+     python .github/scripts/notify.py --check-smtp
+   ```
+
+   This only connects and authenticates — it does not even need `jinja2` — so it is the fastest way
+   to tell a wrong app password from a blocked connection or a refused sender.
+
+**Three things to know about that app password:**
+
+- **Changing your Google password revokes it.** Google: *"we revoke your app passwords when you change
+  your Google Account password."* The next release then fails its Notify step and the run goes red —
+  which is the notification working as designed. Reissue the password and update the secret.
+- **It can send mail as you.** It is scoped to mail, but it is a real credential. Keep it in *secrets*,
+  never in a variable, and never in a file in the repo.
+- **Google caps consumer accounts at 500 recipients and 500 messages per day.** A release notifier is
+  nowhere near that. A loop that mailed on every commit would find it quickly.
 
 ### Previewing without sending
 
@@ -149,11 +190,53 @@ row renders: it pulls the error lines out of the log, truncates **server-side** 
 them behind a scroll some clients can't perform), and matches them against a small table of known
 failures to fill the "what to do" row.
 
+### Why not a dedicated email API
+
+Because most of the free tiers quietly stopped being free. This was checked against the providers'
+own pages rather than their marketing, and it is the reason the notifier speaks generic SMTP instead
+of one vendor's REST API:
+
+- **SendGrid** — since 25 March 2025, new accounts get a **60-day trial**. Their support article:
+  *"After the 60 day trial period, email send via any web API or SMTP integration for the account will
+  stop unless an appropriate 'Email API' plan is chosen before then."* Paid starts at $19.95/mo.
+- **Mailtrap** — requires a domain you control: *"Can I send emails without my domain? No, you can't."*
+- **AWS SES** — no per-email free grant any more, only a 6-month credit window, and every new account
+  starts in a sandbox capped at *"a maximum of 200 messages per 24-hour period"*.
+- **Azure Communication Services Email** — no free tier at all.
+- **SMTP2GO** — turns free-mail signups away at the door: *"Sorry, we don't allow email addresses at
+  public domains such as Gmail and Yahoo."* Phone verification is mandatory as well.
+- **MailerSend** — wants a card even on the free plan: *"we just ask that you provide this information
+  to prevent abuse of the platform."*
+
+If you ever do want a provider, these were still genuinely free-forever at the time of writing. And
+because the transport is plain SMTP, moving to one is a change of repository variables, not of code:
+
+| Provider | Free tier | Sending without a domain |
+|---|---|---|
+| Elastic Email | 3,000/mo, 100/day, no card | Verify a single sender address |
+| Mailjet | 6,000/mo, 200/day, no card | Activate a single sender by email link |
+| Brevo | 300/day, no card, no stated time limit | Single sender by OTP — but they require domain authentication for Gmail/Yahoo/Microsoft senders |
+| Postmark | 100/mo, unlimited/day, no card | Sender Signature; accounts are approved by hand |
+| Resend | 3,000/mo, 100/day | Without a domain it can only mail the account's own address |
+
+Two of those matter if you ever switch: **`SMTP_USER` is not always your email address** (Resend uses
+the literal string `resend` with an API key as the password), and several providers allow only **one
+SMTP user or key on the free plan**. Run `--check-smtp` after any change — it reports exactly which of
+those you got wrong.
+
+One warning before you pick: **read the signup form before you commit.** SMTP2GO's rejection above is
+not unique — these providers sell to businesses, so a personal address can be turned away at the door
+even when the free tier itself would have suited you perfectly.
+
 ### Why not just GitHub's own email
 
 GitHub will email you about workflow runs natively — *Settings → Notifications → System → Actions* —
 with no code at all. But the template is fixed: no version, no tag, no error text, and no link to the
-npm approval page. Turn it on as a safety net if you like, but it cannot replace this one.
+npm approval page. It cannot replace this one.
+
+It is still worth leaving on, because it is the **backstop**. If the Gmail app password is revoked or
+the SMTP settings go stale, this notifier fails its step by design — so the run goes red and GitHub's
+own mail is what reaches you even though the release mail could not.
 
 ## Dist-tags, and what that permission is not
 

@@ -1,36 +1,43 @@
 #!/usr/bin/env python3
-"""Render the release notification and send it through SendGrid's v3 API.
+"""Render the release notification and send it over SMTP.
 
 Runs as the last step of .github/workflows/release.yml under `if: always()`, so it
 sees both outcomes — and the no-op case where the gate found nothing to release.
 
-Two rules shape this file:
+Three rules shape this file:
 
-  1. **It never fails the job.** A notification problem must not mark a release
-     that actually succeeded as failed. Missing configuration is a loud warning
-     and exit 0.
-  2. **It decides the state itself**, from the step outcomes the workflow hands
-     it. GitHub gives a step no idea what the steps before it did.
+  1. **It never fails a release that already succeeded.** Missing configuration is a
+     loud warning and exit 0: a notifier you have not set up yet is not a broken
+     build.
+  2. **Once SMTP is configured, a send failure exits non-zero.** You asked to be told
+     about every release, so silence is the one outcome you cannot debug. GitHub
+     mails the actor when a run fails, so that mail becomes the backstop telling you
+     the notifier itself broke. The release is unaffected — it was staged and tagged
+     long before this step ran.
+  3. **It decides the state itself**, from the step outcomes the workflow hands it.
+     GitHub gives a step no idea what the steps before it did.
+
+The transport is deliberately generic SMTP rather than one vendor's REST API, so
+switching provider is a secrets change and not a code change.
 
 Usage:
-    python .github/scripts/notify.py                  # render and send
-    python .github/scripts/notify.py --dry-run         # render, print, send nothing
-    python .github/scripts/notify.py --dry-run --out d # write render.html / render.txt
+    python .github/scripts/notify.py                    # render and send
+    python .github/scripts/notify.py --dry-run          # render, print, send nothing
+    python .github/scripts/notify.py --dry-run --out d  # write render.html / render.txt
+    python .github/scripts/notify.py --check-smtp       # prove host/user/pass work
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import pathlib
 import re
+import smtplib
+import ssl
 import sys
 import time
-import urllib.error
-import urllib.request
-
-SENDGRID_ENDPOINT = "https://api.sendgrid.com/v3/mail/send"
+from email.message import EmailMessage
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 EMAIL_DIR = ROOT / ".github" / "email"
@@ -258,30 +265,87 @@ def render(context: dict, out_dir: str | None, dry_run: bool) -> tuple[str, str]
     return html, text
 
 
-def send(api_key: str, sender: str, to: list[str], subject: str, html: str, text: str) -> None:
-    payload = {
-        "personalizations": [{"to": [{"email": addr} for addr in to], "subject": subject}],
-        "from": {"email": sender, "name": "release"},
-        "content": [
-            {"type": "text/plain", "value": text},
-            {"type": "text/html", "value": html},
-        ],
+def smtp_config() -> dict:
+    """The transport, as data — so no provider name is baked into this file."""
+    return {
+        "host": env("SMTP_HOST"),
+        "port": int(env("SMTP_PORT") or 587),
+        "user": env("SMTP_USER"),
+        # Deliberately NOT via env(): it strips, and a password may legitimately
+        # begin or end with whitespace. Only strip if it is entirely blank.
+        "password": os.environ.get("SMTP_PASS", ""),
+        "mode": (env("SMTP_TLS") or "starttls").lower(),
+        "from_name": env("MAIL_FROM_NAME") or "release",
     }
-    request = urllib.request.Request(
-        SENDGRID_ENDPOINT,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            # SendGrid answers 202 Accepted with an empty body.
-            print(f"notify: sent — HTTP {response.status}")
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", "replace")
-        raise SystemExit(f"notify: SendGrid rejected the message — HTTP {exc.code}: {body}") from None
-    except urllib.error.URLError as exc:
-        raise SystemExit(f"notify: could not reach SendGrid — {exc.reason}") from None
+
+
+def connect(cfg: dict) -> smtplib.SMTP:
+    """Open, upgrade and authenticate a connection. Caller closes it."""
+    if cfg["mode"] == "ssl":
+        server = smtplib.SMTP_SSL(
+            cfg["host"], cfg["port"], timeout=30, context=ssl.create_default_context()
+        )
+    else:
+        server = smtplib.SMTP(cfg["host"], cfg["port"], timeout=30)
+        server.ehlo()
+        if cfg["mode"] != "none":
+            server.starttls(context=ssl.create_default_context())
+            server.ehlo()
+    if cfg["user"]:
+        server.login(cfg["user"], cfg["password"])
+    return server
+
+
+def smtp_failure(exc: BaseException, cfg: dict) -> str:
+    """Turn an smtplib exception into the one sentence that says what to fix."""
+    # SMTPAuthenticationError subclasses SMTPResponseException, so it goes first.
+    if isinstance(exc, smtplib.SMTPAuthenticationError):
+        return (
+            f"notify: SMTP login was rejected ({exc.smtp_code} {exc.smtp_error!r}) for user "
+            f"{cfg['user']!r}. Check SMTP_USER/SMTP_PASS against the provider's SMTP "
+            "credentials — several providers issue these separately from your dashboard "
+            "login, and some allow only one active SMTP user on a free tier."
+        )
+    if isinstance(exc, smtplib.SMTPSenderRefused):
+        return (
+            f"notify: the server refused the sender address {exc.sender!r} "
+            f"({exc.smtp_code} {exc.smtp_error!r}). Most providers accept mail only from a "
+            "sender you have verified in their dashboard, so verify MAIL_FROM first."
+        )
+    if isinstance(exc, smtplib.SMTPRecipientsRefused):
+        detail = "; ".join(f"{a}: {c} {m!r}" for a, (c, m) in exc.recipients.items())
+        return f"notify: the server refused every recipient — {detail}"
+    if isinstance(exc, smtplib.SMTPResponseException):
+        return f"notify: the server rejected the message — {exc.smtp_code} {exc.smtp_error!r}"
+    if isinstance(exc, smtplib.SMTPException):
+        return f"notify: SMTP error — {exc}"
+    if isinstance(exc, ssl.SSLError):
+        return (
+            f"notify: TLS failed talking to {cfg['host']}:{cfg['port']} — {exc}. Port 587 "
+            "usually wants SMTP_TLS=starttls and port 465 wants SMTP_TLS=ssl."
+        )
+    if isinstance(exc, OSError):
+        return f"notify: could not reach {cfg['host']}:{cfg['port']} — {exc}"
+    return f"notify: could not send — {type(exc).__name__}: {exc}"
+
+
+def send_via_smtp(cfg: dict, sender: str, to: list[str], subject: str, text: str, html: str) -> None:
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = f"{cfg['from_name']} <{sender}>"
+    msg["To"] = ", ".join(to)
+    # set_content + add_alternative builds multipart/alternative with the right
+    # part order, so clients that render HTML take it and the rest fall back.
+    msg.set_content(text)
+    msg.add_alternative(html, subtype="html")
+
+    with connect(cfg) as server:
+        refused = server.send_message(msg, from_addr=sender, to_addrs=to)
+
+    if refused:
+        detail = "; ".join(f"{a}: {c} {m!r}" for a, (c, m) in refused.items())
+        raise SystemExit(f"notify: the server refused some recipients — {detail}")
+    print(f"notify: sent to {len(to)} recipient(s) via {cfg['host']}:{cfg['port']}")
 
 
 def main() -> int:
@@ -289,7 +353,29 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="render and print, send nothing")
     parser.add_argument("--out", metavar="DIR", help="write render.html / render.txt into DIR")
     parser.add_argument("--force", action="store_true", help="also send for a no-op run")
+    parser.add_argument(
+        "--check-smtp",
+        action="store_true",
+        help="connect and authenticate, then stop — sends nothing",
+    )
     args = parser.parse_args()
+
+    cfg = smtp_config()
+
+    # Standalone credential check, so you can prove host/user/pass on a laptop with
+    # no CI environment at all. Deliberately before any release state is read.
+    if args.check_smtp:
+        if not cfg["host"]:
+            print("notify: SMTP_HOST is not set — nothing to check", file=sys.stderr)
+            return 1
+        try:
+            with connect(cfg) as _server:
+                who = f"authenticated as {cfg['user']}" if cfg["user"] else "no auth"
+                print(f"notify: SMTP ok — {cfg['host']}:{cfg['port']} ({cfg['mode']}, {who})")
+        except Exception as exc:  # noqa: BLE001 — the message is the entire point
+            print(smtp_failure(exc, cfg), file=sys.stderr)
+            return 1
+        return 0
 
     context = build_context()
 
@@ -301,31 +387,42 @@ def main() -> int:
     if args.dry_run:
         return 0
 
-    api_key = env("SENDGRID_API_KEY")
     sender = env("MAIL_FROM")
     to = [a.strip() for a in env("MAIL_TO").replace(";", ",").split(",") if a.strip()]
 
     missing = [
         name
-        for name, value in (("SENDGRID_API_KEY", api_key), ("MAIL_FROM", sender), ("MAIL_TO", to))
+        for name, value in (
+            ("SMTP_HOST", cfg["host"]),
+            ("SMTP_PASS", cfg["password"].strip() if cfg["user"] else "(not needed)"),
+            ("MAIL_FROM", sender),
+            ("MAIL_TO", to),
+        )
         if not value
     ]
     if missing:
+        # Unconfigured is not broken. Warn loudly, but do not fail a release that
+        # already succeeded because you have not set up email yet.
         print(
             "notify: WARNING — not sending: missing "
             + ", ".join(missing)
-            + ". Set SENDGRID_API_KEY as a secret and MAIL_FROM/MAIL_TO as repository variables. "
-            "The release itself is unaffected.",
+            + ". Set SMTP_PASS as a repository secret and SMTP_HOST/SMTP_USER/MAIL_FROM/"
+            "MAIL_TO as repository variables. The release itself is unaffected.",
             file=sys.stderr,
         )
         return 0
 
     try:
-        send(api_key, sender, to, context["subject"], html, text)
+        send_via_smtp(cfg, sender, to, context["subject"], text, html)
     except SystemExit as exc:
-        # Loud, but never fatal: the release already happened.
+        # Configured but undelivered: that is a real problem, and a green run would
+        # tell you nothing. GitHub mails the actor on failure, so you still hear
+        # about it even though this mail did not go out.
         print(str(exc), file=sys.stderr)
-        return 0
+        return 1
+    except Exception as exc:  # noqa: BLE001 — the message is the entire point
+        print(smtp_failure(exc, cfg), file=sys.stderr)
+        return 1
     return 0
 
 
