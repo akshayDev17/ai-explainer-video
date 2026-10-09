@@ -106,10 +106,9 @@ The workflow ends with a **Notify** step that renders
 [`release.html.j2`](./.github/email/release.html.j2) — plus a `text/plain` twin — with Jinja, and
 sends it over **plain SMTP**. It runs under `if: always()`, so failures are reported too.
 
-The transport is deliberately generic rather than one vendor's REST API. Every provider worth using
-speaks SMTP, so changing provider is a change of repository variables rather than a change of code —
-which matters, because most of the free email tiers have quietly stopped being free (see
-[Why not a dedicated email API](#why-not-a-dedicated-email-api)).
+The transport is deliberately generic SMTP rather than one vendor's REST API, so the provider is a
+config choice rather than a code change. It talks to a Gmail account — the reason for that is in
+[why not an email API](#why-not-an-email-api) below.
 
 Four things it does deliberately:
 
@@ -128,9 +127,8 @@ Four things it does deliberately:
 
 ### One-time setup (Gmail SMTP)
 
-The notifier sends through a Gmail account using an **App Password**. It is the one option that costs
-nothing and needs no new account, no domain, no card and no signup review — which is more than can be
-said for most of the email APIs now (see [Why not a dedicated email API](#why-not-a-dedicated-email-api)).
+The notifier sends through a Gmail account using an **App Password**. It costs nothing and needs no
+new account, no domain, no card and no signup review.
 
 1. Turn on **2-Step Verification** for the Google account: <https://myaccount.google.com/security>.
    App passwords do not exist without it, and the page in the next step will simply not offer them.
@@ -202,53 +200,18 @@ row renders: it pulls the error lines out of the log, truncates **server-side** 
 them behind a scroll some clients can't perform), and matches them against a small table of known
 failures to fill the "what to do" row.
 
-### Why not a dedicated email API
+### Why not an email API
 
-Because most of the free tiers quietly stopped being free. This was checked against the providers'
-own pages rather than their marketing, and it is the reason the notifier speaks generic SMTP instead
-of one vendor's REST API:
+Gmail is the only sender available without owning a domain. The free email APIs either demand a "work
+email" on a private domain at signup — SMTP2GO rejects it with *"we don't allow email addresses at
+public domains such as Gmail and Yahoo"*, and Postmark refuses Gmail, Yahoo, Outlook and iCloud
+outright — or they insist you authenticate a domain before you can send to anyone but yourself. A
+domain (roughly $10/year) is what unlocks them, and since the transport is plain SMTP, moving to one
+is a change of variables rather than of code.
 
-- **SendGrid** — since 25 March 2025, new accounts get a **60-day trial**. Their support article:
-  *"After the 60 day trial period, email send via any web API or SMTP integration for the account will
-  stop unless an appropriate 'Email API' plan is chosen before then."* Paid starts at $19.95/mo.
-- **Mailtrap** — requires a domain you control: *"Can I send emails without my domain? No, you can't."*
-- **AWS SES** — no per-email free grant any more, only a 6-month credit window, and every new account
-  starts in a sandbox capped at *"a maximum of 200 messages per 24-hour period"*.
-- **Azure Communication Services Email** — no free tier at all.
-- **SMTP2GO** — turns free-mail signups away at the door: *"Sorry, we don't allow email addresses at
-  public domains such as Gmail and Yahoo."* Phone verification is mandatory as well.
-- **MailerSend** — wants a card even on the free plan: *"we just ask that you provide this information
-  to prevent abuse of the platform."*
-
-If you ever do want a provider, the free tier being generous tells you nothing about whether they
-will let you in the door — so the table below is about **admission**, not pricing. Everything in it
-was checked against the providers' own signup forms and docs. Because the transport is plain SMTP,
-moving to one is a change of repository variables, not of code:
-
-| Provider | Free tier | Signing up and sending from a personal address |
-|---|---|---|
-| **Mailjet** | 6,000/mo, 200/day, no card | ✅ The frictionless one. No phone step; the sender validates with a confirmation link. Caveat: new accounts can land in a "Test Mode" capped at 10 emails/hour until support verifies your details, and upgrading does *not* lift it. |
-| **Resend** | 3,000/mo, 100/day | ⚠️ Open signup, but **no DNS-free sending at all** — without a verified domain the `resend.dev` test domain delivers only to your own account address. Perfect for a notifier like this one, useless for anything broader. |
-| **Elastic Email** | 3,000/mo, 100/day, no card, no expiry | ❌ Blocks *activation*, not signup: *"You need to verify your phone number before you can send."* And their docs say a single-address sender cannot be on a free provider like Gmail — so with no domain you have no usable `From` anyway. |
-| **Brevo** | 300/day, no card, no time limit | ⚠️ A phone/identity step sits in the default onboarding, and generating the SMTP key itself demands *"the verification code sent to your device"* — so a fully hands-off setup breaks there. |
-| **Postmark** | 100/mo, unlimited/day, no card | ❌ Refuses Gmail, Yahoo, Outlook, iCloud, AOL and Proton at signup — same wording as SMTP2GO — *and* the sender signature *"needs to be a private domain that you have access to"*. Despite the generous numbers, it is unreachable without a domain. |
-| **Mailgun** | 100/day, no card | ❌ *"Do I have to use a domain to send email? Yes."* Without one you get a sandbox domain capped at **5 Authorized Recipients**, plus mandatory phone OTP at activation. |
-
-`SMTP_USER` is the field that trips people up, and at most of these it is **not** your email address:
-
-- **Resend** — the literal string `resend`, with your API key as the password.
-- **Mailjet** — the **API key** as username, the **Secret key** as password.
-- **Brevo** — either your account email or a generated `[ID]@smtp-brevo.com`, with a generated **SMTP
-  key** (not its API key). Changing your login email does not change the SMTP login.
-- **Elastic Email** — your account email, with a generated SMTP credential as the password.
-- **Postmark** — the Server API Token is *both* the username and the password.
-
-Run `--check-smtp` after any change; it reports which of those you got wrong.
-
-One claim to be careful of if you go looking: the idea that free plans allow only **one SMTP user or
-key** is not true of any provider checked here. Elastic Email documents 15 credentials per account,
-Mailjet's one-subaccount limit is a different thing, and Resend and Postmark have no SMTP-user concept
-at all.
+The one worth recording by name is **SendGrid**, which was the free default here until it wasn't:
+since 25 March 2025 new accounts get a **60-day trial**, after which *"email send via any web API or
+SMTP integration for the account will stop"* until you pay from $19.95/mo.
 
 ### Why not just GitHub's own email
 
