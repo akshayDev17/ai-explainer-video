@@ -1,21 +1,30 @@
 # Releasing
 
-Two npm packages ship from this repo. GitHub Actions **stages** them; you **approve** them.
-No npm token exists anywhere, and no publish ever runs on a laptop.
+**One** npm package ships from this repo, and it serves all four platforms. GitHub Actions
+stages it; you approve it. No npm token exists anywhere, and no publish ever runs on a laptop.
 
-| package | source | consumers |
-|---|---|---|
-| `explainer-video-from-coursework` | repo root | Claude Code, Codex (npm) · Antigravity (git) |
-| `explainer-video-from-coursework-dsh` | `dsh/` | DeepSeek Harness |
+| package | read by |
+|---|---|
+| `explainer-video-from-coursework` | Claude Code, Codex (npm) · DeepSeek Harness (npm) · Antigravity (git) |
+
+The one package carries three manifest surfaces, and each consumer reads only its own:
+
+| file | read by |
+|---|---|
+| `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json` | Claude Code |
+| `plugin.json` (root) + `.agents/plugins/marketplace.json` | Codex, Antigravity |
+| `dsh.bundle.patch` → `cordis.patch.yml` → `lib/index.js` | DeepSeek Harness |
+
+`skills/` holds all nine skills once, and every surface points at that single copy.
 
 ## A release is a tag, then an approval
 
 ```sh
-# 1. bump the version in all four places it is duplicated
-#    package.json · plugin.json · .claude-plugin/plugin.json · dsh/package.json
+# 1. bump the version in all three places it is duplicated
+#    package.json · plugin.json · .claude-plugin/plugin.json
 # 2. commit
 git commit -am "chore(release): v0.1.3"
-# 3. tag and push — CI stages both packages
+# 3. tag and push — CI stages it
 git tag v0.1.3
 git push origin main --tags
 ```
@@ -30,7 +39,7 @@ Then approve what CI queued — **in the browser**:
 The CLI works too, if you'd rather:
 
 ```sh
-npx npm@latest stage list                      # each staged version, with its stage id
+npx npm@latest stage list                      # the staged version, with its stage id
 npx npm@latest stage download <stage-id>       # optional: open the tarball and look
 npx npm@latest stage approve <stage-id> --otp <6-digit code>
 ```
@@ -38,8 +47,8 @@ npx npm@latest stage approve <stage-id> --otp <6-digit code>
 `npx npm@latest` rather than plain `npm`, because the npm on this laptop is **10.9.8**,
 which predates `npm stage` entirely.
 
-**Two approvals per release**, one per package. On the CLI, `npm stage reject <stage-id>`
-drops a queued version instead of approving it.
+**One approval per release.** On the CLI, `npm stage reject <stage-id>` drops a queued
+version instead of approving it.
 
 ## Why staged rather than direct
 
@@ -53,10 +62,10 @@ install it. `npm stage download` exists so you can inspect the tarball first.
 Checking that box instead would make a tag go live with no human in the loop; npm labels it
 "Not recommended" for exactly this reason.
 
-## One-time setup: a Trusted Publisher per package
+## One-time setup: a Trusted Publisher
 
-npm has to be told which workflow may stage. Do this once for **each** package, under that
-package's settings — `https://www.npmjs.com/package/<name>/access`:
+npm has to be told which workflow may stage. Once, for this one package, at
+`https://www.npmjs.com/package/explainer-video-from-coursework/access`:
 
 | field | value |
 |---|---|
@@ -68,15 +77,11 @@ package's settings — `https://www.npmjs.com/package/<name>/access`:
 | Allow npm publish | **leave unchecked** — this is what forces staging |
 | Allow npm dist-tag | **leave unchecked** — see below |
 
+Also set **Publishing access** to *"Require two-factor authentication and disallow bypass 2fa
+tokens"*. Your documented fallback (`npm publish --otp`) already satisfies 2FA, so this costs
+you nothing and closes the one path that ships without a second factor.
+
 The filename and environment must match the workflow exactly, or npm rejects the request.
-
-**Why we can do this at all:** a package must exist on npm before a Trusted Publisher can be
-attached. Both already do (0.1.0, 0.1.1), so there is no chicken-and-egg here — a brand-new
-package name would need a first publish or `npm stage publish` to create it.
-
-Which also explains the `0.0.0-stage` version sitting on both packages: npm's docs state that
-staging a package that does not yet exist publishes a public *placeholder* at exactly that
-version. That is where those came from.
 
 ## Why OIDC instead of a token
 
@@ -91,7 +96,7 @@ version. That is where those came from.
 
 `Allow npm dist-tag` is for re-pointing tags on **already-published** versions — "promoting a
 version to `latest`", moving `next`/`beta`. It is **not** how a release acquires `latest`:
-`npm publish` sets `latest` as part of publishing, which is covered by the publish path.
+`npm publish` sets `latest` as part of publishing, which the publish path already covers.
 Leave it unchecked. The one thing it would buy is a token-free **rollback**; enable it if and
 when a rollback workflow exists.
 
@@ -99,22 +104,22 @@ when a rollback workflow exists.
 
 - **CI npm must be ≥ 11.15.0.** Two separate floors: the OIDC token exchange landed in
   11.5.1, and `npm stage` needs 11.15.0 — so 11.15.0 is the real floor, hence the workflow
-  pinning `npm@11.15.0` through `npx`. Staging also requires Node ≥ 22.14.0; the workflow's
+  pinning it through `npx`. Staging also requires Node ≥ 22.14.0; the workflow's
   `node-version: "22"` resolves to the newest 22.x, which satisfies it. This laptop's npm
   10.9.8 is why earlier manual publishes needed `--otp`.
 - **`registry-url` is required** in `setup-node`, or the publish fails with `ENEEDAUTH`.
-- **The two stages are serialized** by a `sleep`; a second registry write racing the first
-  one's processing returns `409 Failed to save packument`.
 - **A tag without a matching version fails the run**, deliberately — shipping the wrong
   version is the one mistake a tag-triggered release makes cheap to commit.
 - **Nothing is live until you approve.** A green workflow run means "queued", not "released".
+- **DSH needs no dependency declared.** `lib/index.js` imports
+  `@deepseek-ai/dsh-skill-filesystem` without declaring it: the harness's module fallback
+  supplies it, verified end to end. That keeps the manifest Claude Code and Codex install
+  free of any DeepSeek reference.
 
 ## If a release fails
 
 - **Before staging** (the version guard) — fix it, then delete and re-push the tag:
   `git push --delete origin v0.1.3 && git tag -d v0.1.3`, then re-tag.
-- **Between the two stages** — the root is queued and the wrapper is not. Re-run the job from
-  the Actions tab; the root stage may error as a duplicate, which is harmless.
 - **Staged but wrong** — `npm stage reject <stage-id>`, fix, re-tag. Nothing was ever
   installable, so there is nothing to un-publish.
 - **Already approved and bad** — npm will not let you republish that version. Deprecate and

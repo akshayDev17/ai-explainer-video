@@ -178,14 +178,14 @@ marketplace-only, manual review).
 **Done:** the restructure, the manifests, both marketplace catalogs
 (`.claude-plugin/marketplace.json` + `.agents/plugins/marketplace.json`, `source: npm`),
 the `source: npm` syntax pinned against primary docs, the 8 stage skills moved to the top
-level of `skills/` so all nine resolve on every platform, the DSH wrapper (`dsh/` — a bundle
-plugin that depends on the `explainer-video-from-coursework` package and points
-`customSkillDirs` at *its* installed `skills/`, so the two packages cannot drift), a root
-`README.md`, MIT licensing across all four manifests, and `DISTRIBUTION.md` (publish + four
-install commands).
+level of `skills/` so all nine resolve on every platform, **one** package serving all four
+surfaces (`cordis.patch.yml` + `lib/index.js` at the root, so DSH reads the same package
+Claude Code and Codex do — no second package, no duplication, and no DeepSeek dependency
+declared), a root `README.md`, MIT licensing across the manifests, `DISTRIBUTION.md`, and a
+tag-triggered staged release in `.github/workflows/release.yml` + `RELEASING.md`.
 
-**Remaining (user-owned):** the two `npm publish` runs (`explainer-video-from-coursework`
-and `explainer-video-from-coursework-dsh`) and the four installs on real machines.
+**Remaining (user-owned):** the one-time npm Trusted Publisher config, then the first tagged
+release, and the four installs on real machines.
 
 ### 2.6 `planner.mjs` — remaining input gaps
 

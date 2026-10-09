@@ -3,6 +3,7 @@
   "version": "0.1.2",
   "description": "Turn a directory of structured coursework notes into a narrated, animated explainer-video series.",
   "type": "module",
+  "main": "lib/index.js",
   "engines": {
     "node": ">=22"
   },
@@ -11,8 +12,10 @@
   },
   "license": "MIT",
   "keywords": ["explainer-video", "coursework", "narration", "animation", "text-to-speech", "video"],
-  "files": ["plugin.json", ".claude-plugin/plugin.json", "skills/"],
-  "exports": {
-    "./package.json": "./package.json"
+  "files": ["plugin.json", ".claude-plugin/plugin.json", "skills/", "lib/", "cordis.patch.yml"],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   }
 }

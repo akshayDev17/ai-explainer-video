@@ -1,29 +1,28 @@
 # Distribution & installation
 
-One repo → one Agent Plugins plugin + one DSH bundle wrapper. Two npm packages, one git
-repo. The wrapper carries **no skill files**: it depends on the main package and serves
-*its* installed `skills/`, so the two cannot drift.
+**One** npm package and one git repo serve all four platforms. Each consumer reads its own
+manifest surface out of the same package and ignores the rest, so the nine skills exist once
+and nothing can drift out of step.
 
 ## Packages
 
-| Package | Consumers | Source |
+| package | read by | source |
 |---|---|---|
-| `explainer-video-from-coursework` | Claude Code, Codex | npm — repo root |
-| `explainer-video-from-coursework-dsh` | DeepSeek Harness (DSH) | npm — `dsh/` |
-| `akshayDev17/ai-explainer-video` | Antigravity (git) + the marketplace catalog | git |
+| `explainer-video-from-coursework` | Claude Code, Codex, DeepSeek Harness | npm |
+| `akshayDev17/ai-explainer-video` | Antigravity + the marketplace catalogue | git |
 
 ## Publish — a tag, not a command
 
-Publishing runs in GitHub Actions on a version tag, over OIDC (no npm token):
-[`.github/workflows/release.yml`](./.github/workflows/release.yml) publishes both packages,
-root first. Setup and the full procedure live in [`RELEASING.md`](./RELEASING.md).
+Publishing runs in GitHub Actions on a version tag, over OIDC (no npm token) and **staged** —
+a maintainer approves before anything becomes installable.
+[`RELEASING.md`](./RELEASING.md) owns the one-time Trusted Publisher setup and the full flow.
 
 ```sh
-git tag v0.1.3 && git push origin main --tags
+git tag v0.1.3 && git push origin main --tags     # CI stages it; you approve on npmjs.com
 ```
 
-The manual fallback still works — `npm publish --otp <2FA_OTP>` from the repo root, then
-again in `dsh/` — but it carries no provenance attestation.
+The manual fallback still works — `npm publish --otp <2FA_OTP>` from the repo root — but it
+carries no provenance attestation.
 
 ## Install — four one-liners
 
@@ -41,7 +40,7 @@ codex plugin add explainer-video-from-coursework@akshaydev17
 
 ### DeepSeek Harness (DSH)
 ```sh
-dsh plugin --profile web add explainer-video-from-coursework-dsh
+dsh plugin --profile web add explainer-video-from-coursework
 ```
 
 ### Antigravity
@@ -49,18 +48,28 @@ dsh plugin --profile web add explainer-video-from-coursework-dsh
 agy plugin install https://github.com/akshayDev17/ai-explainer-video
 ```
 
-## How each platform reads this repo
+## How each platform reads the one package
 
-- **Claude Code** reads `.claude-plugin/marketplace.json` (catalog) and
-  `.claude-plugin/plugin.json` (manifest); each catalog entry uses `source: npm`.
+| file / field | read by |
+|---|---|
+| `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json` | Claude Code |
+| `plugin.json` (root) + `.agents/plugins/marketplace.json` | Codex, Antigravity |
+| `dsh.bundle.patch` → `cordis.patch.yml` → `lib/index.js` | DeepSeek Harness |
+
+- **Claude Code** reads `.claude-plugin/marketplace.json` (catalogue) and
+  `.claude-plugin/plugin.json` (manifest); each catalogue entry uses `source: npm`. Note npm
+  works as a **plugin** source here but *not* as a **marketplace** source — Claude Code fails
+  with `NPM marketplace sources not yet implemented` — so the catalogue itself must stay a
+  git repo, which is what `.claude-plugin/marketplace.json` in this repo provides.
 - **Codex** reads `.agents/plugins/marketplace.json` (canonical) or
   `.claude-plugin/marketplace.json` (legacy-compatible); same `source: npm` entries.
 - **Antigravity** reads the root `plugin.json` (Agent Plugins schema) + `skills/` via
   `agy plugin install <git-url>`.
-- **DSH** reads the `dsh/` npm package: `dsh.bundle.patch` → `cordis.patch.yml` →
-  `lib/index.js` mounts `@deepseek-ai/dsh-skill-filesystem` with a unique `providerName`
-  and `customSkillDirs` pointing at the **installed main package's** `skills/` — resolved
-  with `require.resolve`, never bundled.
+- **DSH** reads the same npm package: `dsh.bundle.patch` → `cordis.patch.yml` →
+  `lib/index.js` mounts `@deepseek-ai/dsh-skill-filesystem` with a unique `providerName` and
+  `customSkillDirs` at this package's own `skills/`. It declares **no** DeepSeek dependency:
+  the harness supplies `dsh-skill-filesystem` through its own module fallback, verified end
+  to end. That keeps the manifest Claude Code and Codex install free of it.
 
 All four surfaces resolve the same **nine** skills: `explainer-video-from-coursework` plus
 its eight `craft-video-<stage>` siblings, all top-level under `skills/` so a single-level

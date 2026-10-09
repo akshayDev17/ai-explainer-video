@@ -50,7 +50,7 @@ codex plugin add explainer-video-from-coursework@akshaydev17
 **DeepSeek Harness**
 
 ```sh
-dsh plugin --profile web add explainer-video-from-coursework-dsh
+dsh plugin --profile web add explainer-video-from-coursework
 ```
 
 **Antigravity**
@@ -59,7 +59,8 @@ dsh plugin --profile web add explainer-video-from-coursework-dsh
 agy plugin install https://github.com/akshayDev17/ai-explainer-video
 ```
 
-Why four commands sit behind two npm packages — and how to publish — is in
+All four commands install the **same** npm package — one package, three manifest surfaces,
+one copy of the nine skills. How each platform reads it, and how to publish, is in
 [`DISTRIBUTION.md`](./DISTRIBUTION.md).
 
 ## Prerequisites
@@ -99,9 +100,9 @@ so only the work and scratch paths depend on the current directory.
 plugin.json                              Agent Plugins manifest (Codex, Antigravity)
 .claude-plugin/                          plugin.json + marketplace.json (Claude Code)
 .agents/plugins/                         marketplace.json (Codex)
+cordis.patch.yml + lib/index.js          DSH bundle plugin (serves this package's skills/)
 skills/explainer-video-from-coursework/  the main skill: SKILL.md, tools/, src/, scenes/, SETUP.md
 skills/craft-video-<stage>/              the 8 stage skills, separately invocable
-dsh/                                     DSH bundle wrapper (a separate npm package; no skill files)
 DISTRIBUTION.md                          publish + install commands
 ```
 

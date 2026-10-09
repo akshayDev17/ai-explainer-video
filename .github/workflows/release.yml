@@ -36,20 +36,17 @@ jobs:
           # registry. Without it `npm publish` fails with ENEEDAUTH.
           registry-url: "https://registry.npmjs.org"
 
-      - name: Tag must match both package versions
+      - name: Tag must match the package version
         run: |
           set -e
           TAG="${GITHUB_REF_NAME#v}"
-          ROOT="$(node -p "require('./package.json').version")"
-          DSH="$(node -p "require('./dsh/package.json').version")"
-          echo "tag=$TAG  root=$ROOT  dsh=$DSH"
-          [ "$TAG" = "$ROOT" ] || { echo "::error::tag $TAG != root package version $ROOT"; exit 1; }
-          [ "$TAG" = "$DSH" ]  || { echo "::error::tag $TAG != dsh package version $DSH"; exit 1; }
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "tag=$TAG  version=$VERSION"
+          [ "$TAG" = "$VERSION" ] || { echo "::error::tag $TAG != package.json version $VERSION"; exit 1; }
 
-      - name: Stage both packages (root first)
+      - name: Stage the package
         run: |
-          set -e
-          # Staged publishing: this queues each version and a maintainer approves it
+          # Staged publishing: this queues the version, and a maintainer approves it
           # on npm before it becomes installable. The trusted-publisher config
           # deliberately omits "Allow npm publish", so a compromised run can ask to
           # ship but cannot ship.
@@ -60,13 +57,4 @@ jobs:
           # cache. Staging also requires Node >= 22.14.0; "22" resolves to the
           # newest 22.x, which satisfies that.
           # Provenance needs no flag: trusted publishing emits it by default.
-          stage() { npx --yes npm@11.15.0 stage publish; }
-
-          # Root first: explainer-video-from-coursework-dsh depends on it, so a
-          # consumer resolving the wrapper must find the root already published.
-          stage
-
-          # Serialize the two: a second registry write racing the first one's
-          # processing returns 409 "Failed to save packument".
-          sleep 5
-          cd dsh && stage
+          npx --yes npm@11.15.0 stage publish
