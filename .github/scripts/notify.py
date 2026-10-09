@@ -18,18 +18,20 @@ Three rules shape this file:
      GitHub gives a step no idea what the steps before it did.
 
 The transport is deliberately generic SMTP rather than one vendor's REST API, so
-switching provider is a secrets change and not a code change.
+switching provider is a secrets change and not a code change. For Gmail it accepts
+either an app password or OAuth: set OAUTH_REFRESH_TOKEN to use the latter (XOAUTH2).
 
 Usage:
     python .github/scripts/notify.py                    # render and send
     python .github/scripts/notify.py --dry-run          # render, print, send nothing
     python .github/scripts/notify.py --dry-run --out d  # write render.html / render.txt
-    python .github/scripts/notify.py --check-smtp       # prove host/user/pass work
+    python .github/scripts/notify.py --check-smtp       # prove host + auth work (SMTP or OAuth)
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pathlib
 import re
@@ -37,6 +39,9 @@ import smtplib
 import ssl
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from email.message import EmailMessage
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -45,6 +50,10 @@ EMAIL_DIR = ROOT / ".github" / "email"
 STATE_SUCCESS = "success"
 STATE_FAILURE = "failure"
 STATE_NOOP = "noop"
+
+# Google's OAuth token endpoint. Stdlib urllib only, so the runner needs no
+# Google client library — just a refresh token and the matching client id/secret.
+TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 # Known failure signatures → the one line that tells you what to do about it.
 # Deliberately a small table: an unmatched error still ships, just without advice.
@@ -276,7 +285,53 @@ def smtp_config() -> dict:
         "password": os.environ.get("SMTP_PASS", ""),
         "mode": (env("SMTP_TLS") or "starttls").lower(),
         "from_name": env("MAIL_FROM_NAME") or "release",
+        "oauth_client_id": env("OAUTH_CLIENT_ID"),
+        "oauth_client_secret": env("OAUTH_CLIENT_SECRET"),
+        "oauth_refresh_token": env("OAUTH_REFRESH_TOKEN"),
     }
+
+
+def oauth_enabled(cfg: dict) -> bool:
+    """OAuth mode wins whenever any of its three values is present."""
+    return bool(cfg["oauth_refresh_token"] or cfg["oauth_client_id"] or cfg["oauth_client_secret"])
+
+
+def fetch_access_token(cfg: dict) -> str:
+    """Exchange the refresh token for a short-lived access token, stdlib only."""
+    data = urllib.parse.urlencode(
+        {
+            "client_id": cfg["oauth_client_id"],
+            "client_secret": cfg["oauth_client_secret"],
+            "refresh_token": cfg["oauth_refresh_token"],
+            "grant_type": "refresh_token",
+        }
+    ).encode("ascii")
+    request = urllib.request.Request(
+        TOKEN_URL,
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")
+        raise SystemExit(
+            f"notify: OAuth token refresh failed — HTTP {exc.code}: {body}. The refresh token is "
+            "likely revoked, or OAUTH_CLIENT_ID/OAUTH_CLIENT_SECRET no longer match the client "
+            "that issued it. Re-run oauth_token.py to mint a fresh one."
+        ) from None
+    except urllib.error.URLError as exc:
+        raise SystemExit(f"notify: could not reach Google's token endpoint — {exc.reason}") from None
+    access = payload.get("access_token")
+    if not access:
+        raise SystemExit(f"notify: token endpoint returned no access_token — {json.dumps(payload)[:200]}")
+    return access
+
+
+def xoauth2(user: str, access_token: str) -> str:
+    return f"user={user}\x01auth=Bearer {access_token}\x01\x01"
 
 
 def connect(cfg: dict) -> smtplib.SMTP:
@@ -291,7 +346,16 @@ def connect(cfg: dict) -> smtplib.SMTP:
         if cfg["mode"] != "none":
             server.starttls(context=ssl.create_default_context())
             server.ehlo()
-    if cfg["user"]:
+    if oauth_enabled(cfg):
+        if not cfg["user"]:
+            raise SystemExit(
+                "notify: OAuth mode needs SMTP_USER set to the authorized Gmail address"
+            )
+        access = fetch_access_token(cfg)
+        # authobject is called with no args for the SASL initial response, and
+        # with the challenge bytes if Gmail challenges — return the same string.
+        server.auth("XOAUTH2", lambda *_: xoauth2(cfg["user"], access))
+    elif cfg["user"]:
         server.login(cfg["user"], cfg["password"])
     return server
 
@@ -300,6 +364,13 @@ def smtp_failure(exc: BaseException, cfg: dict) -> str:
     """Turn an smtplib exception into the one sentence that says what to fix."""
     # SMTPAuthenticationError subclasses SMTPResponseException, so it goes first.
     if isinstance(exc, smtplib.SMTPAuthenticationError):
+        if oauth_enabled(cfg):
+            return (
+                f"notify: OAuth (XOAUTH2) was rejected ({exc.smtp_code} {exc.smtp_error!r}) for "
+                f"{cfg['user']!r}. The refresh token is stale or its scope is wrong — re-run "
+                "oauth_token.py to mint a fresh one, and check OAUTH_CLIENT_ID/OAUTH_CLIENT_SECRET match "
+                "the client that issued it."
+            )
         return (
             f"notify: SMTP login was rejected ({exc.smtp_code} {exc.smtp_error!r}) for user "
             f"{cfg['user']!r}. Check SMTP_USER/SMTP_PASS against the provider's SMTP "
@@ -370,8 +441,16 @@ def main() -> int:
             return 1
         try:
             with connect(cfg) as _server:
-                who = f"authenticated as {cfg['user']}" if cfg["user"] else "no auth"
+                if oauth_enabled(cfg):
+                    who = f"authenticated as {cfg['user']} via OAuth"
+                elif cfg["user"]:
+                    who = f"authenticated as {cfg['user']}"
+                else:
+                    who = "no auth"
                 print(f"notify: SMTP ok — {cfg['host']}:{cfg['port']} ({cfg['mode']}, {who})")
+        except SystemExit as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
         except Exception as exc:  # noqa: BLE001 — the message is the entire point
             print(smtp_failure(exc, cfg), file=sys.stderr)
             return 1
@@ -390,24 +469,38 @@ def main() -> int:
     sender = env("MAIL_FROM")
     to = [a.strip() for a in env("MAIL_TO").replace(";", ",").split(",") if a.strip()]
 
-    missing = [
-        name
-        for name, value in (
+    if oauth_enabled(cfg):
+        required = (
+            ("SMTP_HOST", cfg["host"]),
+            ("SMTP_USER", cfg["user"]),
+            ("OAUTH_CLIENT_ID", cfg["oauth_client_id"]),
+            ("OAUTH_CLIENT_SECRET", cfg["oauth_client_secret"]),
+            ("OAUTH_REFRESH_TOKEN", cfg["oauth_refresh_token"]),
+            ("MAIL_FROM", sender),
+            ("MAIL_TO", to),
+        )
+        advice = (
+            "Set OAUTH_CLIENT_SECRET and OAUTH_REFRESH_TOKEN as secrets, and "
+            "OAUTH_CLIENT_ID/SMTP_HOST/SMTP_USER/MAIL_FROM/MAIL_TO as variables."
+        )
+    else:
+        required = (
             ("SMTP_HOST", cfg["host"]),
             ("SMTP_PASS", cfg["password"].strip() if cfg["user"] else "(not needed)"),
             ("MAIL_FROM", sender),
             ("MAIL_TO", to),
         )
-        if not value
-    ]
+        advice = (
+            "Set SMTP_PASS as a repository secret and SMTP_HOST/SMTP_USER/MAIL_FROM/"
+            "MAIL_TO as repository variables."
+        )
+    missing = [name for name, value in required if not value]
     if missing:
         # Unconfigured is not broken. Warn loudly, but do not fail a release that
         # already succeeded because you have not set up email yet.
         print(
-            "notify: WARNING — not sending: missing "
-            + ", ".join(missing)
-            + ". Set SMTP_PASS as a repository secret and SMTP_HOST/SMTP_USER/MAIL_FROM/"
-            "MAIL_TO as repository variables. The release itself is unaffected.",
+            "notify: WARNING — not sending: missing " + ", ".join(missing) + ". " + advice
+            + " The release itself is unaffected.",
             file=sys.stderr,
         )
         return 0

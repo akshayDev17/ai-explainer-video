@@ -125,16 +125,63 @@ Four things it does deliberately:
   backstop telling you the notifier itself broke. Either way the release is unaffected: it was staged
   and tagged before this step ran.
 
-### One-time setup (Gmail SMTP)
+### One-time setup (Gmail)
 
-The notifier sends through a Gmail account using an **App Password**. It costs nothing and needs no
-new account, no domain, no card and no signup review.
+The notifier sends through a Gmail account. Two ways to authenticate — pick one. **OAuth** is
+recommended: no app password, works even when Google withholds app passwords (passkey-only 2FA), and
+the token is scoped to **send only**, so it cannot read the inbox. An **App Password** is simpler on
+paper but is gated behind the right 2FA method.
+
+#### Option A — OAuth (XOAUTH2)
+
+1. In the Google Cloud console: create a project, enable the **Gmail API**, configure the **OAuth
+   consent screen** (user type **External**, add yourself as a test user, and add the
+   `https://www.googleapis.com/auth/gmail.send` scope), then create an **OAuth client** of type
+   **Desktop app** and download its `client_secret_*.json`. Google's own walkthrough — modulo the
+   scope — is <https://ai.google.dev/gemini-api/docs/oauth>.
+
+2. Run the one-time helper. It opens a browser and prints the values to paste:
+
+   ```sh
+   python3 -m pip install --quiet google-auth-oauthlib
+   python3 .github/scripts/oauth_token.py --secrets ~/Downloads/client_secret_*.json
+   ```
+
+   Sign in as the account you send from, and click through the expected "Google hasn't verified this
+   app" screen (Advanced → continue).
+
+3. Add these under *Settings → Secrets and variables → Actions*:
+
+   | kind | name | value |
+   |---|---|---|
+   | secret | `OAUTH_CLIENT_SECRET` | the client secret |
+   | secret | `OAUTH_REFRESH_TOKEN` | the refresh token the helper printed |
+   | variable | `OAUTH_CLIENT_ID` | the client id |
+   | variable | `SMTP_HOST` | `smtp.gmail.com` |
+   | variable | `SMTP_USER` | the authorized Gmail address |
+   | variable | `MAIL_FROM` | the same address |
+   | variable | `MAIL_TO` | where it goes |
+   | variable | `MAIL_FROM_NAME` | optional display name — see below |
+   | variable | `NPM_USER` | your npm username (`akshaydev17`) |
+
+   There is no `SMTP_PASS`: the access token is minted fresh on every run from the refresh token, and
+   the refresh token lives in a secret.
+
+4. Prove it:
+
+   ```sh
+   SMTP_HOST=smtp.gmail.com SMTP_USER=you@gmail.com \
+   OAUTH_CLIENT_ID=… OAUTH_CLIENT_SECRET=… OAUTH_REFRESH_TOKEN=… \
+     python .github/scripts/notify.py --check-smtp
+   ```
+
+#### Option B — App Password
 
 1. Turn on **2-Step Verification** for the Google account: <https://myaccount.google.com/security>.
-   App passwords do not exist without it, and the page in the next step will simply not offer them.
+   App passwords do not exist without it, and Google withholds them for passkey-only accounts.
 
 2. Create an **App Password**: <https://myaccount.google.com/apppasswords>. Google shows the
-   16-character password once. The spaces it displays are cosmetic — keep them or drop them, both work.
+   16-character password once. Paste it into the secret **without the spaces**.
 
 3. Add these under *Settings → Secrets and variables → Actions*:
 
@@ -145,21 +192,22 @@ new account, no domain, no card and no signup review.
    | variable | `SMTP_USER` | your full Gmail address |
    | variable | `MAIL_FROM` | the same address — Gmail sends as the authenticated account |
    | variable | `MAIL_TO` | where it goes; comma-separated for several |
-   | variable | `MAIL_FROM_NAME` | optional; the display name the inbox shows — see below |
-   | variable | `NPM_USER` | your npm username, for the approval link (`akshaydev17`) |
+   | variable | `MAIL_FROM_NAME` | optional display name — see below |
+   | variable | `NPM_USER` | your npm username (`akshaydev17`) |
 
-   Leave `SMTP_PORT` and `SMTP_TLS` unset: the defaults are `587` and `starttls`, which is what Gmail
-   wants.
-
-4. Prove the credentials without sending anything:
+4. Prove it:
 
    ```sh
-   SMTP_HOST=smtp.gmail.com SMTP_USER=you@gmail.com SMTP_PASS='abcd efgh ijkl mnop' \
+   SMTP_HOST=smtp.gmail.com SMTP_USER=you@gmail.com SMTP_PASS='abcdefghijklmnop' \
      python .github/scripts/notify.py --check-smtp
    ```
 
-   This only connects and authenticates — it does not even need `jinja2` — so it is the fastest way
-   to tell a wrong app password from a blocked connection or a refused sender.
+   **App-password caveats.** Changing your Google password revokes it. It can send *and* read mail.
+   Google caps consumer accounts at 500 recipients / 500 messages a day — nowhere near a release
+   notifier.
+
+Both options leave `SMTP_PORT` and `SMTP_TLS` unset: the defaults are `587` and `starttls`, which is
+what Gmail wants.
 
 **On the sender address.** You cannot send as `noreply@github.com`, or as anything on a domain you do
 not own. GitHub can send as `github.com` because they publish SPF and DKIM records for it; a provider
@@ -171,16 +219,6 @@ What you *can* choose freely is the **display name**. Set `MAIL_FROM_NAME` to so
 `explainer-video releases` and the inbox shows `explainer-video releases <you@gmail.com>`: the address
 stays honest, the label reads like a project rather than a stray personal email. That is where project
 identity lives until you own a domain.
-
-**Three things to know about that app password:**
-
-- **Changing your Google password revokes it.** Google: *"we revoke your app passwords when you change
-  your Google Account password."* The next release then fails its Notify step and the run goes red —
-  which is the notification working as designed. Reissue the password and update the secret.
-- **It can send mail as you.** It is scoped to mail, but it is a real credential. Keep it in *secrets*,
-  never in a variable, and never in a file in the repo.
-- **Google caps consumer accounts at 500 recipients and 500 messages per day.** A release notifier is
-  nowhere near that. A loop that mailed on every commit would find it quickly.
 
 ### Previewing without sending
 
