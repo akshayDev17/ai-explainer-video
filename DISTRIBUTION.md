@@ -12,18 +12,18 @@ repo. The wrapper carries **no skill files**: it depends on the main package and
 | `explainer-video-from-coursework-dsh` | DeepSeek Harness (DSH) | npm — `dsh/` |
 | `akshayDev17/ai-explainer-video` | Antigravity (git) + the marketplace catalog | git |
 
-## Publish (run these yourself)
+## Publish — a tag, not a command
+
+Publishing runs in GitHub Actions on a version tag, over OIDC (no npm token):
+[`.github/workflows/release.yml`](./.github/workflows/release.yml) publishes both packages,
+root first. Setup and the full procedure live in [`RELEASING.md`](./RELEASING.md).
 
 ```sh
-cd <repo>
-npm publish --otp <2FA_OTP>     # main plugin (Claude Code + Codex)
-
-cd dsh
-npm publish --otp <2FA_OTP>     # DSH wrapper
+git tag v0.1.3 && git push origin main --tags
 ```
 
-If the npm cache is root-owned and `EPERM` hits, retry each with a local cache:
-`mkdir -p .npm-cache && npm publish --otp <2FA_OTP> --cache ./.npm-cache`
+The manual fallback still works — `npm publish --otp <2FA_OTP>` from the repo root, then
+again in `dsh/` — but it carries no provenance attestation.
 
 ## Install — four one-liners
 

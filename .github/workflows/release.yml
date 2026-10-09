@@ -1,0 +1,65 @@
+# Tag-triggered release — publishes BOTH npm packages with OIDC trusted
+# publishing, so no npm token exists on any machine or in any secret.
+#
+# A release is now: bump the versions, commit, tag, push the tag.
+#
+# One-time prerequisite (see RELEASING.md): a Trusted Publisher configured on
+# npmjs.com for EACH package, pointing at this repo + this workflow file.
+
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+  # Mints the OIDC token npm exchanges for a short-lived publish credential.
+  # This single line is the whole replacement for an NPM_TOKEN secret.
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          # Required: setup-node writes the .npmrc that points npm at the public
+          # registry. Without it `npm publish` fails with ENEEDAUTH.
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Tag must match both package versions
+        run: |
+          set -e
+          TAG="${GITHUB_REF_NAME#v}"
+          ROOT="$(node -p "require('./package.json').version")"
+          DSH="$(node -p "require('./dsh/package.json').version")"
+          echo "tag=$TAG  root=$ROOT  dsh=$DSH"
+          [ "$TAG" = "$ROOT" ] || { echo "::error::tag $TAG != root package version $ROOT"; exit 1; }
+          [ "$TAG" = "$DSH" ]  || { echo "::error::tag $TAG != dsh package version $DSH"; exit 1; }
+
+      - name: Publish both packages (root first)
+        run: |
+          set -e
+          # npm 10 — the version bundled with Node 22 — cannot exchange the OIDC
+          # token for a publish credential; that landed in npm 11.5.1. Pin it via
+          # npx so the runner needs no write access to the hosted tool cache.
+          # Provenance needs no flag here: trusted publishing emits it by default.
+          publish() { npx --yes npm@11.5.1 publish; }
+
+          # Root first: explainer-video-from-coursework-dsh depends on it, so a
+          # consumer resolving the wrapper must find the root already published.
+          publish
+
+          # Serialize the two publishes: a second PUT racing the first one's
+          # registry processing returns 409 "Failed to save packument".
+          sleep 5
+          cd dsh && publish

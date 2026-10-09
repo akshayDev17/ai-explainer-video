@@ -115,6 +115,7 @@ DISTRIBUTION.md                          publish + install commands
 | [`PIPELINE.md`](./skills/explainer-video-from-coursework/PIPELINE.md) | the stage-by-stage pipeline |
 | [`ROADMAP.md`](./skills/explainer-video-from-coursework/ROADMAP.md) | design record and open work |
 | [`DISTRIBUTION.md`](./DISTRIBUTION.md) | publishing, and installing on each platform |
+| [`RELEASING.md`](./RELEASING.md) | how a release works — a tag, not a command line |
 
 ## License
 
