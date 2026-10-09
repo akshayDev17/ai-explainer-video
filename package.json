@@ -11,6 +11,10 @@
     "name": "Akshay Prabhakant"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/akshayDev17/ai-explainer-video.git"
+  },
   "keywords": ["explainer-video", "coursework", "narration", "animation", "text-to-speech", "video"],
   "files": ["plugin.json", ".claude-plugin/plugin.json", "skills/", "lib/", "cordis.patch.yml"],
   "dsh": {

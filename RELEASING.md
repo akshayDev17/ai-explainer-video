@@ -111,6 +111,11 @@ when a rollback workflow exists.
   `node-version: "22"` resolves to the newest 22.x, which satisfies it. This laptop's npm
   10.9.8 is why earlier manual publishes needed `--otp`.
 - **`registry-url` is required** in `setup-node`, or the publish fails with `ENEEDAUTH`.
+- **`repository.url` must point at this GitHub repo.** Provenance is emitted automatically
+  under trusted publishing, and npm validates that field against the repository the workflow
+  ran in — without it the stage fails
+  `422 ... Error verifying sigstore provenance bundle: "repository.url" is ""`. A package with
+  no `repository` field cannot use trusted publishing at all.
 - **The gate is the tag, not the push.** A push to `main` that doesn't change the version
   does nothing; an untagged version is staged once and then tagged, so re-pushing the same
   commit cannot double-release.
