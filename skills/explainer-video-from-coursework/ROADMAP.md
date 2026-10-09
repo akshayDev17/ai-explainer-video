@@ -18,15 +18,17 @@ assemble stages written into `SKILL.md`; video 6 (SOLID) completed end-to-end.
 
 `SKILL.md` — all eight stages (plan, enrich, script, audio, scene, publish, render,
 assemble), each with its command, its `done when` gate, and the visual-check
-protocol (vision gate + the `LOOK` step). Distributed as one plugin
-(`plugin.json` + `skills/explainer-video-from-coursework/`) — see §2.3.
+protocol (vision gate + the `LOOK` step). Distributed as one plugin of nine skills
+(`plugin.json` + `skills/`) — see §2.3.
 
-### The stage contracts
+### The stage skills
 
-Eight internal contract files, one per stage, at `stages/craft-video-<stage>/SKILL.md`.
-Each is a complete contract for its stage — prerequisites, command, what the agent writes,
-hard checks, `done when` — read *by the main skill* when a single stage needs re-running,
-not shipped as separate top-level skills.
+Eight sibling skills, one per stage, at `skills/craft-video-<stage>/SKILL.md` — top-level
+under `skills/`, so every platform that reads the plugin discovers all nine. Each is a
+complete contract for its stage — prerequisites, command, what the agent writes, hard
+checks, `done when` — and each is separately invocable, so one stage can be re-run alone.
+They reach the pipeline's tools as `../explainer-video-from-coursework/tools/<tool>.mjs`,
+resolved against the stage skill's own folder.
 
 `SKILL.md` stays **monolithic on purpose** — a full run loads in one pass — and is the
 contract of record. Every stage file ends with a **Maintenance** note requiring the
@@ -167,18 +169,20 @@ the cache. Undecided, not implemented.
 ### 2.3 Packaging — restructured; publish + register remain
 
 The repo is now an Agent Plugins plugin: root `plugin.json` + `.claude-plugin/plugin.json`
-+ `package.json`, the whole skill self-contained under
++ `package.json`, the main skill self-contained under
 `skills/explainer-video-from-coursework/` (docs + `tools/` + `src/` + `scenes/` +
-`SETUP.md`), and the 8 stage contracts internal under `stages/`. Targets: Claude Code,
-Codex, DSH via **npm**; Antigravity via **git** (Cursor parked — marketplace-only, manual
-review).
+`SETUP.md`), with the 8 stage skills as siblings at `skills/craft-video-<stage>/`. Targets:
+Claude Code, Codex, DSH via **npm**; Antigravity via **git** (Cursor parked —
+marketplace-only, manual review).
 
-**Done:** the restructure, the manifests, the self-contained layout, both marketplace
-catalogs (`.claude-plugin/marketplace.json` + `.agents/plugins/marketplace.json`, `source:
-npm`), the `source: npm` syntax pinned against primary docs, the DSH wrapper
-(`dsh/` — a bundle plugin mounting `dsh-skill-filesystem` with `customSkillDirs` at the
-bundled `skills/`, verified end-to-end: the skill appears in `ctx.skills.list()`), the git
-tag `v0.1.0`, and `DISTRIBUTION.md` (publish + four install commands).
+**Done:** the restructure, the manifests, both marketplace catalogs
+(`.claude-plugin/marketplace.json` + `.agents/plugins/marketplace.json`, `source: npm`),
+the `source: npm` syntax pinned against primary docs, the 8 stage skills moved to the top
+level of `skills/` so all nine resolve on every platform, the DSH wrapper (`dsh/` — a bundle
+plugin that depends on the `explainer-video-from-coursework` package and points
+`customSkillDirs` at *its* installed `skills/`, so the two packages cannot drift), a root
+`README.md`, MIT licensing across all four manifests, and `DISTRIBUTION.md` (publish + four
+install commands).
 
 **Remaining (user-owned):** the two `npm publish` runs (`explainer-video-from-coursework`
 and `explainer-video-from-coursework-dsh`) and the four installs on real machines.

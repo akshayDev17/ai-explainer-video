@@ -99,8 +99,9 @@ so only the work and scratch paths depend on the current directory.
 plugin.json                              Agent Plugins manifest (Codex, Antigravity)
 .claude-plugin/                          plugin.json + marketplace.json (Claude Code)
 .agents/plugins/                         marketplace.json (Codex)
-skills/explainer-video-from-coursework/  the skill: SKILL.md, tools/, src/, scenes/, stages/
-dsh/                                     DSH bundle wrapper (a separate npm package)
+skills/explainer-video-from-coursework/  the main skill: SKILL.md, tools/, src/, scenes/, SETUP.md
+skills/craft-video-<stage>/              the 8 stage skills, separately invocable
+dsh/                                     DSH bundle wrapper (a separate npm package; no skill files)
 DISTRIBUTION.md                          publish + install commands
 ```
 

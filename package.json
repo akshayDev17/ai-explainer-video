@@ -1,6 +1,6 @@
 {
   "name": "explainer-video-from-coursework",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Turn a directory of structured coursework notes into a narrated, animated explainer-video series.",
   "type": "module",
   "engines": {
@@ -11,5 +11,8 @@
   },
   "license": "MIT",
   "keywords": ["explainer-video", "coursework", "narration", "animation", "text-to-speech", "video"],
-  "files": ["plugin.json", ".claude-plugin/plugin.json", "skills/"]
+  "files": ["plugin.json", ".claude-plugin/plugin.json", "skills/"],
+  "exports": {
+    "./package.json": "./package.json"
+  }
 }

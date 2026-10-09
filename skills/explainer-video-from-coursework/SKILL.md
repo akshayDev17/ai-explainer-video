@@ -12,24 +12,27 @@ run **once per video** — write the narration, TTS turns it into measured audio
 author the visuals, generate the publishing metadata, then render and assemble that
 video's finished cut.
 
-The skill's own files (`tools/`, `src/`, `stages/`, `scenes/`) live in **this skill's folder**;
-the tools self-locate them, so `node tools/<tool>.mjs …` runs regardless of cwd. But the
-work and scratch paths (`out/`, `--work`, `--out`, `<notesDir>`) resolve against the
-**current directory** — run every command from the **project** (where `out/` scratch and
-the source notes live), never from the skill's install folder.
+The skill's own files (`tools/`, `src/`, `scenes/`) live in **this skill's folder** — resolve
+`tools/<tool>.mjs` against it; the tools then self-locate everything else, so they run
+regardless of cwd. The eight `craft-video-<stage>` skills sit beside this one under `skills/`.
+But the work and scratch paths (`out/`, `--work`, `--out`, `<notesDir>`) resolve against the
+**current directory** — run every command from the **project** (where `out/` scratch and the
+source notes live), never from the skill's install folder.
 
 > **For maintainers — the dual-file rule.** This skill is deliberately **monolithic**:
-> the whole pipeline lives here, so a full run loads in one pass. Every stage *also* has
-> its own contract file — `stages/craft-video-<stage>/SKILL.md`, one per stage — a
-> **complete contract** for that stage: its prerequisites, its command, what the agent
-> writes, its hard checks and its `done when` gate. These stage files are **internal** to
-> this plugin, not shipped as separate top-level skills. Treat **this file as the contract
-> of record**: every stage file ends with a **Maintenance** note requiring its stage's
-> section here to be reconciled whenever it changes. **If you add a stage, or change an
-> existing one, update *both*** — the stage's section here *and* its stage file — or they
-> will silently diverge.
-> Cross-stage behaviour such as the `/scene ↔ /audio` loop lives in a tool, never in
-> either file, so it stays in one place. See `ROADMAP.md` for the design record.
+> the whole pipeline lives here, so a full run loads in one pass. Every stage *also* ships
+> as its own sibling skill — `craft-video-<stage>/SKILL.md`, one per stage — a **complete
+> contract** for that stage: its prerequisites, its command, what the agent writes, its
+> hard checks and its `done when` gate. Those siblings are top-level under `skills/`, so
+> every platform discovers them and any single stage can be re-run alone. Treat **this file
+> as the contract of record**: every stage skill ends with a **Maintenance** note requiring
+> its stage's section here to be reconciled whenever it changes. **If you add a stage, or
+> change an existing one, update *both*** — the stage's section here *and* its sibling
+> skill — or they will silently diverge.
+> Stage skills reach the tools as `../explainer-video-from-coursework/tools/<tool>.mjs`;
+> keep that path in step if the layout moves again. Cross-stage behaviour such as the
+> `/scene ↔ /audio` loop lives in a tool, never in either file, so it stays in one place.
+> See `ROADMAP.md` for the design record.
 
 ## Prerequisites
 

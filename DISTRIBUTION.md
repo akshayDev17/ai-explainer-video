@@ -1,6 +1,8 @@
 # Distribution & installation
 
-One repo → one Agent Plugins plugin + one DSH bundle wrapper. Two npm packages, one git repo.
+One repo → one Agent Plugins plugin + one DSH bundle wrapper. Two npm packages, one git
+repo. The wrapper carries **no skill files**: it depends on the main package and serves
+*its* installed `skills/`, so the two cannot drift.
 
 ## Packages
 
@@ -57,8 +59,12 @@ agy plugin install https://github.com/akshayDev17/ai-explainer-video
   `agy plugin install <git-url>`.
 - **DSH** reads the `dsh/` npm package: `dsh.bundle.patch` → `cordis.patch.yml` →
   `lib/index.js` mounts `@deepseek-ai/dsh-skill-filesystem` with a unique `providerName`
-  and `customSkillDirs` pointing at the bundled `skills/`. Verified end-to-end against the
-  local DSH checkout (`explainer-video-from-coursework` shows up in `ctx.skills.list()`).
+  and `customSkillDirs` pointing at the **installed main package's** `skills/` — resolved
+  with `require.resolve`, never bundled.
+
+All four surfaces resolve the same **nine** skills: `explainer-video-from-coursework` plus
+its eight `craft-video-<stage>` siblings, all top-level under `skills/` so a single-level
+scan finds every one.
 
 ## Sources
 
