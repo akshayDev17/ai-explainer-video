@@ -140,6 +140,11 @@ paper but is gated behind the right 2FA method.
    **Desktop app** and download its `client_secret_*.json`. Google's own walkthrough — modulo the
    scope — is <https://ai.google.dev/gemini-api/docs/oauth>.
 
+   **Publishing status matters.** Google expires refresh tokens for OAuth clients in **Testing**
+   status after 7 days. Set the app to **In production** (Google Auth platform → Audience →
+   publishing status) so the token lasts indefinitely. It stays "unverified" — fine for a
+   single-user app — but stops expiring.
+
 2. Run the one-time helper. It opens a browser and prints the values to paste:
 
    ```sh
