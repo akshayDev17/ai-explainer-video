@@ -147,6 +147,7 @@ said for most of the email APIs now (see [Why not a dedicated email API](#why-no
    | variable | `SMTP_USER` | your full Gmail address |
    | variable | `MAIL_FROM` | the same address — Gmail sends as the authenticated account |
    | variable | `MAIL_TO` | where it goes; comma-separated for several |
+   | variable | `MAIL_FROM_NAME` | optional; the display name the inbox shows — see below |
    | variable | `NPM_USER` | your npm username, for the approval link (`akshaydev17`) |
 
    Leave `SMTP_PORT` and `SMTP_TLS` unset: the defaults are `587` and `starttls`, which is what Gmail
@@ -161,6 +162,17 @@ said for most of the email APIs now (see [Why not a dedicated email API](#why-no
 
    This only connects and authenticates — it does not even need `jinja2` — so it is the fastest way
    to tell a wrong app password from a blocked connection or a refused sender.
+
+**On the sender address.** You cannot send as `noreply@github.com`, or as anything on a domain you do
+not own. GitHub can send as `github.com` because they publish SPF and DKIM records for it; a provider
+can neither verify nor authenticate an address you cannot receive at, and mail claiming to be GitHub
+from a non-GitHub IP fails that domain's DMARC policy. So `MAIL_FROM` has to be an address you can
+actually read — which, without a domain, means this same Gmail account.
+
+What you *can* choose freely is the **display name**. Set `MAIL_FROM_NAME` to something like
+`explainer-video releases` and the inbox shows `explainer-video releases <you@gmail.com>`: the address
+stays honest, the label reads like a project rather than a stray personal email. That is where project
+identity lives until you own a domain.
 
 **Three things to know about that app password:**
 
