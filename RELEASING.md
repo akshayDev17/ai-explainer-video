@@ -34,10 +34,12 @@ and it is what makes the guard unambiguous on the next push.
 
 Then approve what CI queued — **in the browser**:
 
-> **npmjs.com → the "Staged Packages" tab** → pick the version → click **Approve**.
+> **npmjs.com → Settings → Staged Packages**
+> (`https://www.npmjs.com/settings/<your-username>/staged-packages`)
+> → find the version → **Approve**. There is also **Inspect**, which downloads the tarball so
+> you can open it *before* it goes live — the whole reason the extra click is worth it.
 >
-> That is npm's own documented path, so no terminal is involved. You are prompted for 2FA
-> either way, and nothing is installable until you approve it.
+> No terminal is involved, and nothing is installable until you approve it.
 
 The CLI works too, if you'd rather:
 
@@ -94,6 +96,9 @@ The filename and environment must match the workflow exactly, or npm rejects the
   attestation automatically, so `--provenance` is no longer needed. Provenance requires a
   public source repo; this one is public.
 - **2FA moves to the approval**, where a human is — instead of a token that bypasses it.
+- **Token publishing is being retired.** npm's own site carries the notice: tokens that bypass
+  2FA are being restricted — account changes from August 2026, and **direct publishing from
+  January 2027**. This setup is the destination, not a detour.
 
 ## Dist-tags, and what that permission is not
 
