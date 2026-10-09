@@ -17,17 +17,20 @@ The one package carries three manifest surfaces, and each consumer reads only it
 
 `skills/` holds all nine skills once, and every surface points at that single copy.
 
-## A release is a tag, then an approval
+## A release is a version bump, then an approval
 
 ```sh
 # 1. bump the version in all three places it is duplicated
 #    package.json · plugin.json · .claude-plugin/plugin.json
-# 2. commit
+# 2. commit and push to main — CI stages it
 git commit -am "chore(release): v0.1.3"
-# 3. tag and push — CI stages it
-git tag v0.1.3
-git push origin main --tags
+git push origin main
 ```
+
+Every push to `main` runs the workflow, but it only **acts** when `package.json`'s version
+has no tag yet — ordinary commits are a no-op, and you never type `git tag`. After a
+successful stage the workflow creates `v<version>` itself: that tag is the release record,
+and it is what makes the guard unambiguous on the next push.
 
 Then approve what CI queued — **in the browser**:
 
@@ -108,8 +111,9 @@ when a rollback workflow exists.
   `node-version: "22"` resolves to the newest 22.x, which satisfies it. This laptop's npm
   10.9.8 is why earlier manual publishes needed `--otp`.
 - **`registry-url` is required** in `setup-node`, or the publish fails with `ENEEDAUTH`.
-- **A tag without a matching version fails the run**, deliberately — shipping the wrong
-  version is the one mistake a tag-triggered release makes cheap to commit.
+- **The gate is the tag, not the push.** A push to `main` that doesn't change the version
+  does nothing; an untagged version is staged once and then tagged, so re-pushing the same
+  commit cannot double-release.
 - **Nothing is live until you approve.** A green workflow run means "queued", not "released".
 - **DSH needs no dependency declared.** `lib/index.js` imports
   `@deepseek-ai/dsh-skill-filesystem` without declaring it: the harness's module fallback
@@ -118,12 +122,13 @@ when a rollback workflow exists.
 
 ## If a release fails
 
-- **Before staging** (the version guard) — fix it, then delete and re-push the tag:
-  `git push --delete origin v0.1.3 && git tag -d v0.1.3`, then re-tag.
-- **Staged but wrong** — `npm stage reject <stage-id>`, fix, re-tag. Nothing was ever
-  installable, so there is nothing to un-publish.
-- **Already approved and bad** — npm will not let you republish that version. Deprecate and
-  move forward: `npm deprecate explainer-video-from-coursework@0.1.3 "broken — use 0.1.4"`.
+- **The stage failed** — the job stops before tagging, so the next push to `main` simply
+  retries. Nothing was queued and no tag was written.
+- **Staged but wrong** — `npm stage reject <stage-id>`, fix, and push a new version. Only
+  reuse the same version after deleting its tag:
+  `git push --delete origin v0.1.3 && git tag -d v0.1.3`.
+- **Already approved and bad** — npm will not let you republish that version. Bump and move
+  forward: `npm deprecate explainer-video-from-coursework@0.1.3 "broken — use 0.1.4"`.
   Moving `latest` back would need the dist-tag permission above.
 
 ## Deliberately not wired

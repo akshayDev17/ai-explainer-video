@@ -1,19 +1,20 @@
-# Tag-triggered release — publishes BOTH npm packages with OIDC trusted
-# publishing, so no npm token exists on any machine or in any secret.
+# Release on merge to main — no tag to remember.
 #
-# A release is now: bump the versions, commit, tag, push the tag.
+# A push to main releases only when package.json's version has no tag yet, so
+# ordinary commits are no-ops. The workflow creates the tag itself after a
+# successful stage, which is what makes that guard unambiguous and also gives
+# you a tag per release without anyone typing `git tag`.
 #
-# One-time prerequisite (see RELEASING.md): a Trusted Publisher configured on
-# npmjs.com for EACH package, pointing at this repo + this workflow file.
+# One-time prerequisite (see RELEASING.md): a Trusted Publisher on npmjs.com.
 
 name: release
 
 on:
   push:
-    tags: ["v*.*.*"]
+    branches: [main]
 
 permissions:
-  contents: read
+  contents: write          # create the release tag
   # Mints the OIDC token npm exchanges for a short-lived publish credential.
   # This single line is the whole replacement for an NPM_TOKEN secret.
   id-token: write
@@ -33,28 +34,46 @@ jobs:
         with:
           node-version: "22"
           # Required: setup-node writes the .npmrc that points npm at the public
-          # registry. Without it `npm publish` fails with ENEEDAUTH.
+          # registry. Without it the publish fails with ENEEDAUTH.
           registry-url: "https://registry.npmjs.org"
 
-      - name: Tag must match the package version
+      - name: Release only if this version is untagged
+        id: gate
         run: |
           set -e
-          TAG="${GITHUB_REF_NAME#v}"
-          VERSION="$(node -p "require('./package.json').version")"
-          echo "tag=$TAG  version=$VERSION"
-          [ "$TAG" = "$VERSION" ] || { echo "::error::tag $TAG != package.json version $VERSION"; exit 1; }
+          V="$(node -p "require('./package.json').version")"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$V" >/dev/null; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "v$V is already tagged — nothing to release"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "new version: $V"
+          fi
 
       - name: Stage the package
+        if: steps.gate.outputs.release == 'true'
         run: |
-          # Staged publishing: this queues the version, and a maintainer approves it
-          # on npm before it becomes installable. The trusted-publisher config
+          # Staged publishing: this queues the version, and a maintainer approves
+          # it on npm before it becomes installable. The trusted-publisher config
           # deliberately omits "Allow npm publish", so a compromised run can ask to
           # ship but cannot ship.
           #
-          # npm 10 — the version bundled with Node 22 — is too old on both counts:
-          # the OIDC token exchange landed in 11.5.1, and `stage` needs 11.15.0.
-          # Pin via npx so the runner needs no write access to the hosted tool
-          # cache. Staging also requires Node >= 22.14.0; "22" resolves to the
-          # newest 22.x, which satisfies that.
+          # npm 10 — bundled with Node 22 — is too old on both counts: the OIDC
+          # token exchange landed in 11.5.1, and `stage` needs 11.15.0. Pin via npx
+          # so the runner needs no write access to the hosted tool cache. Staging
+          # also requires Node >= 22.14.0; "22" resolves to the newest 22.x.
           # Provenance needs no flag: trusted publishing emits it by default.
           npx --yes npm@11.15.0 stage publish
+
+      - name: Tag the release
+        if: steps.gate.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          V: ${{ steps.gate.outputs.version }}
+        run: |
+          # Via the API rather than `git push`, so the checkout can keep
+          # persist-credentials: false.
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/v$V" -f sha="$GITHUB_SHA" >/dev/null
+          echo "tagged v$V at $GITHUB_SHA"
