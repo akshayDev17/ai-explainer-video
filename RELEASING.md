@@ -17,29 +17,20 @@ The one package carries three manifest surfaces, and each consumer reads only it
 
 `skills/` holds all nine skills once, and every surface points at that single copy.
 
-## A release is a merge to main
+## A release is a button click
 
-The version is **derived from your commit messages**, never typed by a human. semantic-release reads
-the conventional-commit prefix on every commit since the last tag:
+Normal commits to `main` do **nothing** — no version, no tag, no email. A release happens only
+when you deliberately run the workflow by hand: **Actions → release → Run workflow**.
 
-| prefix | bump |
-|---|---|
-| `fix:` | patch (0.1.3 → 0.1.4) |
-| `feat:` | minor (0.1.3 → 0.2.0) |
-| `feat!:` / `BREAKING CHANGE` | major (0.1.3 → 1.0.0) |
-| `chore:`, `docs:`, `ci:`, anything else | nothing |
+The form asks two things:
 
-So releasing is exactly the normal git flow: code on a branch, test it, merge to `main`.
+- **bump** — `patch` (default) / `minor` / `major`. Leave it on `patch` for a routine fix.
+- **version** — optional. Type an explicit version like `0.3.0` to override the bump.
 
-```sh
-git commit -m "feat: add the YouTube chapters stage"
-git push        # the PR merge (or a direct push) to main
-```
-
-The merge runs the workflow; semantic-release bumps all three version files (`package.json`,
-`plugin.json`, `.claude-plugin/plugin.json`), writes `CHANGELOG.md`, commits them back with
-`[skip ci]`, tags `v<version>`, and runs `npm stage publish`. A `chore:`/`docs:` merge is a
-no-op: no version, no tag, no email.
+Click **Run workflow** and CI does the rest: it computes the next version from the latest tag,
+bumps `package.json`, `plugin.json` and `.claude-plugin/plugin.json` in lockstep, runs
+`npm stage publish` (queuing a candidate), and only then commits + tags `v<version>`. If the stage
+fails, nothing is committed or tagged — the next run recomputes the same version and retries cleanly.
 
 Then approve what CI queued — **in the browser**:
 
@@ -121,9 +112,8 @@ config choice rather than a code change. It talks to a Gmail account — the rea
 
 Four things it does deliberately:
 
-- **It stays silent on a no-op run.** The workflow fires on every push to `main`, but semantic-release
-  only produces a release when a `fix:`/`feat:` commit lands — a `chore:`/`docs:` commit is green and
-  releases nothing. Emailing that would be one mail per merge.
+- **It emails once per release, never per commit.** There is no push trigger, so ordinary commits
+  never run the notifier at all. The only email is for the release you deliberately triggered.
 - **It says "staged", not "released".** A green run means the version is queued in npm's staging area,
   so the most useful line in the mail is the approval link, not the commit hash.
 - **Unconfigured is not broken.** With no SMTP settings it warns in the log and exits 0: a notifier
@@ -285,22 +275,20 @@ when a rollback workflow exists.
 
 ## Gotchas worth knowing
 
-- **The staged publish pins npm ≥ 11.15.0.** Two floors: the OIDC token exchange landed in
-  11.5.1, and `npm stage` needs 11.15.0. The `@semantic-release/exec` plugin's `publishCmd` runs
-  `npx --yes npm@11.15.0 stage publish`, exactly because Node 22's bundled npm 10 is too old.
-  Staging also needs Node ≥ 22.14.0; `node-version: "22"` resolves to the newest 22.x.
-- **`registry-url` is required** in `setup-node`, or the stage fails with `ENEEDAUTH`. This is a
-  deliberate exception to semantic-release's own recipe (which says don't set it): that warning
-  applies only when `@semantic-release/npm` publishes directly. Here `npmPublish: false` skips its
-  auth, and `npx npm stage publish` needs the registry config `setup-node` writes.
+- **The staged publish pins npm ≥ 11.15.0.** Two floors: the OIDC token exchange landed in 11.5.1,
+  and `npm stage` needs 11.15.0. The workflow runs `npx --yes npm@11.15.0 stage publish`, exactly
+  because Node 22's bundled npm 10 is too old. Staging also needs Node ≥ 22.14.0;
+  `node-version: "22"` resolves to the newest 22.x.
+- **`registry-url` is required** in `setup-node`, or the stage fails with `ENEEDAUTH`. The workflow's
+  `npx npm stage publish` reads the registry config that `setup-node` writes.
 - **`repository.url` must point at this GitHub repo.** Provenance is emitted automatically
   under trusted publishing, and npm validates that field against the repository the workflow
   ran in — without it the stage fails
   `422 ... Error verifying sigstore provenance bundle: "repository.url" is ""`. A package with
   no `repository` field cannot use trusted publishing at all.
-- **The gate is the commit type, not the push.** A `fix:`/`feat:` commit releases; `chore:`/
-  `docs:`/`ci:` doesn't. The `[skip ci]` on semantic-release's own commit stops the workflow from
-  re-triggering, so a release is exactly one run, one version, one email.
+- **The gate is the manual button, not the push.** Normal commits to `main` do nothing; only a
+  manually-dispatched run releases. The version is committed and tagged only after a successful
+  stage, so a failed stage never consumes a version.
 - **Nothing is live until you approve.** A green workflow run means "queued", not "released".
 - **DSH needs no dependency declared.** `lib/index.js` imports
   `@deepseek-ai/dsh-skill-filesystem` without declaring it: the harness's module fallback
@@ -309,20 +297,16 @@ when a rollback workflow exists.
 
 ## If a release fails
 
-- **semantic-release failed** — the release email carries the tail of `release.log`. The version is
-  only bumped/tagged/staged after semantic-release has analyzed the commits, so in most failures
-  nothing was touched and the next `fix:`/`feat:` push retries. If the tag *was* created before the
-  publish step failed, that version is spent — delete the tag before re-using it:
-  `git push --delete origin vX.Y.Z && git tag -d vX.Y.Z`.
-- **Staged but wrong** — `npm stage reject <stage-id>`, fix, and merge a new `fix:`/`feat:` commit.
-- **Already approved and bad** — npm will not let you republish that version. Merge a new commit and
-  let semantic-release bump forward, then
+- **The stage failed** — the release email carries the tail of `release.log`. Because staging happens
+  *before* commit + tag, nothing was committed or tagged: the next manual run recomputes the same
+  version and retries cleanly.
+- **Staged but wrong** — `npm stage reject <stage-id>`, fix, and run the release workflow again.
+- **Already approved and bad** — npm will not let you republish that version. Release the next one and
   `npm deprecate explainer-video-from-coursework@X.Y.Z "broken — use <next>"`.
 
 ## Deliberately not wired
 
-- **A GitHub Release per tag** — add `@semantic-release/github` back to the plugin list (it is a
-  bundled default that our explicit `plugins` array currently omits).
+- **A GitHub Release per tag** — a `gh release create` step after the tag push.
 - **Tag protection** — a repository rule on `v*` stops a tag being moved or deleted.
 - **A post-publish smoke test** — `npm view <pkg> version` and a clean install in a scratch
   directory, after approval, so a bad tarball is caught before anyone consumes it.

@@ -91,13 +91,8 @@ HINTS: list[tuple[str, str]] = [
     ),
     (
         r"non-fast-forward|rejected|protected branch|EPUSHREJECTED",
-        "semantic-release could not push the release commit or tag — usually branch protection, "
-        "or the git identity/credentials are missing. See RELEASING.md.",
-    ),
-    (
-        r"ENOENT|Cannot find module|not found in your plugins",
-        "A semantic-release plugin or dependency is missing on the runner. Re-check devDependencies "
-        "and that the install step ran.",
+        "The release commit or tag could not be pushed — usually branch protection, or the git "
+        "identity/credentials are missing. See RELEASING.md.",
     ),
 ]
 
@@ -151,7 +146,7 @@ def build_context() -> dict:
     # ---- decide the state -------------------------------------------------
     failed_step = ""
     if release_outcome == "failure":
-        state, failed_step = STATE_FAILURE, "Release (semantic-release)"
+        state, failed_step = STATE_FAILURE, "Release"
     elif not released:
         state = STATE_NOOP
     else:
@@ -204,7 +199,7 @@ def build_context() -> dict:
         cta_label = "View the failed run"
         cta_url = run_url
         footnote = (
-            "semantic-release stopped before publishing. Nothing became installable — "
+            "The release stopped before publishing. Nothing became installable — "
             "staged publishing means you approve before anything ships."
         )
         preheader = f"{package} failed at {where}"

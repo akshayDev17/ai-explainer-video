@@ -1,11 +1,9 @@
-# Release on merge to main — semantic-release.
+# Release on demand — a human clicks "Run workflow".
 #
-# semantic-release reads conventional-commit messages since the last git tag:
-#   fix:  -> patch   feat: -> minor   feat!: -> major   chore:/docs:/ci: -> nothing.
-# On a release it bumps package.json + the two plugin manifests in lockstep, writes
-# CHANGELOG.md, commits them with [skip ci] (so this workflow does not re-trigger),
-# tags vX.Y.Z, and runs `npm stage publish` so a human approves on npmjs.com before
-# anything becomes installable.
+# Normal commits to main do nothing. A release happens only when this workflow
+# is dispatched manually, and it does the whole job: pick the version, bump all
+# three manifests, run `npm stage publish` (which queues a candidate a human then
+# approves on npmjs.com), and only after a successful stage commit + tag.
 #
 # One-time prerequisites (see RELEASING.md):
 #   - a Trusted Publisher on npmjs.com that permits staging (not direct publish);
@@ -14,11 +12,21 @@
 name: release
 
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Semver increment (ignored if you set an explicit version)"
+        required: true
+        type: choice
+        default: "patch"
+        options: ["patch", "minor", "major"]
+      version:
+        description: "Explicit version, e.g. 0.3.0 (optional — overrides bump)"
+        required: false
+        type: string
 
 permissions:
-  contents: write        # semantic-release pushes the release commit + tag
+  contents: write        # push the release commit + tag
   id-token: write        # OIDC token npm exchanges for a staging credential
 
 jobs:
@@ -28,13 +36,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0    # full history — semantic-release reads commits since the last tag
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
           node-version: "22"
-          registry-url: "https://registry.npmjs.org"   # npm stage publish reads this
+          registry-url: "https://registry.npmjs.org"
 
       - name: Set up Python (for the notification)
         uses: actions/setup-python@v7
@@ -45,30 +53,45 @@ jobs:
         id: start
         run: echo "epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
       - name: Set git identity
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      # One step does everything: analyze -> bump -> sync manifests -> changelog ->
-      # commit [skip ci] + tag -> npm stage publish. On a chore:/docs:/ci: push it
-      # finds nothing to release and exits 0 (no output, no email). successCmd
-      # writes `released` + `version` to the step outputs on an actual release.
+      # One step so a single outcome drives the notification. Order matters:
+      # stage BEFORE commit+tag, so a failed stage does not consume the version —
+      # the next manual run recomputes the same version and retries cleanly.
       - name: Release
         id: release
         env:
+          BUMP: ${{ inputs.bump }}
+          VERSION_OVERRIDE: ${{ inputs.version }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -o pipefail
-          npx semantic-release 2>&1 | tee "$RUNNER_TEMP/release.log"
+          set -euo pipefail
+          CURRENT=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true); CURRENT=${CURRENT#v}
+          [ -z "$CURRENT" ] && CURRENT=$(node -p "require('./package.json').version")
+          if [ -n "$VERSION_OVERRIDE" ]; then
+            NEXT="$VERSION_OVERRIDE"
+          else
+            NEXT=$(node scripts/next-version.mjs "$CURRENT" "$BUMP")
+          fi
+          echo "releasing: $CURRENT -> $NEXT"
+          node scripts/bump.mjs "$NEXT"
 
-      # Runs on every outcome. notify.py decides from RELEASE_OUTCOME + RELEASED:
-      #   failure  -> red email with the release log tail
-      #   released -> "staged, approve on npm" email
-      #   otherwise-> silent no-op.
+          {
+            npx --yes npm@11.15.0 stage publish
+            git add package.json plugin.json .claude-plugin/plugin.json
+            git commit -m "chore(release): $NEXT"
+            git tag "v$NEXT"
+            git push origin "v$NEXT" HEAD:main
+          } 2>&1 | tee "$RUNNER_TEMP/release.log"
+
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+
+      # Email on success or failure; silent only if the release step was skipped
+      # (which cannot happen for a manual dispatch, but notify.py is defensive).
       - name: Notify
         if: always()
         env:
