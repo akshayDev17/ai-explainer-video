@@ -17,6 +17,12 @@
   },
   "keywords": ["explainer-video", "coursework", "narration", "animation", "text-to-speech", "video"],
   "files": ["plugin.json", ".claude-plugin/plugin.json", "skills/", "lib/", "cordis.patch.yml"],
+  "devDependencies": {
+    "semantic-release": "^25.0.0",
+    "@semantic-release/changelog": "^7.0.0",
+    "@semantic-release/exec": "^7.0.0",
+    "@semantic-release/git": "^11.0.0"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

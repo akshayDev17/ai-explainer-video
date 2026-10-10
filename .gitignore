@@ -16,3 +16,6 @@ parts/
 # bytecode: regenerated on every import, so it has no business in a repo
 __pycache__/
 *.pyc
+
+# dependencies are installed from the lockfile in CI, never committed
+node_modules/

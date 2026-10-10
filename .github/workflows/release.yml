@@ -1,11 +1,15 @@
-# Release on merge to main — no tag to remember.
+# Release on merge to main — semantic-release.
 #
-# A push to main releases only when package.json's version has no tag yet, so
-# ordinary commits are no-ops. The workflow creates the tag itself after a
-# successful stage, which is what makes that guard unambiguous and also gives
-# you a tag per release without anyone typing `git tag`.
+# semantic-release reads conventional-commit messages since the last git tag:
+#   fix:  -> patch   feat: -> minor   feat!: -> major   chore:/docs:/ci: -> nothing.
+# On a release it bumps package.json + the two plugin manifests in lockstep, writes
+# CHANGELOG.md, commits them with [skip ci] (so this workflow does not re-trigger),
+# tags vX.Y.Z, and runs `npm stage publish` so a human approves on npmjs.com before
+# anything becomes installable.
 #
-# One-time prerequisite (see RELEASING.md): a Trusted Publisher on npmjs.com.
+# One-time prerequisites (see RELEASING.md):
+#   - a Trusted Publisher on npmjs.com that permits staging (not direct publish);
+#   - an npm username in the NPM_USER repository variable for the approval link.
 
 name: release
 
@@ -14,10 +18,8 @@ on:
     branches: [main]
 
 permissions:
-  contents: write          # create the release tag
-  # Mints the OIDC token npm exchanges for a short-lived publish credential.
-  # This single line is the whole replacement for an NPM_TOKEN secret.
-  id-token: write
+  contents: write        # semantic-release pushes the release commit + tag
+  id-token: write        # OIDC token npm exchanges for a staging credential
 
 jobs:
   release:
@@ -26,88 +28,55 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
-          persist-credentials: false
+          fetch-depth: 0    # full history — semantic-release reads commits since the last tag
 
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
           node-version: "22"
-          # Required: setup-node writes the .npmrc that points npm at the public
-          # registry. Without it the publish fails with ENEEDAUTH.
-          registry-url: "https://registry.npmjs.org"
+          registry-url: "https://registry.npmjs.org"   # npm stage publish reads this
 
-      # setup-python gives a Python whose pip install works without the runner's
-      # system Python complaining about being externally managed (PEP 668).
       - name: Set up Python (for the notification)
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - name: Release only if this version is untagged
-        id: gate
-        run: |
-          set -e
-          echo "start=$(date +%s)" >> "$GITHUB_OUTPUT"
-          V="$(node -p "require('./package.json').version")"
-          echo "version=$V" >> "$GITHUB_OUTPUT"
-          if git rev-parse -q --verify "refs/tags/v$V" >/dev/null; then
-            echo "release=false" >> "$GITHUB_OUTPUT"
-            echo "v$V is already tagged — nothing to release"
-          else
-            echo "release=true" >> "$GITHUB_OUTPUT"
-            echo "new version: $V"
-          fi
+      - name: Mark start time
+        id: start
+        run: echo "epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      - name: Stage the package
-        id: stage
-        if: steps.gate.outputs.release == 'true'
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Set git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # One step does everything: analyze -> bump -> sync manifests -> changelog ->
+      # commit [skip ci] + tag -> npm stage publish. On a chore:/docs:/ci: push it
+      # finds nothing to release and exits 0 (no output, no email). successCmd
+      # writes `released` + `version` to the step outputs on an actual release.
+      - name: Release
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -o pipefail
-          # Staged publishing: this queues the version, and a maintainer approves
-          # it on npm before it becomes installable. The trusted-publisher config
-          # deliberately omits "Allow npm publish", so a compromised run can ask to
-          # ship but cannot ship.
-          #
-          # npm 10 — bundled with Node 22 — is too old on both counts: the OIDC
-          # token exchange landed in 11.5.1, and `stage` needs 11.15.0. Pin via npx
-          # so the runner needs no write access to the hosted tool cache. Staging
-          # also requires Node >= 22.14.0; "22" resolves to the newest 22.x.
-          # Provenance needs no flag: trusted publishing emits it by default.
-          # Capture the output: on failure the notification inlines its tail, and a
-          # job log is not something you can read from an email.
-          npx --yes npm@11.15.0 stage publish 2>&1 | tee "$RUNNER_TEMP/stage.log"
+          npx semantic-release 2>&1 | tee "$RUNNER_TEMP/release.log"
 
-      - name: Tag the release
-        id: tag
-        if: steps.gate.outputs.release == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          V: ${{ steps.gate.outputs.version }}
-        run: |
-          # Via the API rather than `git push`, so the checkout can keep
-          # persist-credentials: false.
-          gh api "repos/$GITHUB_REPOSITORY/git/refs" \
-            -f ref="refs/tags/v$V" -f sha="$GITHUB_SHA" >/dev/null
-          echo "tagged v$V at $GITHUB_SHA"
-
-      # Runs on every outcome, so a failure is reported too. notify.py works out the
-      # state from the step outcomes above and stays silent on a no-op run.
-      #
-      # Provider-agnostic SMTP: needs SMTP_PASS (secret) plus SMTP_HOST, SMTP_USER,
-      # MAIL_FROM and MAIL_TO (variables). Unset config warns in the log and exits 0;
-      # a *failed* send exits 1, so the run goes red and GitHub mails you rather than
-      # failing silently. See RELEASING.md.
+      # Runs on every outcome. notify.py decides from RELEASE_OUTCOME + RELEASED:
+      #   failure  -> red email with the release log tail
+      #   released -> "staged, approve on npm" email
+      #   otherwise-> silent no-op.
       - name: Notify
         if: always()
         env:
-          GATE_OUTCOME: ${{ steps.gate.outcome }}
-          GATE_RELEASE: ${{ steps.gate.outputs.release }}
-          VERSION: ${{ steps.gate.outputs.version }}
-          START_EPOCH: ${{ steps.gate.outputs.start }}
-          STAGE_OUTCOME: ${{ steps.stage.outcome }}
-          TAG_OUTCOME: ${{ steps.tag.outcome }}
-          STAGE_LOG: ${{ runner.temp }}/stage.log
+          RELEASE_OUTCOME: ${{ steps.release.outcome }}
+          RELEASED: ${{ steps.release.outputs.released }}
+          VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_LOG: ${{ runner.temp }}/release.log
+          START_EPOCH: ${{ steps.start.outputs.epoch }}
           PACKAGE: explainer-video-from-coursework
           NPM_USER: ${{ vars.NPM_USER }}
           SMTP_HOST: ${{ vars.SMTP_HOST }}

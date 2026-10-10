@@ -89,6 +89,16 @@ HINTS: list[tuple[str, str]] = [
         r"EPERM|EACCES|permission denied",
         "A filesystem permission problem on the runner.",
     ),
+    (
+        r"non-fast-forward|rejected|protected branch|EPUSHREJECTED",
+        "semantic-release could not push the release commit or tag — usually branch protection, "
+        "or the git identity/credentials are missing. See RELEASING.md.",
+    ),
+    (
+        r"ENOENT|Cannot find module|not found in your plugins",
+        "A semantic-release plugin or dependency is missing on the runner. Re-check devDependencies "
+        "and that the install step ran.",
+    ),
 ]
 
 
@@ -135,31 +145,25 @@ def build_context() -> dict:
     version = env("VERSION") or "unknown"
     npm_user = env("NPM_USER")
 
-    gate_outcome = env("GATE_OUTCOME")
-    stage_outcome = env("STAGE_OUTCOME")
-    tag_outcome = env("TAG_OUTCOME")
-    release = env("GATE_RELEASE") == "true"
+    release_outcome = env("RELEASE_OUTCOME")
+    released = env("RELEASED") == "true"
 
     # ---- decide the state -------------------------------------------------
     failed_step = ""
-    if gate_outcome == "failure":
-        state, failed_step = STATE_FAILURE, "Release only if this version is untagged"
-    elif not release:
+    if release_outcome == "failure":
+        state, failed_step = STATE_FAILURE, "Release (semantic-release)"
+    elif not released:
         state = STATE_NOOP
-    elif stage_outcome == "failure":
-        state, failed_step = STATE_FAILURE, "Stage the package"
-    elif tag_outcome == "failure":
-        state, failed_step = STATE_FAILURE, "Tag the release"
     else:
         state = STATE_SUCCESS
 
     # ---- the error tail --------------------------------------------------
-    log_path = env("STAGE_LOG")
+    log_path = env("RELEASE_LOG")
     raw = ""
     if log_path and pathlib.Path(log_path).is_file():
         raw = pathlib.Path(log_path).read_text(errors="replace")
     if not raw:
-        raw = env("GATE_LOG_TEXT")
+        raw = env("RELEASE_LOG_TEXT")
 
     error_lines, truncated = ([], False)
     hint = ""
@@ -175,7 +179,7 @@ def build_context() -> dict:
         start = 0
     duration = human_duration(int(time.time()) - start) if start else ""
 
-    tag_created = success or tag_outcome == "success"
+    tag_created = success
     run_url = f"{server}/{repo}/actions/runs/{run_id}" if repo and run_id else ""
     approve_url = (
         f"https://www.npmjs.com/settings/{npm_user}/staged-packages" if npm_user else ""
@@ -200,12 +204,11 @@ def build_context() -> dict:
         cta_label = "View the failed run"
         cta_url = run_url
         footnote = (
-            "No tag was written, so the next push to the branch retries automatically."
-            if not tag_created
-            else "The tag was written; the version may still need attention."
+            "semantic-release stopped before publishing. Nothing became installable — "
+            "staged publishing means you approve before anything ships."
         )
-        preheader = f"{package} {version} failed at {where}"
-        subject = f"❌ release {version} failed — {where}"
+        preheader = f"{package} failed at {where}"
+        subject = f"❌ release failed — {where}"
 
     return {
         "state": state,
