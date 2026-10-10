@@ -12,7 +12,7 @@ Three rules shape this file:
   2. **Once SMTP is configured, a send failure exits non-zero.** You asked to be told
      about every release, so silence is the one outcome you cannot debug. GitHub
      mails the actor when a run fails, so that mail becomes the backstop telling you
-     the notifier itself broke. The release is unaffected — it was staged and tagged
+     the notifier itself broke. The release is unaffected — it was published and tagged
      long before this step ran.
   3. **It decides the state itself**, from the step outcomes the workflow hands it.
      GitHub gives a step no idea what the steps before it did.
@@ -83,7 +83,7 @@ HINTS: list[tuple[str, str]] = [
     (
         r"\b403\b|Forbidden|not authorized",
         "The trusted publisher may not match this workflow's filename, or its permissions do not "
-        "cover staging. Re-check the npmjs.com configuration.",
+        "cover publishing. Re-check the npmjs.com configuration.",
     ),
     (
         r"EPERM|EACCES|permission denied",
@@ -138,7 +138,6 @@ def build_context() -> dict:
     event = env("GITHUB_EVENT_NAME", "push")
     package = env("PACKAGE", "explainer-video-from-coursework")
     version = env("VERSION") or "unknown"
-    npm_user = env("NPM_USER")
 
     release_outcome = env("RELEASE_OUTCOME")
     released = env("RELEASED") == "true"
@@ -176,22 +175,16 @@ def build_context() -> dict:
 
     tag_created = success
     run_url = f"{server}/{repo}/actions/runs/{run_id}" if repo and run_id else ""
-    approve_url = (
-        f"https://www.npmjs.com/settings/{npm_user}/staged-packages" if npm_user else ""
-    )
+    package_url = f"https://www.npmjs.com/package/{package}/v/{version}"
 
     if success:
         heading = "RELEASE SUCCEEDED"
-        subhead = "staged — waiting on your approval"
-        cta_label = f"Approve {version} on npm"
-        cta_url = approve_url or run_url
-        footnote = (
-            "Nothing is installable until you approve it."
-            if approve_url
-            else "Set the NPM_USER repository variable to get a direct approval link."
-        )
-        preheader = f"{package} {version} is staged — approve it on npm"
-        subject = f"✅ release {version} staged — approve on npm"
+        subhead = f"{version} is published to npm"
+        cta_label = "View the package"
+        cta_url = package_url
+        footnote = "Published directly — no approval step."
+        preheader = f"{package} {version} is published"
+        subject = f"✅ release {version} published"
     else:
         where = failed_step or "the release"
         heading = "RELEASE FAILED"
@@ -199,8 +192,8 @@ def build_context() -> dict:
         cta_label = "View the failed run"
         cta_url = run_url
         footnote = (
-            "The release stopped before publishing. Nothing became installable — "
-            "staged publishing means you approve before anything ships."
+            "The release stopped before publishing. Nothing was published — "
+            "check the Release step's log."
         )
         preheader = f"{package} failed at {where}"
         subject = f"❌ release failed — {where}"

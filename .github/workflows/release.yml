@@ -2,12 +2,11 @@
 #
 # Normal commits to main do nothing. A release happens only when this workflow
 # is dispatched manually, and it does the whole job: pick the version, bump all
-# three manifests, run `npm stage publish` (which queues a candidate a human then
-# approves on npmjs.com), and only after a successful stage commit + tag.
+# three manifests, publish straight to npm, and only after a successful publish
+# commit + tag.
 #
-# One-time prerequisites (see RELEASING.md):
-#   - a Trusted Publisher on npmjs.com that permits staging (not direct publish);
-#   - an npm username in the NPM_USER repository variable for the approval link.
+# One-time prerequisite (see RELEASING.md): a Trusted Publisher on npmjs.com with
+# "Allow npm publish" checked.
 
 name: release
 
@@ -27,7 +26,7 @@ on:
 
 permissions:
   contents: write        # push the release commit + tag
-  id-token: write        # OIDC token npm exchanges for a staging credential
+  id-token: write        # OIDC token npm exchanges for a publish credential
 
 jobs:
   release:
@@ -59,8 +58,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       # One step so a single outcome drives the notification. Order matters:
-      # stage BEFORE commit+tag, so a failed stage does not consume the version —
-      # the next manual run recomputes the same version and retries cleanly.
+      # publish BEFORE commit+tag, so a failed publish does not consume the
+      # version — the next manual run recomputes the same version and retries.
       - name: Release
         id: release
         env:
@@ -80,7 +79,7 @@ jobs:
           node scripts/bump.mjs "$NEXT"
 
           {
-            npx --yes npm@11.15.0 stage publish
+            npx --yes npm@11.15.0 publish
             git add package.json plugin.json .claude-plugin/plugin.json
             git commit -m "chore(release): $NEXT"
             git tag "v$NEXT"
@@ -101,7 +100,6 @@ jobs:
           RELEASE_LOG: ${{ runner.temp }}/release.log
           START_EPOCH: ${{ steps.start.outputs.epoch }}
           PACKAGE: explainer-video-from-coursework
-          NPM_USER: ${{ vars.NPM_USER }}
           SMTP_HOST: ${{ vars.SMTP_HOST }}
           SMTP_PORT: ${{ vars.SMTP_PORT }}
           SMTP_USER: ${{ vars.SMTP_USER }}

@@ -1,7 +1,7 @@
 # Releasing
 
 **One** npm package ships from this repo, and it serves all four platforms. GitHub Actions
-stages it; you approve it. No npm token exists anywhere, and no publish ever runs on a laptop.
+publishes it on demand. No npm token exists anywhere, and no publish ever runs on a laptop.
 
 | package | read by |
 |---|---|
@@ -28,48 +28,28 @@ The form asks two things:
 - **version** — optional. Type an explicit version like `0.3.0` to override the bump.
 
 Click **Run workflow** and CI does the rest: it computes the next version from the latest tag,
-bumps `package.json`, `plugin.json` and `.claude-plugin/plugin.json` in lockstep, runs
-`npm stage publish` (queuing a candidate), and only then commits + tags `v<version>`. If the stage
-fails, nothing is committed or tagged — the next run recomputes the same version and retries cleanly.
+bumps `package.json`, `plugin.json` and `.claude-plugin/plugin.json` in lockstep, publishes
+straight to npm, and only then commits + tags `v<version>`. If the publish fails, nothing is
+committed or tagged — the next run recomputes the same version and retries cleanly.
 
-Then approve what CI queued — **in the browser**:
+The release is **live immediately** — there is no second approval step. The manual click is the
+single gate: clicking Run workflow *is* the "ship this now" decision.
 
-> **npmjs.com → Settings → Staged Packages**
-> (`https://www.npmjs.com/settings/<your-username>/staged-packages`)
-> → find the version → **Approve**. There is also **Inspect**, which downloads the tarball so
-> you can open it *before* it goes live — the whole reason the extra click is worth it.
->
-> No terminal is involved, and nothing is installable until you approve it.
+## Why direct, not staged
 
-The CLI works too, if you'd rather:
+npm offers **staged publishing** — CI queues a version, then a human approves it in the browser
+before it goes live. We used it for a while and dropped it: with a manual release, that approval
+was a *second* gate on top of the click, and it caused version drift — a rejected staged version
+left a dangling git tag, so the next release skipped a version number that had never actually
+shipped.
 
-```sh
-npx npm@latest stage list                      # the staged version, with its stage id
-npx npm@latest stage download <stage-id>       # optional: open the tarball and look
-npx npm@latest stage approve <stage-id> --otp <6-digit code>
-```
-
-`npx npm@latest` rather than plain `npm`, because the npm on this laptop is **10.9.8**,
-which predates `npm stage` entirely.
-
-**One approval per release.** On the CLI, `npm stage reject <stage-id>` drops a queued
-version instead of approving it.
-
-## Why staged rather than direct
-
-The trusted publisher is configured with **"Allow npm publish" unchecked**, so the
-workflow's OIDC credential can queue a version but cannot make it live. That closes a hole
-provenance does *not* close: if the release workflow were ever compromised, the provenance
-attestation would still verify perfectly — because the code really did come from this repo.
-Staging is the control that stops it, since a human sees the version before anyone can
-install it. `npm stage download` exists so you can inspect the tarball first.
-
-Checking that box instead would make a tag go live with no human in the loop; npm labels it
-"Not recommended" for exactly this reason.
+Direct publish has exactly one gate (the click) and one source of truth (the tag and the npm
+version are created together). For a solo maintainer who already has to click the button, the
+second gate was pure friction.
 
 ## One-time setup: a Trusted Publisher
 
-npm has to be told which workflow may stage. Once, for this one package, at
+npm has to be told which workflow may publish. Once, for this one package, at
 `https://www.npmjs.com/package/explainer-video-from-coursework/access`:
 
 | field | value |
@@ -79,12 +59,8 @@ npm has to be told which workflow may stage. Once, for this one package, at
 | Repository | `ai-explainer-video` |
 | Workflow filename | `release.yml` |
 | Environment name | **leave empty** — the workflow declares no `environment:` |
-| Allow npm publish | **leave unchecked** — this is what forces staging |
+| Allow npm publish | **check it** — this is what permits direct publish |
 | Allow npm dist-tag | **leave unchecked** — see below |
-
-Also set **Publishing access** to *"Require two-factor authentication and disallow bypass 2fa
-tokens"*. Your documented fallback (`npm publish --otp`) already satisfies 2FA, so this costs
-you nothing and closes the one path that ships without a second factor.
 
 The filename and environment must match the workflow exactly, or npm rejects the request.
 
@@ -95,10 +71,11 @@ The filename and environment must match the workflow exactly, or npm rejects the
 - **Provenance comes free.** Under trusted publishing the npm CLI emits a provenance
   attestation automatically, so `--provenance` is no longer needed. Provenance requires a
   public source repo; this one is public.
-- **2FA moves to the approval**, where a human is — instead of a token that bypasses it.
-- **Token publishing is being retired.** npm's own site carries the notice: tokens that bypass
-  2FA are being restricted — account changes from August 2026, and **direct publishing from
-  January 2027**. This setup is the destination, not a detour.
+- **The human gate is the trigger.** The only way to publish is a maintainer clicking Run workflow —
+  no long-lived token to leak, no way for a stray push to ship silently.
+- **Publish tokens are being retired; trusted publishing is the replacement.** npm is restricting
+  2FA-bypassing access tokens (account changes August 2026, direct token publish from January 2027).
+  OIDC trusted publishing is unaffected — which is why this uses it.
 
 ## The release email
 
@@ -114,15 +91,15 @@ Four things it does deliberately:
 
 - **It emails once per release, never per commit.** There is no push trigger, so ordinary commits
   never run the notifier at all. The only email is for the release you deliberately triggered.
-- **It says "staged", not "released".** A green run means the version is queued in npm's staging area,
-  so the most useful line in the mail is the approval link, not the commit hash.
+- **It says "published", not "queued".** A green run means the version is live on npm, so the mail
+  links the package page rather than asking for an approval click.
 - **Unconfigured is not broken.** With no SMTP settings it warns in the log and exits 0: a notifier
   you have not set up yet must not fail a release that did succeed.
 - **A configured send that fails exits 1.** The opposite case is worth a red run. You asked to be
   told about every release, and silence is the one outcome you cannot debug — so if the mail cannot
   go out, the run should say so. GitHub emails the actor when a run fails, which makes that mail the
-  backstop telling you the notifier itself broke. Either way the release is unaffected: it was staged
-  and tagged before this step ran.
+  backstop telling you the notifier itself broke. Either way the release is unaffected: it was
+  published and tagged before this step ran.
 
 ### One-time setup (Gmail)
 
@@ -167,7 +144,6 @@ password, though — SMTP has no send-only scope, so the token covers full Gmail
    | variable | `MAIL_FROM` | the same address |
    | variable | `MAIL_TO` | where it goes |
    | variable | `MAIL_FROM_NAME` | optional display name — see below |
-   | variable | `NPM_USER` | your npm username (`akshaydev17`) |
 
    There is no `SMTP_PASS`: the access token is minted fresh on every run from the refresh token, and
    the refresh token lives in a secret.
@@ -198,7 +174,6 @@ password, though — SMTP has no send-only scope, so the token covers full Gmail
    | variable | `MAIL_FROM` | the same address — Gmail sends as the authenticated account |
    | variable | `MAIL_TO` | where it goes; comma-separated for several |
    | variable | `MAIL_FROM_NAME` | optional display name — see below |
-   | variable | `NPM_USER` | your npm username (`akshaydev17`) |
 
 4. Prove it:
 
@@ -233,7 +208,7 @@ The renderer has a dry run that needs no credentials:
 python -m pip install jinja2
 GITHUB_REPOSITORY=akshayDev17/ai-explainer-video GITHUB_RUN_ID=1 GITHUB_SHA=abc1234 \
 GITHUB_ACTOR=you GITHUB_REF_NAME=main VERSION=0.2.0 RELEASED=true RELEASE_OUTCOME=success \
-PACKAGE=explainer-video-from-coursework NPM_USER=yourname \
+PACKAGE=explainer-video-from-coursework \
 python .github/scripts/notify.py --dry-run --out /tmp/preview
 ```
 
@@ -259,7 +234,7 @@ SMTP integration for the account will stop"* until you pay from $19.95/mo.
 
 GitHub will email you about workflow runs natively — *Settings → Notifications → System → Actions* —
 with no code at all. But the template is fixed: no version, no tag, no error text, and no link to the
-npm approval page. It cannot replace this one.
+package page. It cannot replace this one.
 
 It is still worth leaving on, because it is the **backstop**. If the Gmail app password is revoked or
 the SMTP settings go stale, this notifier fails its step by design — so the run goes red and GitHub's
@@ -275,21 +250,20 @@ when a rollback workflow exists.
 
 ## Gotchas worth knowing
 
-- **The staged publish pins npm ≥ 11.15.0.** Two floors: the OIDC token exchange landed in 11.5.1,
-  and `npm stage` needs 11.15.0. The workflow runs `npx --yes npm@11.15.0 stage publish`, exactly
-  because Node 22's bundled npm 10 is too old. Staging also needs Node ≥ 22.14.0;
-  `node-version: "22"` resolves to the newest 22.x.
-- **`registry-url` is required** in `setup-node`, or the stage fails with `ENEEDAUTH`. The workflow's
-  `npx npm stage publish` reads the registry config that `setup-node` writes.
+- **The publish pins npm 11.15.0.** Node 22's bundled npm 10 is too old for the OIDC token exchange
+  (which landed in 11.5.1), so the workflow runs `npx --yes npm@11.15.0 publish`. Node ≥ 22.14.0 is
+  also required; `node-version: "22"` resolves to the newest 22.x.
+- **`registry-url` is required** in `setup-node`, or the publish fails with `ENEEDAUTH`. The
+  workflow's `npx npm publish` reads the registry config that `setup-node` writes.
 - **`repository.url` must point at this GitHub repo.** Provenance is emitted automatically
   under trusted publishing, and npm validates that field against the repository the workflow
-  ran in — without it the stage fails
+  ran in — without it the publish fails
   `422 ... Error verifying sigstore provenance bundle: "repository.url" is ""`. A package with
   no `repository` field cannot use trusted publishing at all.
 - **The gate is the manual button, not the push.** Normal commits to `main` do nothing; only a
   manually-dispatched run releases. The version is committed and tagged only after a successful
-  stage, so a failed stage never consumes a version.
-- **Nothing is live until you approve.** A green workflow run means "queued", not "released".
+  publish, so a failed publish never consumes a version.
+- **The release is live immediately.** A green run means the version is on npm, not queued.
 - **DSH needs no dependency declared.** `lib/index.js` imports
   `@deepseek-ai/dsh-skill-filesystem` without declaring it: the harness's module fallback
   supplies it, verified end to end. That keeps the manifest Claude Code and Codex install
@@ -297,11 +271,10 @@ when a rollback workflow exists.
 
 ## If a release fails
 
-- **The stage failed** — the release email carries the tail of `release.log`. Because staging happens
-  *before* commit + tag, nothing was committed or tagged: the next manual run recomputes the same
-  version and retries cleanly.
-- **Staged but wrong** — `npm stage reject <stage-id>`, fix, and run the release workflow again.
-- **Already approved and bad** — npm will not let you republish that version. Release the next one and
+- **The publish failed** — the release email carries the tail of `release.log`. Because publishing
+  happens *before* commit + tag, nothing was committed or tagged: the next manual run recomputes the
+  same version and retries cleanly.
+- **Published and bad** — npm will not let you republish that version. Release the next one and
   `npm deprecate explainer-video-from-coursework@X.Y.Z "broken — use <next>"`.
 
 ## Deliberately not wired
@@ -309,4 +282,4 @@ when a rollback workflow exists.
 - **A GitHub Release per tag** — a `gh release create` step after the tag push.
 - **Tag protection** — a repository rule on `v*` stops a tag being moved or deleted.
 - **A post-publish smoke test** — `npm view <pkg> version` and a clean install in a scratch
-  directory, after approval, so a bad tarball is caught before anyone consumes it.
+  directory, after publish, so a bad tarball is caught before anyone consumes it.
