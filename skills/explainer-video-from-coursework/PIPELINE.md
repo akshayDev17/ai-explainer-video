@@ -48,7 +48,7 @@ command when a prerequisite is missing.
 ### 1 · `/plan` — decompose the source
 
 ```bash
-node tools/planner.mjs <notesDir> --out out/<name> --max-min 14
+node tools/planner.mjs <notesDir> --out out/<name> --max-min 25
 ```
 
 There is **no dedupe flag and no name-based inference**. The planner excludes
@@ -266,7 +266,7 @@ whole track at every segment boundary — a bug this stage used to have.
 
 ```bash
 # 1 + 2 — plan, then enrich
-node tools/planner.mjs <lld-notes> --out out/lld --max-min 14
+node tools/planner.mjs <lld-notes> --out out/lld --max-min 25
 #     → agent writes out/lld/enrichment.json
 node tools/apply-enrichment.mjs --plan out/lld/plan.json --enrichment out/lld/enrichment.json
 

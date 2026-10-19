@@ -15,7 +15,7 @@
 
    Usage:
      node tools/script-check.mjs --script out/<name>/scripts/NN-<slug>.json \
-                                 [--plan out/<name>/plan.enriched.json] [--max-min 14]
+                                 [--plan out/<name>/plan.enriched.json] [--max-min 25]
    ========================================================================== */
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
@@ -31,7 +31,7 @@ const flag = (n, d) => {
 /* same cost model as the planner, so the two are comparable */
 const WPM = parseFloat(flag('wpm', DEFAULT_WPM));
 const EXPANSION = parseFloat(flag('expansion', DEFAULT_EXPANSION));
-const MAX_MIN = parseFloat(flag('max-min', '14'));
+const MAX_MIN = parseFloat(flag('max-min', '25'));
 const MIN_FILL = parseFloat(flag('min-fill', '0.55'));   // script must reach 55% of target
 
 const scriptPath = flag('script');
@@ -101,6 +101,13 @@ if (target && estVideo > target * 1.25) {
 let coverageLine = null;
 if (planPath && existsSync(planPath)) {
   const plan = JSON.parse(readFileSync(planPath, 'utf8'));
+  /* The plan was split at its own recorded cap. If this run's cap disagrees, the plan
+     is from a different model generation — say so rather than silently allowing a
+     script far longer than the plan ever expected. */
+  const planCap = plan.model && plan.model.maxVideoMin;
+  if (planCap != null && Math.abs(planCap - MAX_MIN) > 1e-9) {
+    warnings.push(`plan was built with maxVideoMin=${planCap} but this check uses ${MAX_MIN} — the plan predates the current default (re-plan to change the split, which also reshuffles video indices)`);
+  }
   const video = plan.videos.find(v => v.index === script.videoIndex);
   if (!video) {
     warnings.push(`video ${script.videoIndex} not found in the plan — skipping coverage check`);

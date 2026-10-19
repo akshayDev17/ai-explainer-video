@@ -21,7 +21,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { resolve } from 'node:path';
+import { resolve, join, dirname } from 'node:path';
 import { WPM as DEFAULT_WPM, EXPANSION as DEFAULT_EXPANSION } from './model.mjs';
 
 const argv = process.argv.slice(2);
@@ -171,13 +171,62 @@ if (measured) {
    is a SHORTFALL, and a shortfall is a prompt, not a failure: hold the frame, pad
    the audio gap, or extend the narration. A beat that cannot fit inside its
    segment at all is a genuine error. */
-const BEATS = Array.isArray(global.window.SCENE_BEATS) ? global.window.SCENE_BEATS.slice() : null;
+/* Beats may be declared three ways:
+     { beats: [{ id, line, min }] }   line-anchored — the contract (times resolved)
+     [{ id, at, min }]                legacy bare array with hand-written seconds
+   Line-anchored beats get their `at` from beats.json (written by resolve-beats),
+   so a scene can no longer carry a guessed second. A beat that still declares a
+   raw `at` without a `line` is reported as a defect, not silently honoured. */
+const declaredBeats = (() => {
+  const d = global.window.SCENE_BEATS;
+  if (!d) return null;
+  if (Array.isArray(d)) return d.slice();
+  return Array.isArray(d.beats) ? d.beats.slice() : null;
+})();
+
+const beatsPath = (() => {
+  const w = flag('work', null);
+  if (w) return join(String(w), 'beats.json');
+  return timelinePath ? join(dirname(String(timelinePath)), 'beats.json') : null;
+})();
+let resolvedMap = null;
+if (beatsPath && existsSync(beatsPath)) {
+  try {
+    const doc = JSON.parse(readFileSync(beatsPath, 'utf8'));
+    const seg = doc.segments?.[segmentKey];
+    if (seg) resolvedMap = new Map(seg.beats.map(b => [b.id, b]));
+  } catch { /* unreadable: fall through to the checks below */ }
+}
+
+let BEATS = declaredBeats;
+if (BEATS && BEATS.length) {
+  BEATS = BEATS.map(b => {
+    if (b.line != null) {
+      if (!resolvedMap) {
+        errors.push(`beat "${b.id}" is line-anchored but beats.json has no entry for "${segmentKey}" — run tools/resolve-beats.mjs`);
+        return b;
+      }
+      const r = resolvedMap.get(b.id);
+      if (!r) { errors.push(`beat "${b.id}" (line ${b.line}) is not in beats.json — re-run tools/resolve-beats.mjs`); return b; }
+      return { ...b, at: r.at };
+    }
+    if (b.at != null) {
+      warnings.push(`beat "${b.id}" uses a hand-written \`at: ${b.at}\` — bind it to a narration \`line\` instead; a guessed second cannot be validated`);
+    }
+    return b;
+  });
+}
 if (BEATS && BEATS.length && measured) {
   const narr = measured.duration;
   const pad = measured.pad || 0;
   /* a beat can occupy the whole window — narration, the declared `pad` hold, and
      the built-in inter-segment gap */
-  const winEnd = TOTAL - LEAD;
+  /* TOTAL is already WINDOW-RELATIVE (see the note above the resolver), and a
+     beat's `at` is window-relative too — so the bound is TOTAL itself. It used to
+     subtract LEAD, which quietly removed the last 0.6s of every window; that only
+     looked fine while beats were hand-placed nowhere near the end. Line-anchored
+     beats legitimately run to the last spoken word, which exposed it. */
+  const winEnd = TOTAL;
   BEATS.sort((a, b) => (a.at || 0) - (b.at || 0));
   const last = BEATS[BEATS.length - 1];
   const visualNeed = (last.at || 0) + (last.min || 0);

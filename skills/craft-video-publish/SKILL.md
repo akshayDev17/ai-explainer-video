@@ -7,15 +7,24 @@ description: Generate YouTube chapters and English captions for one finished vid
 
 > Part of the `explainer-video-from-coursework` pipeline — **stage 6 of 8**.
 >
-> The pipeline's tools and scene hosts live in the sibling `explainer-video-from-coursework` skill: run them as `node ../explainer-video-from-coursework/tools/<tool>.mjs`, resolved against this skill's folder. Run from the **project**, so `out/` scratch lands beside your notes.
+> The pipeline's tools and scene hosts live in the sibling `explainer-video-from-coursework` skill: run them as `node ../explainer-video-from-coursework/tools/<tool>.mjs`, resolved against this skill's folder. Run from the **scratch root** — the directory holding `out/`, which Stage 0 fixes (default: beside your notes) — so every `out/<name>/…` path in this stage resolves.
+
+> **Timing.** Bracket the stage with the stamp pair so the series accrues a per-video audit;
+> `end` must run before the stage counts as done (see *Timing* in the main skill):
+>
+> ```bash
+> node ../explainer-video-from-coursework/tools/stamp.mjs begin --out out/<name> --video <NN> --stage 6
+> node ../explainer-video-from-coursework/tools/stamp.mjs end   --out out/<name> --video <NN> --stage 6
+> ```
 
 **Prerequisites:** `out/<name>/<NN>/timeline.json` and `narration/<key>.src` — both
 final once the scene stage exits.
 
 The agent writes `out/<name>/<NN>/publish.json` — a chapter list (`segments` keys +
 `title`) and a `blurb`. The tool resolves timecodes, validates, and emits **two files**
-to `--dest`: `description.md` (the blurb, then the chapter block, paste-ready plain
-text) and `captions.srt`.
+into the video's own folder, `--dest/<NN>-<slug>/`: `description.md` (the blurb, then
+the chapter block, paste-ready plain text) and `captions.srt`. The folder name is
+derived from the script's `videoIndex` + title — do not pick it by hand.
 
 - **Chapters** — `M:SS Title`, start-time only, one per segment by default; grouping is
   two keys in one list, and a chapter's time is the first segment's window start.
@@ -35,7 +44,7 @@ absent chapters are not a formatting fault: `0:00` (one digit), a `-` after the 
 blurb above the block and a 2:39 runtime were each verified live on eligible channels, and
 the hard checks above already mirror YouTube's rules.
 
-**Done when:** `publish` exits 0 and both files land beside the MP4.
+**Done when:** `publish` exits 0 and both files land in `--dest/<NN>-<slug>/` beside the MP4.
 
 ## Maintenance
 

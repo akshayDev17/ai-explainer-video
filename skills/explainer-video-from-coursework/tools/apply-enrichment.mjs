@@ -199,7 +199,8 @@ if (problems.length) {
 }
 writeFileSync(join(OUT_DIR, 'plan.enriched.md'), L.join('\n') + '\n');
 
-console.log(L.slice(0, 18).join('\n'));
+/* print the whole final list — every video, not the first handful */
+console.log(L.join('\n'));
 console.log(`\n[out] ${join(OUT_DIR, 'plan.enriched.json')}`);
 console.log(`[out] ${join(OUT_DIR, 'plan.enriched.md')}`);
 if (problems.length) { console.log(`\n⚠️  ${problems.length} validation problem(s)`); process.exitCode = 2; }

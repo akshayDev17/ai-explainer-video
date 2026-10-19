@@ -6,7 +6,7 @@
    what form, in what order — and proves nothing was silently dropped.
 
    Usage:
-     node tools/planner.mjs <sourceDir> --out out/<name> [--max-min 14] [--title "..."]
+     node tools/planner.mjs <sourceDir> --out out/<name> [--max-min 25] [--title "..."]
 
    Pipeline position:
      source notes -> [PLANNER] -> plan.json -> script -> scene -> audio -> video
@@ -20,14 +20,15 @@
    ========================================================================== */
 
 import { readdirSync, readFileSync, statSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
-import { join, relative, extname, basename, sep } from 'node:path';
+import { join, relative, extname, basename, sep, dirname, resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { WPM, EXPANSION } from './model.mjs';
 
 /* ---------------- tunable model ---------------- */
 const DEFAULTS = {
   wpm: WPM,          // narration words per minute — measured, see model.mjs
   expansion: EXPANSION, // visual/beat overhead on top of pure narration time — measured
-  maxMin: 14,        // per-video hard cap
+  maxMin: 25,        // per-video hard cap (aligned to the 30-min transcribe ceiling)
   minMin: 2.5,       // below this, try to merge with a sibling
   codeNarration: 0.15,  // fraction of code words that get narrated (you show, then explain briefly)
   tableNarration: 0.40, // tables get condensed, not read out
@@ -35,11 +36,16 @@ const DEFAULTS = {
 
 /* ---------------- args ---------------- */
 const argv = process.argv.slice(2);
-const sourceDir = argv.find(a => !a.startsWith('--'));
+// The source is the first bare argument — but a flag's *value* is also bare, so
+// skip anything that followed a flag which takes one.
+const VALUED = new Set(['--out', '--max-min', '--min-min', '--wpm', '--expansion', '--title', '--exclude']);
+const sourceDir = argv.find((a, i) => !a.startsWith('--') && !(i > 0 && VALUED.has(argv[i - 1])));
 const flag = (n, d) => {
   const i = argv.indexOf('--' + n);
   return i === -1 ? d : argv[i + 1];
 };
+// Repeatable: --exclude a --exclude b (a published destination usually needs one).
+const flags = (n) => argv.flatMap((a, i) => (a === '--' + n && argv[i + 1] ? [argv[i + 1]] : []));
 if (!sourceDir) {
   console.error('usage: node tools/planner.mjs <sourceDir> --out <outDir> [options]');
   process.exit(1);
@@ -49,6 +55,7 @@ const CFG = {
   wpm: parseFloat(flag('wpm', DEFAULTS.wpm)),
   expansion: parseFloat(flag('expansion', DEFAULTS.expansion)),
   maxMin: parseFloat(flag('max-min', DEFAULTS.maxMin)),
+  force: !!flag('force', false),   // overwrite a plan whose model differs (see the guard below)
   minMin: parseFloat(flag('min-min', DEFAULTS.minMin)),
   outDir: flag('out', 'out/plan'),
   title: flag('title', basename(sourceDir.replace(/\/+$/, ''))),
@@ -62,11 +69,13 @@ const PACK_CAP = CAP_SEC * 0.97;
 /* =============================================================================
    1. Walk the source tree
    ========================================================================== */
+const EXCLUDE = flags('exclude').map(d => resolve(d));
 function walk(dir, base = dir) {
   const out = [];
   for (const name of readdirSync(dir)) {
     if (name.startsWith('.')) continue;
     const p = join(dir, name);
+    if (EXCLUDE.some(x => resolve(p) === x || resolve(p).startsWith(x + sep))) continue;
     const st = statSync(p);
     if (st.isDirectory()) out.push(...walk(p, base));
     else out.push({ path: p, rel: relative(base, p), ext: extname(p).toLowerCase(), bytes: st.size });
@@ -84,6 +93,19 @@ if (!statSync(sourceDir).isDirectory()) {
 }
 const files = walk(sourceDir);
 const mdFiles = files.filter(f => f.ext === '.md');
+
+/* A destination placed inside the source gets re-ingested on the next plan: the
+   sidecars we published (`description.md`, `captions.srt`) read as course notes and
+   turn into phantom videos. Detect the tell-tale name and say how to fix it. */
+const sidecars = mdFiles.filter(f => basename(f.path) === 'description.md');
+if (sidecars.length) {
+  const dirs = [...new Set(sidecars.map(f => dirname(f.path)))];
+  console.error(`\n[planner] ${sidecars.length} of the ${mdFiles.length} input files are `
+    + '`description.md` — that is the name this pipeline publishes. They are outputs, not notes.');
+  for (const d of dirs.slice(0, 4)) console.error(`          ${relative(sourceDir, d) || '.'}/description.md`);
+  console.error('          Pass --exclude <that directory> (repeatable) — or --exclude your');
+  console.error('          destination — so published sidecars never re-enter the plan.\n');
+}
 const codeFiles = files.filter(f => ['.java', '.py', '.ts', '.js', '.go', '.cpp', '.c', '.rs'].includes(f.ext));
 
 // Refuse to plan nothing. An empty or all-code directory used to produce a
@@ -471,7 +493,74 @@ const plan = {
   })),
 };
 
+/* A plan records the model that produced it, and video INDICES are keyed by that
+   split. Re-planning with a different cap produces a different number of videos, so
+   any enrichment (titles/skips, keyed by index) silently stops pointing at the video
+   it was written for. That is a data-loss hazard, not a cosmetic mismatch, so it has
+   to be opted into rather than discovered later. */
+const prevPlanPath = join(CFG.outDir, 'plan.json');
+const enrichedPath = join(CFG.outDir, 'plan.enriched.json');
+if (existsSync(prevPlanPath)) {
+  let prev = null;
+  try { prev = JSON.parse(readFileSync(prevPlanPath, 'utf8')); } catch { /* unreadable: treat as none */ }
+  const prevCap = prev && prev.model ? prev.model.maxVideoMin : null;
+  const prevCount = prev && Array.isArray(prev.videos) ? prev.videos.length : null;
+  const capChanged = prevCap != null && Math.abs(prevCap - CFG.maxMin) > 1e-9;
+  const countChanged = prevCount != null && prevCount !== videos.length;
+  if (capChanged || countChanged) {
+    const why = [];
+    if (capChanged) why.push(`cap ${prevCap} min -> ${CFG.maxMin} min`);
+    if (countChanged) why.push(`${prevCount} videos -> ${videos.length} videos`);
+    const enriched = existsSync(enrichedPath);
+    const msg = `[planner] existing plan in ${CFG.outDir} differs: ${why.join(', ')}`;
+    if (enriched) {
+      if (!CFG.force) {
+        console.error(`\n${msg}`);
+        console.error('  plan.enriched.json is present, and enrichment is keyed by video INDEX —');
+        console.error('  re-planning would silently repoint every curated title at a different video.');
+        console.error('  Re-run with --force to overwrite, or use a different --out to compare side by side.');
+        process.exit(4);
+      }
+      console.error(`\n${msg}`);
+      console.error('  --force given: overwriting an enriched plan. Re-run apply-enrichment afterwards.');
+    } else if (capChanged) {
+      console.error(`\n${msg}`);
+      console.error('  (no plan.enriched.json yet, so nothing is lost — overwriting.)');
+    }
+  }
+}
+
+/* Scratch is not a throwaway: one 90-video series carries hundreds of MB of WAVs and
+   MP4s. If the scratch root sits inside a git work tree that does not ignore it, the
+   next `git add -A` sweeps it in. Verify the ignore rule; append it only if missing. */
+function ensureScratchIgnored(outDir) {
+  const target = dirname(outDir);            // the `out/` itself, not the per-series dir
+  try {
+    const root = execFileSync('git', ['-C', target, 'rev-parse', '--show-toplevel'],
+      { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    if (!root) return;
+    try {
+      execFileSync('git', ['-C', root, 'check-ignore', '-q', target], { stdio: 'ignore' });
+      return;                                // already ignored — stay silent
+    } catch { /* not ignored: fall through */ }
+    if (target === root) return;             // scratch root is the repo root; leave it alone
+    const rel = relative(root, target).split(sep).join('/');
+    const gi = join(root, '.gitignore');
+    const before = existsSync(gi) ? readFileSync(gi, 'utf8') : '';
+    const already = before.split('\n').some((l) => {
+      const t = l.trim().replace(/\/$/, '');
+      return t === rel || t === `/${rel}`;
+    });
+    if (already) return;                     // ignored, just not by git's checker
+    const pad = !before || before.endsWith('\n') ? '' : '\n';
+    writeFileSync(gi, `${before}${pad}\n# explainer-video scratch — grows to hundreds of MB\n/${rel}/\n`);
+    console.log(`[gitignore] added /${rel}/ to ${relative(process.cwd(), gi) || '.gitignore'}`
+      + ' (scratch is large; it must not be committable)');
+  } catch { /* no git, or not a work tree — nothing to ignore */ }
+}
+
 mkdirSync(CFG.outDir, { recursive: true });
+ensureScratchIgnored(CFG.outDir);
 writeFileSync(join(CFG.outDir, 'plan.json'), JSON.stringify(plan, null, 2));
 
 /* ---- human-readable report ---- */
@@ -516,8 +605,12 @@ if (orphans.length) {
 }
 writeFileSync(join(CFG.outDir, 'plan.md'), L.join('\n') + '\n');
 
-/* ---- console summary ---- */
-console.log(L.slice(0, 12).join('\n'));
+/* ---- console summary ----
+   Print the WHOLE plan, not a sample. The first 12 lines are the title, stats and the
+   table header — i.e. slicing here printed the header and zero video rows, which
+   quietly contradicted this tool's own rule that every number is printed so the plan
+   can be argued with. A big plan is long; hiding rows is worse than being long. */
+console.log(L.join('\n'));
 console.log(`\n[out] ${join(CFG.outDir, 'plan.json')}`);
 console.log(`[out] ${join(CFG.outDir, 'plan.md')}`);
 if (orphans.length) { console.log(`\n⚠️  ${orphans.length} orphaned section(s)`); process.exitCode = 2; }

@@ -9,7 +9,7 @@ description: Retitle and curate the videos in an explainer-video plan — write 
 > once-per-series stage. Self-contained: it operates on an existing `plan.json`. For a
 > full run, use the main skill instead.
 >
-> The pipeline's tools and scene hosts live in the sibling `explainer-video-from-coursework` skill: run them as `node ../explainer-video-from-coursework/tools/<tool>.mjs`, resolved against this skill's folder. Run from the **project**, so `out/` scratch lands beside your notes.
+> The pipeline's tools and scene hosts live in the sibling `explainer-video-from-coursework` skill: run them as `node ../explainer-video-from-coursework/tools/<tool>.mjs`, resolved against this skill's folder. Run from the **scratch root** — the directory holding `out/`, which Stage 0 fixes (default: beside your notes) — so every `out/<name>/…` path in this stage resolves.
 
 **Prerequisites:** `out/<name>/plan.json` from the plan stage.
 
@@ -23,8 +23,10 @@ node ../explainer-video-from-coursework/tools/apply-enrichment.mjs --plan out/<n
 
 Writes `plan.enriched.json` and `plan.enriched.md`.
 
-**Done when:** the run exits **0** (no validation problems) and `plan.enriched.md`
-shows the final video list.
+**Done when:** the run exits **0** (no validation problems), `plan.enriched.md` shows
+the final video list, **and that full list has been shown to the user** — every
+surviving video plus the removals with their reasons. Never summarise it into a sample:
+`apply-enrichment` prints the whole table, and the whole table is what gets reviewed.
 
 **Title contract.** The planner's titles are placeholders. Replace each with a real
 title: descriptive, **unique**, written for a human scrolling YouTube — never a

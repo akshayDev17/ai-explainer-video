@@ -5,7 +5,7 @@
    The agent writes out/<name>/<NN>/publish.json (chapters[] + blurb); this tool
    resolves each chapter's timecode from the measured windows, generates the SRT
    from narration/<key>.src, validates YouTube's chapter rules, and writes the two
-   deliverables beside the MP4:
+   deliverables into the video's destination folder (`--dest/<NN>-<slug>/`) beside the MP4:
 
        description.md   — the blurb, then the chapter block, paste-ready plain text
        captions.srt     — one cue per segment, verbatim spoken text
@@ -17,8 +17,9 @@
    ========================================================================== */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { videoDir } from './naming.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -45,6 +46,14 @@ if (!existsSync(publishPath)) { console.error(`no publish.json at ${publishPath}
 
 const tl = JSON.parse(readFileSync(timelinePath, 'utf8'));
 const pub = JSON.parse(readFileSync(publishPath, 'utf8'));
+
+/* Read the script once, up front, so the `--dest` copy and the cross-check below
+   share one parse and can derive the per-video folder from `videoIndex` + title. */
+let script = null;
+if (SCRIPT) {
+  const scriptPath = resolve(SCRIPT);
+  if (existsSync(scriptPath)) script = JSON.parse(readFileSync(scriptPath, 'utf8'));
+}
 const windows = tl.windows || {};
 const segments = tl.segments || [];
 const errors = [];
@@ -123,10 +132,8 @@ for (let i = 1; i < cues.length; i++) {
 
 /* ---- optional cross-check against the script ---- */
 if (SCRIPT) {
-  const scriptPath = resolve(SCRIPT);
-  if (!existsSync(scriptPath)) warnings.push(`--script not found: ${scriptPath}`);
+  if (!script) warnings.push(`--script not found or unreadable: ${SCRIPT}`);
   else {
-    const script = JSON.parse(readFileSync(scriptPath, 'utf8'));
     const scriptKeys = new Set((script.segments || []).map(s => s.key));
     segments.forEach(s => { if (!scriptKeys.has(s.key)) warnings.push(`timeline has segment "${s.key}" not present in the script`); });
     scriptKeys.forEach(k => { if (!windows[k]) warnings.push(`script has segment "${k}" with no timeline window`); });
@@ -163,8 +170,11 @@ console.log(`\n[out] ${descOut}`);
 console.log(`[out] ${srtOut}`);
 
 if (DEST) {
-  mkdirSync(DEST, { recursive: true });
-  copyFileSync(descOut, join(DEST, 'description.md'));
-  copyFileSync(srtOut, join(DEST, 'captions.srt'));
-  console.log(`[dest] ${DEST}`);
+  /* One folder per video: <dest>/<NN>-<slug>/. The folder, not the filename, is the
+     namespace, so the fixed description.md / captions.srt can never collide. */
+  const dir = join(resolve(DEST), videoDir(script, basename(workDir)));
+  mkdirSync(dir, { recursive: true });
+  copyFileSync(descOut, join(dir, 'description.md'));
+  copyFileSync(srtOut, join(dir, 'captions.srt'));
+  console.log(`[dest] ${dir}`);
 }

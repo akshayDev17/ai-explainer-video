@@ -16,8 +16,11 @@ The skill's own files (`tools/`, `src/`, `scenes/`) live in **this skill's folde
 `tools/<tool>.mjs` against it; the tools then self-locate everything else, so they run
 regardless of cwd. The eight `craft-video-<stage>` skills sit beside this one under `skills/`.
 But the work and scratch paths (`out/`, `--work`, `--out`, `<notesDir>`) resolve against the
-**current directory** — run every command from the **project** (where `out/` scratch and the
-source notes live), never from the skill's install folder.
+**current directory**, so run every command from the **scratch root** — the directory that
+holds `out/`. Stage 0 fixes it once, defaulting beside the source. Never run from the skill's
+install folder, and never from whatever directory you happen to be in: the wrong root
+scatters a few hundred MB of scratch somewhere no `.gitignore` covers and nobody will think
+to look.
 
 > **For maintainers — the dual-file rule.** This skill is deliberately **monolithic**:
 > the whole pipeline lives here, so a full run loads in one pass. Every stage *also* ships
@@ -63,35 +66,67 @@ section, then re-run.
   run). The series is the full deliverable, but each video is produced
   independently.
 
-## Stage 0 — `/inputs`: source and destination
+## Stage 0 — `/inputs`: source, destination, scratch
 
-Ask for the two things the user must decide; everything else is the skill's. If the
-invocation already names them, skip. Ask **together, one prompt, with a default** for
-the destination so the user only adjusts, never invents:
+Ask for what the user must decide; everything else is the skill's. If the invocation
+already names them, skip. Ask **together, one prompt, with defaults** for destination
+and scratch so the user only adjusts, never invents:
 
 - **Source** — the notes directory. If they referenced a path (`@…`), use it;
   otherwise list candidate directories that contain `.md` files and let them pick.
 - **Destination** — where the finished video(s) land. Default: `videos/` beside the
-  source. Scratch goes to a gitignored `out/<name>/` the user never opens; only the
-  finished `.mp4` is copied out (assemble's `--dest`).
+  source. Each finished video lands in its **own folder** under the destination —
+  `<destination>/<NN>-<slug>/` — holding the `.mp4`, `description.md` and
+  `captions.srt`. The folder name is derived from the plan's `videoIndex` (the
+  consumption order) and a slug of the title, so a series sorts into watch order and
+  a shared destination can never collide across videos. If the user puts it **inside**
+  the source — `<source>/videos/` is a common choice — Stage 1 must `--exclude` it, or
+  a published sidecar re-enters the plan as a note (Stage 1 has the detail).
+- **Scratch root** — the directory that holds `out/`, i.e. the cwd for every command
+  in Stages 1–8. Default: **`<source>/..`** — beside the source, the same anchor the
+  destination uses, which also keeps it inside whatever repo already ignores `out/`.
+  Not a throwaway: a series runs to hundreds of MB of WAV and MP4, so it is worth one
+  line in the prompt rather than a surprise later. Say plainly that the default is
+  fine; the user should not have to think about it.
 
-Proceed to Stage 1 only once both are set. After Stage 1, show the plan's own
+Then `cd` to the scratch root once and stay there. It is the only cwd that makes the
+`out/<name>/…` paths below resolve. If that root is inside a git work tree, `planner`
+verifies `out/` is ignored and appends a rule when it is not, printing what it changed;
+outside a repo there is nothing to ignore and it stays silent.
+
+Proceed to Stage 1 only once all three are set. After Stage 1, show the plan's own
 numbers as a free confirmation — *"`<source>` → N markdown files → M videos, landing
 in `<destination>`"* — before Stage 2 and the `Choose the scope` gate spend anything.
 
 ## Stage 1 — `/plan`: decompose and prove completeness
 
 ```bash
-node tools/planner.mjs <notesDir> --out out/<name> --max-min 14
+node tools/planner.mjs <notesDir> --out out/<name> --max-min 25 \
+  [--exclude <notesDir>/videos]
 ```
 
 Writes `out/<name>/plan.json` and `out/<name>/plan.md`. No network, no key, safe
 to re-run. Read `plan.md`, not `plan.json`.
 
-**Done when:** the run exits **0** and `plan.md`'s coverage line reads
-`N assigned · M excluded as navigation · 0 orphaned`. A non-zero exit, or any
-orphan, means the plan is incomplete — stop and fix it. Never enrich an
-incomplete plan.
+`--exclude` is not optional when the destination sits **inside** the source (the
+common case: `<notesDir>/videos/`). The planner walks everything under `<notesDir>`,
+so a published `description.md` re-enters as a note and becomes a phantom video
+titled after its folder. The planner names this if it sees it — `description.md` is a
+name this pipeline publishes — but passing the exclusion is the actual fix, and it is
+repeatable if several old output folders exist.
+
+**Done when:** the run exits **0**, `plan.md`'s coverage line reads
+`N assigned · M excluded as navigation · 0 orphaned`, **and you have shown the user
+every planned video**. A non-zero exit, or any orphan, means the plan is incomplete —
+stop and fix it. Never enrich an incomplete plan.
+
+**Show all of them.** The plan's whole point is that it can be argued with row by row,
+so display the complete list — index, title, length — however many there are. Concretely:
+no sample, no "first 10 of 136", no "…and 126 more", no relying on the user to open
+`plan.md`. A 136-video plan is 136 lines and that is the correct amount of output; a
+truncated list silently turns a reviewable proposal into a fait accompli. (`planner`
+now prints the whole plan for exactly this reason — if you post-process it, keep every
+row.)
 
 Two facts that shape how you read the output:
 
@@ -106,6 +141,14 @@ Two facts that shape how you read the output:
 
 Only `.md` files are parsed; non-markdown content is invisible to the planner.
 
+**`--max-min` is part of the plan, not a preference.** The plan records the model that
+produced it (`model.maxVideoMin`) and its video **indices** are keyed by that split, so
+re-running with a different cap gives a different number of videos — on the module-07
+tree, cap 14 → 136 videos, cap 25 → 96. Any `enrichment.json` is keyed by index, so
+`planner` **refuses** (exit 4) to overwrite a `plan.enriched.json` whose model differs,
+and asks for `--force` or a different `--out`. `script-check` warns when the plan it is
+validating was built with a different cap than it is enforcing.
+
 ## Stage 2 — `/enrich`: retitle and curate
 
 Write `out/<name>/enrichment.json` — one entry per video — then validate and merge:
@@ -117,9 +160,13 @@ node tools/apply-enrichment.mjs --plan out/<name>/plan.json \
 
 Writes `plan.enriched.json` and `plan.enriched.md`.
 
-**Done when:** the run exits **0** (no validation problems) and `plan.enriched.md`
-shows the final video list. A problem list means your enrichment is wrong — fix
-and re-run.
+**Done when:** the run exits **0** (no validation problems), `plan.enriched.md` shows
+the final video list, **and you have shown the user that complete list** — every
+surviving video, plus the removals you made with their stated reasons. A problem list
+means your enrichment is wrong — fix and re-run.
+
+Same rule as stage 1: all rows or it is not a review. `apply-enrichment` prints the
+full table; do not summarise it away.
 
 ### The title contract
 
@@ -144,8 +191,8 @@ sections, so coverage stays auditable.
 ## Choose the scope — after `/enrich`, before `/script`
 
 The enriched plan is the decision point. **Ask the user which videos to run through
-stages 3–8 — never assume "all of them".** Present the final list (index + title) and
-ask for:
+stages 3–8 — never assume "all of them".** Present **every** video (all N of them:
+index + title), not a sample or a "top 10", and ask for:
 
 - **all** videos, or
 - a **subset by index** — `30`, or `5, 7, 9`, or `1-3, 30`.
@@ -154,7 +201,41 @@ Then run stages 3–8 only for the chosen set, one video at a time, each into it
 `out/<name>/<NN>/` (see *Series scope*). TTS and rendering are the expensive stages,
 so never spend them on a video the user has not explicitly chosen.
 
+## Timing — every stage 3–8 is stamped
+
+Per-video work starts here. Each stage is bracketed by a `stamp` pair so the series
+accrues a per-video, per-stage audit; the `end` stamp is part of the stage's *Done
+when*, so a stage is not complete until it is timed:
+
+```bash
+node tools/stamp.mjs begin --out out/<name> --video <NN> --stage <n> [--note …]
+… run the stage …
+node tools/stamp.mjs end   --out out/<name> --video <NN> --stage <n>
+```
+
+`begin` writes a throwaway marker; `end` subtracts it and appends one row to
+`out/<name>/timing.jsonl` — `{video, stage, attempt, seconds, ended_at, note}` — and a
+retry of the same stage becomes the next `attempt` automatically. At series end, render
+the audit:
+
+```bash
+node tools/timing-report.mjs --out out/<name>   # → timing.csv · timing.md · timing.svg · timing.html
+```
+
+`timing.html` is the interactive view — a self-contained Plotly chart (the bundle is
+inlined, so it opens with no network): horizontal stacked bars, hover for exact seconds,
+legend-click to toggle a stage, zoom/pan/download from the modebar. `timing.svg` is the
+no-JS fallback for anything that can't run a browser.
+
+The stage lives in the `stage` *value*, never a column name, so stages can be added,
+renamed, or merged later without touching the file's shape.
+
 ## Stage 3 — `/script`: write the narration
+
+```bash
+node tools/stamp.mjs begin --out out/<name> --video <NN> --stage 3
+```
+
 
 One video at a time, write `out/<name>/scripts/<NN>-<slug>.json`, then validate:
 
@@ -185,7 +266,17 @@ re-run.
 - **Budget** — target `planTargetMinutes` from the plan; stay within its 55%–125%
   band (`script-check` errors below, warns above).
 
+
+```bash
+node tools/stamp.mjs end --out out/<name> --video <NN> --stage 3
+```
+
 ## Stage 4 — `/audio`: TTS and the measured timeline
+
+```bash
+node tools/stamp.mjs begin --out out/<name> --video <NN> --stage 4
+```
+
 
 ```bash
 node tools/build-audio.mjs --script out/<name>/scripts/<NN>-*.json --out out/<name> --voice Aoede
@@ -210,7 +301,57 @@ Two facts:
   `--voice`, `style`, or `--model`: change one of those and the old audio is silently
   reused. Pass `--force` to re-synthesize.
 
+
+```bash
+node tools/stamp.mjs end --out out/<name> --video <NN> --stage 4
+```
+
+## Stage 4b — `/align`: word and line timings
+
+```bash
+node tools/stamp.mjs begin --out out/<name> --video <NN> --stage 4b
+```
+
+
+```bash
+node tools/align.mjs --script out/<name>/scripts/<NN>-*.json --work out/<name>/<NN>
+```
+
+Transcribes the **whole narration track in one request** with word offsets, cuts those
+words into segments at the measured `timeline.json` boundaries, **aligns each segment's
+words back onto that segment's script words**, and writes the span of every narration
+line to `lines.json` (plus `narration/<key>.words.json`, cached per segment).
+
+One request per video, not one per segment: `gemini-3.5-transcribe` is capped at **100
+requests/day per project per model** with no Batch API, so per-segment alignment would
+cap the pipeline at ~3 videos/day. A track over ~28 minutes is cut at segment
+boundaries into several passes, since 30 min is the model ceiling with word timings.
+
+Why the alignment step is mandatory: the transcriber is not a faithful echo. Measured
+on real narration it returned `In March, it pushes…` (inserted comma), `spends 40
+minutes` (we wrote *forty*), `failed` (we wrote *fail*), and merged two sentences into
+one. So **our punctuation decides the boundaries and the aligned words supply the
+times** — never the transcript's own segmentation.
+
+Word offsets occasionally contain outliers (one plan put `A delta` at 3.7s between
+neighbours at 12.4s and 14.2s); they are forced monotonic, and the repairs are
+reported.
+
+**Done when:** `align` exits **0** and prints `✓ N segment(s) · M lines · written`.
+Line times are relative to the narration WAV; `lines.json` records `lead` per segment,
+so scene time is `line.start + lead`.
+
+
+```bash
+node tools/stamp.mjs end --out out/<name> --video <NN> --stage 4b
+```
+
 ## Stage 5 — `/scene`: author the visuals
+
+```bash
+node tools/stamp.mjs begin --out out/<name> --video <NN> --stage 5
+```
+
 
 Each segment is a **beat**: narration plus the visual that illustrates it. Author the
 visual as a list of **visual beats** — steps, each with a minimum dwell and an
@@ -234,37 +375,83 @@ alignment to the narration — never as raw seconds.
   relation macros). Compose them where a beat matches one; drop to raw SVG where it
   doesn't. **Primitives are a floor, not a ceiling.**
 
-### The beat owns the timing
+### The beat anchors to a line, never to a second
 
-Declare the scene's beats alongside its config:
+A beat declares **which narration line it illustrates**, not a time:
 
 ```js
-window.SCENE_BEATS = [
-  { id: 'title',  at: 0,    min: 4 },              // needs ≥ 4s to be read
-  { id: 'pool',   at: 12.5, min: 5 },
-  { id: 'legend', at: 18,   min: 8, hold: true },  // may outlive the narration
-];
+window.SCENE_BEATS = { beats: [
+  { id: 'march',   line: 1 },                    // the line this reveal belongs to
+  { id: 'april',   line: 2 },
+  { id: 'caption', lines: [3, 4], hold: true },  // holds across those two lines
+]};
 ```
 
-`at` is seconds from the segment's narration start, `min` is the beat's minimum
-dwell, and `hold: true` marks a beat allowed to run past the narration. The visual's
-own beat sequence is now explicit, parallel to the narration's measured beats; each
-aligned beat resolves to `max(narration_beat, visual_beat_min)`.
+`line` is a 0-based index into that segment's lines in `lines.json` (stage 4b).
+`lines: [from, to]` claims a range — a closing caption legitimately holds while the
+last two or three sentences play — and `hold: true` lets the final beat run to the cut.
 
-- If the visual needs **more** than the narration, hold the frame — a **declared
-  hold**, not dead air. Cover it instead (pad the audio gap, or extend the
-  narration) if you prefer; re-run `/audio` when you do.
+**Why not `at`.** A hand-written second cannot be validated, so it is never caught.
+The module-07 pilot shipped `at: 6.6` for a phrase that begins at **12.6s**; every
+check passed because none of them could see the narration. `resolve-beats` therefore
+**rejects** a beat carrying `at` without `line`, and rejects a baked `at` that
+disagrees with the measured line onset by more than 60 ms.
+
+```bash
+node tools/resolve-beats.mjs --work out/<name>/<NN> [--print]
+```
+
+It resolves `line` → `at = line.start + lead`, writes `beats.json`, and fails when a
+line does not exist, beats run out of order, or **a narration line has no beat** —
+which is narration playing with nothing changing on screen.
+
 - **Dead air** is *undeclared* silence with nothing changing — that is still a bug.
 
-`pacing-check` resolves the beats against the measured narration and reports
-shortfalls (`beat "legend" needs 8.0s, has 5.0s (+3.0s)`). A shortfall is a prompt to
-hold / pad / extend, **not** a failure — only a beat that cannot fit inside its
-segment at all is an error. A scene without `SCENE_BEATS` falls back to the older
-budget and dead-air checks.
+`pacing-check` reads `beats.json` and resolves the beats against the measured
+narration, reporting shortfalls (`beat "legend" needs 8.0s, has 5.0s (+3.0s)`). A
+shortfall is a prompt to hold / pad / extend, **not** a failure — only a beat that
+cannot fit inside its segment at all is an error. A beat that still carries a
+hand-written `at` is reported as a defect, never silently honoured.
 
-**Resolving a shortfall:** set `pad` on the script segment (the hold silence in
-seconds) and `hold: true` on the overflowing beat, then re-run `/audio` — the TTS is
-text-cached, so this is free and just re-tiles the timeline with the wider window.
+A beat's dwell should default to **how long its lines are spoken**
+(`lines[to].end − lines[from].start`). That makes a shortfall arithmetically
+impossible: `at + min` lands inside the window by construction. A line-anchored scene
+should therefore report **no** shortfalls at all — the module-07 pilot ran 123 beats
+across 30 scenes with zero.
+
+**A shortfall now means you over-asked, not that the audio ran short.** You declared a
+`min` longer than the lines the beat covers. Resolve it in this order:
+
+1. **Widen the range** — `lines: [from, to]`, so the beat holds across the following
+   line too. Free: no audio re-tile, no re-alignment.
+2. **Redesign the beat** — a visual needing longer than its words is usually the wrong
+   visual for them. Four one-word lines ("Staleness." … "Recall failure.") cannot carry
+   four sequential card reveals; show all four at once and highlight each as it is
+   named.
+3. **`pad` the segment** — last resort. It buys screen time with silence: costs a
+   re-tile, lengthens the video, adds no content.
+
+Padding used to be step one because a guessed beat could not be trusted to fit inside
+its window. Beat times are measured now, so padding is a design decision you should
+have to argue for, not a routine repair.
+
+**If you do reach step 3** — the `/scene ↔ /audio` loop. Set `pad` on the script
+segment and `hold: true` on the beat, then re-run `/audio` (text-cached, so free; it
+re-tiles the window wider). A `pad` widens the **window** only, never
+`narration/<key>.wav`, so `lines.json` still describes the audio that plays and the
+resolved beat times stay correct.
+
+**Rewriting the narration is not free the same way.** Changing a segment's `text`
+re-synthesises its WAV and invalidates every line time measured for it:
+
+```
+pad  → /audio                       → (line data still valid)
+text → /audio → /align → /resolve-beats
+```
+
+`align.mjs` stamps each segment's text hash into `lines.json`, and
+`resolve-beats --script …` **fails** when the script no longer matches, naming the
+segment (the word cache makes re-aligning free unless the audio changed).
 
 ### Design rules
 
@@ -305,7 +492,17 @@ visual check. Either answer is fine; never "look" blind.
 **Done when:** `pacing-check` exits 0 **and** every still has been eyeballed — or the
 user skipped the visual check.
 
+
+```bash
+node tools/stamp.mjs end --out out/<name> --video <NN> --stage 5
+```
+
 ## Stage 6 — `/publish`: chapters and captions
+
+```bash
+node tools/stamp.mjs begin --out out/<name> --video <NN> --stage 6
+```
+
 
 ```bash
 node tools/publish.mjs --work out/<name>/<NN> \
@@ -384,8 +581,8 @@ fault and rewriting a passing list will not help. `0:00` (one digit), a `-` afte
 timecode, a blurb above the block and a 2:39 runtime were each verified live on eligible
 channels, and the hard checks above already mirror YouTube's rules.
 
-Outputs, copied to `--dest` beside the MP4 because they are deliverables rather than
-scratch — just two files:
+Outputs, copied into the video's own folder — `--dest/<NN>-<slug>/` — alongside the
+MP4 because they are deliverables rather than scratch — just two files:
 
 - **`description.md`** — the blurb, then the chapter block, **paste-ready as plain
   text**. YouTube reads chapters only from the description, so the block lives here and
@@ -394,9 +591,22 @@ scratch — just two files:
   markdown, so those characters would paste in literally.
 - **`captions.srt`** — the cue list, uploaded as a caption track.
 
-**Done when:** `publish` exits 0 and those two files land beside the MP4.
+**Done when:** `publish` exits 0 and those two files land in `--dest/<NN>-<slug>/`
+next to the MP4. The folder name is derived by the tool from the script's
+`videoIndex` + title — do not hand-pick a different folder name, or a series will
+sprawl out of watch order.
+
+
+```bash
+node tools/stamp.mjs end --out out/<name> --video <NN> --stage 6
+```
 
 ## Stage 7 — `/render`: frames to MP4
+
+```bash
+node tools/stamp.mjs begin --out out/<name> --video <NN> --stage 7
+```
+
 
 ```bash
 node tools/render.mjs --scene "src/scene-diagram.html?scene=<name>" \
@@ -435,12 +645,25 @@ visual check. Either answer is fine; never "look" blind.
 **Done when:** the render exits 0 **and** the window's frames have been eyeballed —
 or the user skipped the visual check.
 
+
+```bash
+node tools/stamp.mjs end --out out/<name> --video <NN> --stage 7
+```
+
 ## Stage 8 — `/assemble`: the finished video
 
 ```bash
-node tools/assemble.mjs --script out/<name>/scripts/<NN>-*.json \
-                        --work out/<name> --name <output>
+node tools/stamp.mjs begin --out out/<name> --video <NN> --stage 8
 ```
+
+
+```bash
+node tools/assemble.mjs --script out/<name>/scripts/<NN>-*.json \
+                        --work out/<name> --name <output> --dest <destination>
+```
+
+With `--dest`, the finished MP4 lands in `<destination>/<NN>-<slug>/<output>.mp4` —
+the same folder `publish` (stage 6) wrote `description.md` and `captions.srt` into.
 
 Per segment: render its own window through its own host + config, **silent** — parts
 are silent on purpose, because muxing narration onto each one would restart the whole
@@ -475,6 +698,11 @@ visual check. Either answer is fine; never "look" blind.
 
 **Done when:** the run exits 0 with `audio ok` **and** the assembled frames have been
 eyeballed — or the user skipped the visual check.
+
+
+```bash
+node tools/stamp.mjs end --out out/<name> --video <NN> --stage 8
+```
 
 ## Reference — enrichment.json
 

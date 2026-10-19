@@ -4,6 +4,7 @@ out/
 frames/
 preview/
 parts/
+.demo/
 
 # the deliverable videos are large binaries — dump them somewhere you own, not into a code repo
 *.mp4

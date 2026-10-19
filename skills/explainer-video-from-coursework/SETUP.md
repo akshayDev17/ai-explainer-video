@@ -1,8 +1,9 @@
 # Setup — what this skill needs on the machine
 
 One-time environment prerequisites. `SKILL.md` and the per-stage files point here; run
-everything else from the **project** (where `out/` scratch lives), not the skill install
-folder. Everything the pipeline produces beyond this it makes itself under `out/`.
+everything else from the **scratch root** (the directory holding `out/`, which Stage 0
+fixes and which defaults beside your notes), not the skill install folder. Everything the
+pipeline produces beyond this it makes itself under `out/`.
 
 ## Node ≥ 22
 
@@ -32,6 +33,36 @@ npx playwright install --with-deps --only-shell
 `CHROME_BIN` / `PLAYWRIGHT_BROWSERS_PATH` if the browser lives somewhere else.
 
 ([source](https://playwright.dev/docs/browsers#chromium-headless-shell))
+
+## Transcribe quota (stage 4b)
+
+`tools/align.mjs` calls `gemini-3.5-transcribe`, which has a **hard per-day cap** that
+is separate from the TTS model and cannot be batched around:
+
+| Limit | Value | Source |
+|---|---|---|
+| Requests/day per project per model | **100** | API `QuotaFailure` → `GenerateRequestsPerDayPerProjectPerModel`, `quotaValue: "100"` |
+| Audio per request | 1 hour — **30 minutes when word-level timestamps are enabled** | model card |
+| Batch API | **not supported** | model card |
+| Custom vocabulary + word timestamps | mutually exclusive | transcribe guide |
+
+Exceeding the daily cap returns HTTP **429** with a `RetryInfo.retryDelay` (~18 h) and
+nothing else in the pipeline is affected — TTS uses a different model with its own
+quota.
+
+Practical consequences:
+
+- `align.mjs` transcribes the **whole narration track in one request** by default
+  (per-segment would be ~30 requests per video, i.e. ~3 videos/day). Above ~28 minutes
+  of track it cuts at segment boundaries into multiple passes, because 30 minutes is
+  the model ceiling with word timings.
+- `--per-segment` remains available as a fallback; it is chosen automatically when
+  only a few segments are missing, where it is cheaper than a full pass.
+- A quota failure **stops the run with exit 3** rather than falling back and burning
+  the rest of the budget on doomed requests.
+- Alignment is a **one-time cost per video** — `narration/<key>.words.json` is cached
+  and keyed on the WAV plus the script text. **Commit those files** and alignment is
+  never paid for twice.
 
 ## Gemini API key
 

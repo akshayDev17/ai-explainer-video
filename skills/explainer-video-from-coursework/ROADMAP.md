@@ -59,6 +59,13 @@ Stages are named in prose (`/render`, `/assemble`) rather than numbered, so inse
 stage does not silently rewrite history: publish's insertion at 6 moved render to 7 and
 assemble to 8, and "stages 6–7" had meant render/assemble.
 
+Per-video timing (stages 3–8) accrues in `out/<name>/timing.jsonl` via `tools/stamp.mjs`
+(`begin`/`end` — the end is folded into each stage's *Done when*); `tools/timing-report.mjs`
+renders `timing.csv` (long), `timing.md` (one heading per video), `timing.svg` (static), and
+`timing.html` (interactive Plotly — the `vendor/plotly-basic.min.js` bundle is inlined, so the
+file opens offline). The stage lives in the `stage` *value*, not a column name, so stages can
+be added/renamed/merged without changing the file's shape.
+
 ### Renderers
 
 | File | Covers | Vocabulary |
@@ -76,8 +83,11 @@ leftover directory. It holds the five `_pt-*` configs, one per primitive.
 `tools/publish.mjs` exists and the stage runs; render and assemble do not depend on it. The
 agent writes `out/<name>/<NN>/publish.json` — `chapters[]` (segment keys plus a `title`) and a
 `blurb`. The tool resolves the timecodes from the measured windows, validates, and emits two
-files, copied to publish's **own** `--dest` beside the MP4 (`assemble`'s `--dest` still
-carries only the MP4):
+files, copied into the video's own folder under `--dest` — `<NN>-<slug>/` — alongside
+the MP4. `assemble`'s `--dest` now lands the MP4 in the **same** folder (both derive the
+name from the script's `videoIndex` + title via `tools/naming.mjs`), so the fixed
+`description.md` / `captions.srt` filenames can never collide across a series and the
+destination sorts into watch order:
 
 | File | Contents | Delivered to |
 |---|---|---|
@@ -104,6 +114,75 @@ and `scenes/`, so nothing is global:
 Two videos can now coexist and be re-rendered independently; only Chromium's `--port` is
 shared, so renders still run one at a time. This closed the structural gap that the
 pipeline assumes one video at a time.
+
+The **destination** mirrors this: each finished video lands in
+`<destination>/<NN>-<slug>/` (`.mp4` + `description.md` + `captions.srt`), one folder per
+video — see `tools/naming.mjs`. The folder name is the plan's `videoIndex` plus a slug of
+the title, so listing the destination sorts into consumption order.
+
+### Beats anchor to narration lines, not to seconds
+
+A scene used to declare `at: 6.6` — a hand-guessed second — which nothing measured.
+On the module-07 pilot the "April" reveal fired at 6.6s while the words *In April*
+begin at 12.6s: a six-second desync that `pacing-check` passed, because that check can
+only compare beats against the **segment**, never against the narration inside it.
+
+Two new stages close it:
+
+- **`tools/align.mjs`** (stage 4b) transcribes the whole narration track with
+  `gemini-3.5-transcribe` (`wordTimestamp: true`), cuts the words into segments at the
+  measured boundaries, aligns each segment's words back onto that segment's script
+  words, and writes every narration **line's** span to `lines.json`.
+  Alignment is mandatory because the transcript is not an echo: it rewrote *forty* as
+  `40`, *fail* as `failed`, inserted commas and merged two sentences. Our punctuation
+  fixes the boundaries; the aligned words supply the times. Offsets are clamped
+  monotonic — the API occasionally returns an outlier (one plan put `A delta` at 3.7s
+  between neighbours at 12.4s and 14.2s).
+- **`tools/resolve-beats.mjs`** resolves `{ id, line }` (or `{ lines: [from,to] }`) to
+  seconds, writes `beats.json`, and **fails** on a raw `at` with no `line`, a
+  nonexistent line, out-of-order beats, a baked `at` that disagrees with the measured
+  onset by >60 ms, or **a narration line with no beat**.
+
+`pacing-check` now resolves from `beats.json` and flags any remaining hand-written
+`at`. It also had a latent unit bug: `winEnd` subtracted the lead-in although `at` is
+already window-relative, silently removing the last 0.6 s of every window. That only
+looked harmless while beats were hand-placed nowhere near the end; line-anchored beats
+run to the last spoken word and exposed it.
+
+**The `/scene ↔ /audio` pad loop is demoted.** It existed because a hand-guessed beat
+could not be trusted to fit its window, so padding was the routine repair. With dwells
+measured from the lines a beat covers, `at + min` is inside the window by construction —
+the module-07 pilot ran 123 beats across 30 scenes with zero shortfalls and zero pad.
+A shortfall now means the scene *over-asked*: widen the `lines` range, redesign the
+beat, and pad only as a last resort. `craft-video-audio` no longer presents padding as
+the expected re-invocation.
+
+Honest status: the three pilots' 87 scenes were migrated by a proposer (keyword +
+monotonic DP over line text) with manual overrides on the beats it mis-read, dwells
+recomputed from the measured line spans. Measured on the shipped pilot it moved
+`april` from 6.60s to 13.20s. Per-scene line assignment still deserves a human pass —
+the proposer gets roughly four in five right.
+
+### The transcribe request budget, and why stage 4b is one request per video
+
+`gemini-3.5-transcribe` carries its own hard cap, discovered the expensive way: the
+first alignment implementation transcribed per segment, and a 13-minute video cost ~30
+requests. The API's `QuotaFailure` payload names the limit exactly —
+`GenerateRequestsPerDayPerProjectPerModel`, `quotaValue: "100"`, scoped to the model
+and the project, with a `RetryInfo.retryDelay` around 18 h. The Batch API is not
+supported for this model, so the cap cannot be queued around, and being per-project it
+cannot be spread across keys.
+
+Stage 4b therefore transcribes `narration.wav` **once** and cuts the words into
+segments at the measured boundaries. The model allows 30 minutes per request when word
+timestamps are enabled, so longer tracks are cut at segment boundaries into several
+passes. `--per-segment` survives as a fallback and is chosen automatically for a small
+number of missing segments.
+
+Two consequences worth keeping in view: alignment is a **one-time** cost per video
+(the `words.json` cache is keyed on WAV + script text, and should be committed), and
+the per-video length cap now has a second justification — `--max-min 25` keeps a video
+inside a single transcribe pass, where the old 14 had only watchability behind it.
 
 ### The beat model — the scene declares its own timing
 
@@ -386,6 +465,30 @@ no beats, and the 83 harness configs no longer exist.
 ## 3. Design decisions worth challenging
 
 These are the calls I made. Some may be wrong.
+
+### 3.0 Where scratch lives is an input, not an inference
+
+`out/` resolved against whatever the cwd happened to be, described as "run from the
+project" — a directory that was never defined, never checked, and not something the
+skills could verify. One real run put 679 MB at `<repo>/out/…`, two levels above the
+notes and outside the tree whose `.gitignore` already covered `out/`, simply because
+that is where the shell was.
+
+Scratch is now a Stage 0 input with a default — the directory that holds `out/`,
+defaulting to the source's parent — and `planner` verifies the ignore rule instead of
+assuming it: it walks up to the git work tree, asks `git check-ignore`, and appends
+`/<rel>/` when the rule is missing, printing what it changed. Outside a repo it says
+nothing, because there is nothing to ignore.
+
+The same class of bug bit the other direction: a destination *inside* the source
+(`<notesDir>/videos/`) is walked by `planner`, so a published `description.md` re-enters
+as a note and becomes a phantom video titled after its folder. Hence `--exclude`
+(repeatable) and a warning keyed on `description.md` — a filename only this pipeline
+emits. Both are worth their small cost because the failure is silent and permanent
+otherwise: you notice it when a video about nothing shows up in the series.
+
+*Challenge if:* you would rather the tools **refuse** a scratch root inside a git work
+tree that does not ignore it, than edit the user's `.gitignore` for them.
 
 ### 3.1 Code vs agent boundary
 

@@ -17,14 +17,16 @@
 
    Usage:
      node tools/assemble.mjs --script out/<name>/scripts/NN-<slug>.json \
-                             --work out/<name>/<NN> --name <output>
+                             --work out/<name>/<NN> --name <output> \
+                              --dest <destination>
    ========================================================================== */
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, readdirSync, copyFileSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireCmd } from './env.mjs';
+import { videoDir } from './naming.mjs';
 
 requireCmd('ffmpeg');
 requireCmd('ffprobe');
@@ -171,8 +173,12 @@ console.log(`       ${parts.length} segments · ${dur.toFixed(2)}s · ${(dur / 6
 /* ---------------- deliver: the mp4 is the only thing the user keeps ---------
    Copy it to a destination they own; the work dir stays scratch and disposable. */
 if (DEST) {
-  mkdirSync(DEST, { recursive: true });
-  const destPath = join(DEST, NAME + '.mp4');
+  /* The finished MP4 goes into the video's own folder — the same <NN>-<slug> that
+     publish.mjs uses for description.md / captions.srt — so a series sorts into
+     consumption order and the three deliverables never collide across videos. */
+  const dir = join(resolve(DEST), videoDir(script, basename(WORK)));
+  mkdirSync(dir, { recursive: true });
+  const destPath = join(dir, NAME + '.mp4');
   copyFileSync(final, destPath);
   console.log(`[dest] ${destPath}`);
 }

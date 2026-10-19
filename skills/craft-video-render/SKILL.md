@@ -9,7 +9,15 @@ description: Render one scene config over one time window to an MP4 (or a handfu
 > **primitive**; the assemble stage drives it per segment. It can also run alone for QA
 > stills during scene authoring.
 >
-> The pipeline's tools and scene hosts live in the sibling `explainer-video-from-coursework` skill: run them as `node ../explainer-video-from-coursework/tools/<tool>.mjs`, resolved against this skill's folder. Run from the **project**, so `out/` scratch lands beside your notes.
+> The pipeline's tools and scene hosts live in the sibling `explainer-video-from-coursework` skill: run them as `node ../explainer-video-from-coursework/tools/<tool>.mjs`, resolved against this skill's folder. Run from the **scratch root** — the directory holding `out/`, which Stage 0 fixes (default: beside your notes) — so every `out/<name>/…` path in this stage resolves.
+
+> **Timing.** Bracket the stage with the stamp pair so the series accrues a per-video audit;
+> `end` must run before the stage counts as done (see *Timing* in the main skill):
+>
+> ```bash
+> node ../explainer-video-from-coursework/tools/stamp.mjs begin --out out/<name> --video <NN> --stage 7
+> node ../explainer-video-from-coursework/tools/stamp.mjs end   --out out/<name> --video <NN> --stage 7
+> ```
 
 **Prerequisites:** a scene config and, for windowed renders, `out/<name>/<NN>/timeline.json`; on the machine, `ffmpeg` + headless Chromium (see `SETUP.md`).
 
