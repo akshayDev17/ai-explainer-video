@@ -173,3 +173,62 @@ Anything a resumed session needs (which videos, in what order, which stages are 
 must live on disk, one writer per file. See the in-session discussion of per-video
 `state.json` plus a once-written selection manifest, as the alternative to a single
 shared `series.json` with nine writers.
+
+---
+
+## 8 · `assemble` relaunches Chromium per segment — measured, and **not worth fixing** *(rejected)*
+
+**Hypothesis (mine, wrong).** `assemble` invokes `render.mjs` once per segment, so each
+segment pays for a fresh Chromium launch and page load. I estimated ~5 min of "pure
+relaunch" per 48-segment video (10%), later revising to 3.5 min (7%).
+
+**Measurement.** Synthetic 20-second work dir (600 frames), `--shots` isolates launch +
+page load with no ffmpeg and no frame loop:
+
+| component | measured |
+|---|---|
+| launch + page load (3 runs, spread 0.01 s) | **0.43 s** |
+| frame loop (600 ÷ 14.7 fps) | 40.82 s |
+| per-invocation overhead (wall − loop) | 3.94 s |
+| — of which launch + page load | 0.43 s (**11%**) |
+| — of which ffmpeg encode | **3.52 s (89%)** |
+
+**Conclusion: rejected.** Browser reuse removes 0.43 s per segment ≈ **21 s per
+48-segment video, about 0.7%** of a 50-minute render. The overhead is almost entirely the
+per-segment ffmpeg encode, which browser reuse cannot touch. Not worth the refactor.
+
+The method is kept here because it is reusable: `--shots` decomposes a render into
+launch, loop and encode, and every future "make rendering faster" claim should be checked
+against it before anyone builds anything.
+
+---
+
+## 9 · Capture is PNG-encoded in the browser and dominates the loop *(P1, unadopted)*
+
+**What the same decomposition revealed.** Of the ~45 s a 600-frame segment takes, ~41 s is
+the capture loop (≈68 ms/frame) and only ~6 ms/frame is ffmpeg's share. So the loop — not
+the encode, not the launch — is where the time goes, and it is dominated by Chromium
+rasterising and **PNG-encoding** 1920×1080 on every frame via `Page.captureScreenshot`.
+
+**Measured.** Same scene, same 600-frame window, changing only the capture format
+(a throwaway copy of `render.mjs` with `format: 'jpeg', quality: 92`; the skill was not
+modified):
+
+| capture format | loop fps | wall for 600 frames |
+|---|---|---|
+| PNG (current) | 14.4 / 14.5 | 45.4 s |
+| **JPEG q92** | **20.0** | **30.4 s** |
+
+**~1.4× faster overall**, for a one-flag change: write frames as `.jpg` and point ffmpeg's
+input pattern at them (the naive swap fails loudly — ffmpeg rejects PNG-named files
+carrying `0xFFD8FF`, the JPEG signature — which is a good failure, not a silent one).
+
+**Why it is not adopted yet.** The content of these videos *is* text, and JPEG q92 rings
+around glyph edges. That has to be settled by looking: an A/B of the same frame as PNG,
+JPEG q95 and JPEG q92, at 100%, before anything is committed. If q95 holds up, take it —
+it compounds with a render pool (1.4 × 2.65 ≈ 3.7× versus serial solo).
+
+**Ruled out, for the record.** Piping *raw* frames to ffmpeg is not available: CDP's
+`captureScreenshot` offers only `png` and `jpeg`, and raw 1080p is 8.3 MB/frame — ~11 MB
+after base64 at 20 fps, versus ~200 KB for PNG. PNG's compression is load-bearing for the
+transport. Piping the existing PNG bytes (disk → stdin) remains a small, orthogonal win.
