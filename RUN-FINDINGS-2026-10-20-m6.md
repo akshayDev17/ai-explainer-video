@@ -232,3 +232,48 @@ it compounds with a render pool (1.4 × 2.65 ≈ 3.7× versus serial solo).
 `captureScreenshot` offers only `png` and `jpeg`, and raw 1080p is 8.3 MB/frame — ~11 MB
 after base64 at 20 fps, versus ~200 KB for PNG. PNG's compression is load-bearing for the
 transport. Piping the existing PNG bytes (disk → stdin) remains a small, orthogonal win.
+
+---
+
+## 10 · Beats-driven static-frame skipping — prototyped end to end, pixel-exact *(P1, unadopted)*
+
+**Idea.** `beats.json` already lists every point where the picture changes, resolved to
+scene time. So "which frames can differ?" is derivable on the Node side — no per-frame IPC,
+no `scene-core` change. Capture inside the windows; byte-copy the previous PNG outside them,
+which preserves the dense frame sequence so the ffmpeg path is untouched.
+
+**Prerequisite.** Finding 9's sibling change: the in-frame progress bar made 100% of frames
+unique. With `overlays.progress` now opt-in, **82% of frames are byte-identical to their
+predecessor** (measured on a real scene, bottom strip excluded from the hash).
+
+**Measured, on one 600-frame window, bar off, comparing all 600 pre-encode PNGs
+byte-for-byte against a normal capture-all render:**
+
+| run | wall | frames captured | identical to reference |
+|---|---|---|---|
+| baseline, capture all | 45.3 s | 600 | — |
+| skip, naive margin (±0.85 s after the beat) | 15.2 s | 146 | **514/600** |
+| skip, corrected margin | 13.2 s | 123 | 592/600 |
+| skip, corrected + window edges | **14.0 s** | 136 | **600/600** |
+
+**3.2× on the dominant term, pixel-exact.** Two non-obvious rules had to be discovered by
+comparison, and both are easy to get wrong silently:
+
+1. **The window must look backwards.** `win(t, from, until, ramp)` in `scene-core.js` fades
+   from `from − ramp` and **completes exactly at `from`**, so a reveal's picture changes
+   *before* its beat timestamp. The window is `[at − ramp − margin, at + margin]`, i.e.
+   ~0.75 s before and 0.10 s after — the reverse of the intuitive guess. Getting this
+   backwards cost 86 wrong frames while still looking plausible at a glance.
+2. **Window edges are not in any beat.** The stage badge fades in over the first 0.3 s and
+   out over the last 0.3 s of every segment window, so both edges must always be captured.
+   Without it: 8 wrong frames, all in the final 0.27 s.
+
+**Why it is not adopted yet.** It needs `assemble`/`render` to read `beats.json` and to
+treat a missing or unusable file as "capture everything" (the prototype does exactly that,
+and the fallback is what caught the missing `timeline.json` during testing). Small, but it
+should land behind a flag and with the 600-frame byte-identical check as its test.
+
+**Where it leaves the profile.** A segment drops from 45.3 s to 14.0 s, of which the H.264
+encode is now ~3.5 s (25%). Once capture is this cheap the encoder becomes the floor, and
+`parallel` multiplies the *number* of competing encoders rather than reducing their cost —
+so the next lever is the encoder preset (`-preset medium` today), not more capture tricks.
