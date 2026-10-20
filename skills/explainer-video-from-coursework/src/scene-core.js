@@ -16,7 +16,7 @@
      pings    health-check probes along edges
      rules    time windows that change node/edge state
      banners  transient pills / glyphs (badges, question marks)
-     overlays title card, header, stage badge, progress, cards, closing line
+     overlays title card, header, stage badge, progress (opt-in), cards, closing line
    ========================================================================== */
 (function () {
   'use strict';
@@ -321,7 +321,13 @@
       stageRect = el('rect', { x: W - 366, y: 38, width: 292, height: 50, rx: 25, fill: '#0f1c31', stroke: P.hair, 'stroke-width': 1.5 }, stageBadge);
       stageText = txt(W - 220, 70, '', { fill: P.hub, 'font-size': 22, 'font-weight': 700, 'text-anchor': 'middle', 'letter-spacing': '0.8' }, stageBadge);
     }
-    if (OV.progress !== false) {
+    /* Opt-in as of 2026-10: the finished MP4 is watched in a player that already
+       reports progress, so an in-frame bar duplicates it — and because the bar is
+       the ONLY thing that changes on an otherwise static frame, it defeated every
+       form of static-frame skipping (82% of frames are byte-identical without it,
+       measured on a real scene). Scenes that genuinely want one set
+       `overlays.progress: true`. */
+    if (OV.progress === true) {
       el('rect', { x: 0, y: H - 6, width: W, height: 6, fill: '#0d1728' }, chromeG);
       progBar = el('rect', { x: 0, y: H - 6, width: 0, height: 6, fill: P.hub, opacity: 0.85 }, chromeG);
     }

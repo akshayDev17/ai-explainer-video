@@ -400,6 +400,17 @@ alignment to the narration — never as raw seconds.
   relation macros). Compose them where a beat matches one; drop to raw SVG where it
   doesn't. **Primitives are a floor, not a ceiling.**
 
+### Two chrome defaults worth knowing
+
+- **No in-frame progress bar.** `overlays.progress` is opt-in (`scene-core.js` draws one
+  only when it is `true`). The finished MP4 plays in a player that already reports
+  progress, so a bar duplicates it — and because the bar is the only element that changes
+  on an otherwise static frame, it defeats static-frame skipping. Measured on a real
+  scene: with the bar excluded, **82% of frames are byte-identical to their predecessor**.
+- **The stage badge is on by default.** It is a position marker, not a title; several
+  segments legitimately share one. Do not reuse badge text as chapter titles (stage 6) —
+  it is typically uppercased and sometimes absent.
+
 ### The beat anchors to a line, never to a second
 
 A beat declares **which narration line it illustrates**, not a time:
