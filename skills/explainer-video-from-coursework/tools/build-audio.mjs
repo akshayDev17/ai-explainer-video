@@ -12,14 +12,15 @@
    Usage:
      node tools/build-audio.mjs --script out/<name>/scripts/NN-<slug>.json \
                                 --out out/<name>/<NN> \
-                                [--only <key>] [--voice Aoede] [--model gemini-3.8-flash-lite-tts]
+                                [--only <key>] [--voice Aoede] [--model gemini-3.8-flash-lite-tts] [--interactive]
    ========================================================================== */
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
-import { synthesize } from './tts-gemini.mjs';
+import { synthesize, synthesizeBatch, DEFAULT_MODEL, FALLBACK_MODEL } from './tts-gemini.mjs';
 import { loadKey, describe, storeHint } from './key-source.mjs';
+import { claimWorkDir } from './workdir.mjs';
 import { requireCmd } from './env.mjs';
 
 requireCmd('ffmpeg');
@@ -36,6 +37,9 @@ const OUT_DIR = String(flag('out', 'out'));
 const ONLY = flag('only', null);                  // synthesize just one segment key
 const VOICE = String(flag('voice', 'Aoede'));
 const MODEL = String(flag('model', 'gemini-3.8-flash-lite-tts'));
+const INTERACTIVE = !!flag('interactive', false);  // opt OUT of batch: per-segment, synchronous
+const BATCH = !INTERACTIVE;                        // default: one batch job for all pending segments
+const FALLBACK = MODEL === FALLBACK_MODEL ? DEFAULT_MODEL : FALLBACK_MODEL;  // the other TTS model
 const LEAD = parseFloat(flag('lead', '0.6'));     // silence before the first word
 const GAP = parseFloat(flag('gap', '0.75'));      // silence between segments
 const TAIL = parseFloat(flag('tail', '1.6'));     // silence after the last word
@@ -52,13 +56,19 @@ const durationOf = f => parseFloat(
 );
 
 const script = JSON.parse(readFileSync(SCRIPT, 'utf8'));
+
+/* One work dir per video, or the fixed artefact names collide: a second video's
+   run would overwrite the first's timeline.json and everything downstream would
+   read the wrong video's timings. Checked before any filesystem or API work. */
+claimWorkDir(OUT_DIR, script, 'build-audio');
+
 const narDir = join(OUT_DIR, 'narration');
 mkdirSync(narDir, { recursive: true });
 
 const { key, source: keySrc, store } = loadKey(flag('key'));
 if (!key) { console.error('No API key found. Store it in your OS secret store.\n' + storeHint(store)); process.exit(1); }
 console.log(`[auth]  ${describe(keySrc, key)}`);
-console.log(`[model] ${MODEL}  voice=${VOICE}`);
+console.log(`[model] ${MODEL}  voice=${VOICE}${BATCH ? `  batch (fallback ${FALLBACK})` : ''}`);
 
 const wanted = script.segments.filter(s => !ONLY || s.key === ONLY);
 if (!wanted.length) { console.error(`no segment matched --only ${ONLY}`); process.exit(1); }
@@ -66,42 +76,97 @@ if (!wanted.length) { console.error(`no segment matched --only ${ONLY}`); proces
 const segments = [];
 let cursor = LEAD;
 let calls = 0;
+let batchJobs = 0;
 
+/* ---- phase 1: ensure every wanted segment has its WAV on disk ---- */
+const missing = [];
+const wasCached = new Map();
 for (const seg of wanted) {
-  const raw = join(narDir, `${seg.key}.raw.wav`);
   const wav = join(narDir, `${seg.key}.wav`);
   const srcFile = join(narDir, `${seg.key}.src`);
-  // Cache keyed on the exact spoken text: re-running after a scene/timing tweak
-  // must not re-spend TTS quota, but stale audio must never be reused.
   const cached = existsSync(wav) && existsSync(srcFile) && readFileSync(srcFile, 'utf8') === seg.text;
-  process.stdout.write(`  [tts] ${seg.key.padEnd(7)} … `);
+  wasCached.set(seg.key, cached && !flag('force'));
   if (cached && !flag('force')) {
-    console.log('reused (text unchanged)');
+    console.log(`  [tts] ${seg.key.padEnd(7)} reused (text unchanged)`);
   } else {
-    try {
-      const { wav: buf } = await synthesize({ text: seg.text, voice: VOICE, style: seg.style, model: MODEL, key });
-      writeFileSync(raw, buf);
-      calls++;
-    } catch (e) {
-      console.log('FAILED');
-      console.error('\n[error] ' + e.message.split('\n')[0]);
-      process.exit(1);
-    }
-    run('ffmpeg', ['-y', '-v', 'error', '-i', raw, '-ar', String(SR), '-ac', '1', wav]);
-    rmSync(raw, { force: true });
-    writeFileSync(srcFile, seg.text);
-    console.log(`${durationOf(wav).toFixed(2)}s  (${seg.text.split(/\s+/).filter(Boolean).length} words)`);
+    missing.push(seg);
   }
-  const dur = durationOf(wav);
+}
+
+if (missing.length) {
+  if (BATCH) {
+    const { segments: made, jobs } = await synthesizeBatch({
+      segments: missing.map(s => ({ key: s.key, text: s.text, style: s.style })),
+      voice: VOICE, model: MODEL, fallbackModel: FALLBACK, key,
+    });
+    batchJobs += jobs;
+    for (const { key: k, wav: buf } of made) {
+      const seg = missing.find(s => s.key === k);
+      const raw = join(narDir, `${k}.raw.wav`);
+      const wavPath = join(narDir, `${k}.wav`);
+      writeFileSync(raw, buf);
+      run('ffmpeg', ['-y', '-v', 'error', '-i', raw, '-ar', String(SR), '-ac', '1', wavPath]);
+      rmSync(raw, { force: true });
+      writeFileSync(join(narDir, `${k}.src`), seg.text);
+      calls++;
+      console.log(`  [tts] ${k.padEnd(7)} ${durationOf(wavPath).toFixed(2)}s  (${seg.text.split(/\s+/).filter(Boolean).length} words)`);
+    }
+  } else {
+    for (const seg of missing) {
+      process.stdout.write(`  [tts] ${seg.key.padEnd(7)} … `);
+      try {
+        const { wav: buf } = await synthesize({ text: seg.text, voice: VOICE, style: seg.style, model: MODEL, key });
+        const raw = join(narDir, `${seg.key}.raw.wav`);
+        writeFileSync(raw, buf);
+        run('ffmpeg', ['-y', '-v', 'error', '-i', raw, '-ar', String(SR), '-ac', '1', join(narDir, `${seg.key}.wav`)]);
+        rmSync(raw, { force: true });
+        writeFileSync(join(narDir, `${seg.key}.src`), seg.text);
+        calls++;
+        console.log(`${durationOf(join(narDir, `${seg.key}.wav`)).toFixed(2)}s  (${seg.text.split(/\s+/).filter(Boolean).length} words)`);
+      } catch (e) {
+        console.log('FAILED');
+        console.error('\n[error] ' + e.message.split('\n')[0]);
+        process.exit(1);
+      }
+    }
+  }
+}
+
+/* ---- phase 2: measure every segment and build the timeline ---- */
+for (const seg of wanted) {
+  const dur = durationOf(join(narDir, `${seg.key}.wav`));
   // A segment may declare a hold: extra silence after the spoken words, giving the
   // visuals room a beat needs beyond its narration. pacing-check reports the
   // shortfall; this pad resolves it (and re-running is free — the TTS is cached).
   const pad = Number(seg.pad) || 0;
-  segments.push({ key: seg.key, start: +cursor.toFixed(3), end: +(cursor + dur).toFixed(3), duration: +dur.toFixed(3), pad: pad, words: seg.text.split(/\s+/).filter(Boolean).length, cached });
+  segments.push({ key: seg.key, start: +cursor.toFixed(3), end: +(cursor + dur).toFixed(3), duration: +dur.toFixed(3), pad: pad, words: seg.text.split(/\s+/).filter(Boolean).length, cached: !!wasCached.get(seg.key) });
   cursor += dur + pad + GAP;
 }
 
 const total = +(cursor - GAP + TAIL).toFixed(3);
+
+/* ---- partial runs must not touch the global artefacts ----
+   `--only` is a smoke test ("does TTS work for this segment?"). It used to write
+   the concatenated `narration.wav`, `timeline.json` and `timeline.js` from that
+   one segment, silently replacing a finished video's timeline with a one-scene
+   version that no downstream stage could use. A partial run now stops here with a
+   segment-scoped timeline and leaves the global artefacts exactly as they were. */
+const complete = wanted.length === script.segments.length;
+if (!complete) {
+  const suffix = wanted.map(s => s.key).join('+');
+  const partialPath = join(OUT_DIR, `timeline.${suffix}.json`);
+  writeFileSync(partialPath, JSON.stringify({
+    script: SCRIPT, voice: VOICE, model: MODEL, measured: true, partial: true,
+    requested: wanted.length, of: script.segments.length, total, segments,
+  }, null, 2));
+
+  const hadGlobal = existsSync(join(OUT_DIR, 'timeline.json'));
+  console.log(`\n[partial] ${wanted.length} of ${script.segments.length} segment(s) requested — a partial run.`);
+  console.log(`[partial] NOT written: narration.wav, timeline.json, timeline.js${hadGlobal ? ' (an existing timeline.json was left untouched)' : ''}`);
+  console.log(`[partial] measured timeline: ${partialPath}`);
+  console.log(`[partial] re-run without --only to rebuild the full track.`);
+  process.exit(0);
+}
 
 /* ---- build the full narration track (silence + segments + silence) ---- */
 const sil = (name, secs) => {
@@ -161,7 +226,7 @@ writeFileSync(join(OUT_DIR, 'timeline.js'),
     total: grandTotal, scenes, windows, segments,
   }, null, 2) + ';\n');
 
-console.log(`\n[audio] ${calls} TTS call(s) · narration track ${trackDur.toFixed(2)}s`);
+console.log(`\n[audio] ${calls} segment(s) synthesized${BATCH ? ` via ${batchJobs} batch job(s)` : ''} · narration track ${trackDur.toFixed(2)}s`);
 console.log(`[windows] ${Object.entries(windows).map(([k, w]) => k + ' ' + w.dur + 's').join(' · ')}`);
 segments.forEach(s => console.log(`   ${s.key.padEnd(7)} ${String(s.start).padStart(7)}s -> ${String(s.end).padStart(7)}s  (${s.duration}s)`));
 console.log(`[out] ${join(OUT_DIR, 'narration.wav')}`);

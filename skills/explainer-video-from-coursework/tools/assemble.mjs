@@ -27,6 +27,7 @@ import { join, resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireCmd } from './env.mjs';
 import { videoDir } from './naming.mjs';
+import { claimWorkDir } from './workdir.mjs';
 
 requireCmd('ffmpeg');
 requireCmd('ffprobe');
@@ -57,6 +58,10 @@ const ffprobeDur = f =>
   parseFloat(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f]).toString());
 
 const script = JSON.parse(readFileSync(SCRIPT, 'utf8'));
+
+/* One work dir per video (see tools/workdir.mjs) — parts/, the silent cut and the
+   final MP4 all have fixed names, so a shared dir would overwrite another video. */
+claimWorkDir(WORK, script, 'assemble');
 /* Per-video manifest: <work>/manifest.json. Falls back to the legacy global path so
    a work dir that hasn't been migrated yet still assembles. */
 const manifestPath = existsSync(join(WORK, 'manifest.json'))

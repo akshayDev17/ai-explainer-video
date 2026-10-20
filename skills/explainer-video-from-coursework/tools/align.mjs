@@ -43,6 +43,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { transcribeWords, MODEL } from './transcribe-gemini.mjs';
 import { loadKey, describe, storeHint } from './key-source.mjs';
+import { claimWorkDir } from './workdir.mjs';
 import { requireCmd } from './env.mjs';
 
 requireCmd('ffmpeg');
@@ -79,6 +80,10 @@ if (FORCE_WHOLE && FORCE_PER_SEG) { console.error('--whole-track and --per-segme
 const scriptPath = resolve(SCRIPT);
 const workDir = resolve(WORK);
 const script = JSON.parse(readFileSync(scriptPath, 'utf8'));
+
+/* One work dir per video (see tools/workdir.mjs) — `lines.json` has the same
+   fixed name for every video, so a shared dir would mix two videos' alignments. */
+claimWorkDir(WORK, script, 'align');
 
 const timelinePath = join(workDir, 'timeline.json');
 const tl = existsSync(timelinePath) ? JSON.parse(readFileSync(timelinePath, 'utf8')) : null;
