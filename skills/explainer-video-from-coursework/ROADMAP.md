@@ -62,9 +62,20 @@ assemble to 8, and "stages 6–7" had meant render/assemble.
 Per-video timing (stages 3–8) accrues in `out/<name>/timing.jsonl` via `tools/stamp.mjs`
 (`begin`/`end` — the end is folded into each stage's *Done when*); `tools/timing-report.mjs`
 renders `timing.csv` (long), `timing.md` (one heading per video), `timing.svg` (static), and
-`timing.html` (interactive Plotly — the `vendor/plotly-basic.min.js` bundle is inlined, so the
-file opens offline). The stage lives in the `stage` *value*, not a column name, so stages can
-be added/renamed/merged without changing the file's shape.
+`timing.html` (interactive Plotly — the `vendor/plotly-basic.min.js` bundle and
+`src/timing-chart.js` are inlined, so the file opens offline). The stage lives in the
+`stage` *value*, not a column name, so stages can be added/renamed/merged without changing
+the file's shape.
+
+**Grouping came out of a spike, not a guess.** A single 85-row chart is unreadable, and the
+plan already groups videos by module (first path segment of a video's first source), so the
+report facets by module: one aggregate bar per module with a click to drill into its videos,
+falling back to the per-video chart when the ledger spans a single module (`--flat` forces
+it). Three layouts were prototyped — module filter list, small multiples, and
+overview-plus-drill — and overview-plus-drill won: it is the only one that shows the whole
+series without spending either a click per module or a wall of truncated labels. The spike
+also surfaced that a fractional legend `y` collapses on short charts, which is why the
+legend is placed from reserved pixels instead.
 
 ### Renderers
 
@@ -416,20 +427,35 @@ because the other 19 parts no longer existed. A reuse pass keyed on `part` mtime
 **Fix:** add `--reuse` (skip segments whose part is newer than their scene and the
 timeline), and/or keep parts by default. *Medium.*
 
-#### 2.9.8 `SKILL.md`'s work-dir convention contradicts its own "Series scope" *(P1)*
+#### 2.9.8 `SKILL.md`'s work-dir convention contradicts its own "Series scope" — **RESOLVED**
 
 - **The contradiction:** "Series scope" says each video gets its own
-  `out/<name>/<NN>/`, but every stage command in `SKILL.md` shows `--out out/<name>`
+  `out/<name>/<NN>/`, but every stage command in `SKILL.md` showed `--out out/<name>`
   / `--work out/<name>`. §1 *Work-dir layout* records the per-video layout as resolved,
-  yet the commands were never updated to match, so the agent has to reconcile the two
+  yet the commands were never updated to match, so the agent had to reconcile the two
   itself.
-- **An undocumented rule:** `--work` must be a path *relative to `src/`*, because the
-  hosts resolve `'../' + WORK + '/timeline.js'` (`src/scene-diagram.html:31`,
-  `src/scene-svg.html:31`). A repo-root-relative or absolute path silently fails to
-  load the timeline.
-
-**Fix:** update the stage commands to `out/<name>/<NN>`, and document the `--work`
-path rule. *Small.*
+- **The stale sub-claim (do not re-add):** this entry used to say `--work` must be a
+  path *relative to `src/`*, citing the hosts resolving `'../' + WORK + '/timeline.js'`.
+  That was true of an older host; `render.mjs:81` now converts `--work` with
+  `pathToFileURL(resolve(WORK))`, so a cwd-relative **or absolute** path both work.
+- **Resolved (2026-10-20).** Stage 4/5/8 commands in `SKILL.md` and `PIPELINE.md` now
+  show `out/<name>/<NN>`, the stale parenthetical in *Series scope* is gone, and the
+  `--work` rule is documented there as cwd-relative-or-absolute.
+- **Resolved differently, and better, than the filed fix.** The filed fix was
+  documentation only — but documentation was not the failure mode: an agent that reads
+  the right path from `build-audio.mjs`'s own usage string still collides on a careless
+  re-run, because the harm is structural. `narration.wav`, `timeline.json`, `timeline.js`,
+  `lines.json`, `manifest.json` and the MP4 are named identically for every video, so a
+  second video pointed at one dir silently overwrites the first's timings and every later
+  stage reads the wrong video. New `tools/workdir.mjs` stamps a `.video-identity` marker
+  into the work dir and `build-audio`, `align` and `assemble` **refuse** a `videoIndex`
+  mismatch (exit 3) naming both videos. Permissive by construction: any layout is allowed
+  so long as one dir serves one video, and a same-index retitle (re-enrichment) updates
+  the marker instead of failing.
+- **Related, fixed at the same time:** `build-audio --only` wrote the global
+  `narration.wav` / `timeline.json` / `timeline.js` from a single segment, replacing a
+  finished video's timeline with a one-scene one. A partial run now stops with a
+  segment-scoped `timeline.<key>.json` and touches no global artefact.
 
 #### 2.9.9 The beat model: two things worth resolving *(P2)*
 

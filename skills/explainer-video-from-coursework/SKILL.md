@@ -55,9 +55,12 @@ section, then re-run.
 - **Stages 3–8 repeat once per video you ship.** Give each video its own work
   directory — `out/<name>/<NN>/` — which holds its own `timeline.js`,
   `manifest.json`, `scenes/`, `narration/`, `parts/`, `publish.json` and the
-  finished MP4. *(Some stage commands below still show the older single-directory
-  form `out/<name>`; `out/<name>/<NN>/` is the correct layout — tracked as ROADMAP
-  §2.9.8.)*
+  finished MP4. A work dir belongs to exactly one video: the stage tools stamp a
+  `.video-identity` marker into it and **refuse** a run whose `videoIndex` disagrees,
+  because every video's `narration.wav`, `timeline.json`, `lines.json` and MP4 share
+  the same names — a second video in the same dir would silently overwrite the
+  first's timings. `--work` / `--out` are resolved against the current directory
+  (an absolute path is fine); `render` converts it to a `file://` URL itself.
 - **Videos are independent.** Nothing is shared between them, so two videos can
   coexist and either can be re-rendered or re-assembled on its own (ROADMAP §1,
   *Work-dir layout*). The only shared resource is Chromium's `--port`, so run one
@@ -215,17 +218,34 @@ node tools/stamp.mjs end   --out out/<name> --video <NN> --stage <n>
 
 `begin` writes a throwaway marker; `end` subtracts it and appends one row to
 `out/<name>/timing.jsonl` — `{video, stage, attempt, seconds, ended_at, note}` — and a
-retry of the same stage becomes the next `attempt` automatically. At series end, render
-the audit:
+retry of the same stage becomes the next `attempt` automatically. Render the audit with:
 
 ```bash
 node tools/timing-report.mjs --out out/<name>   # → timing.csv · timing.md · timing.svg · timing.html
 ```
 
-`timing.html` is the interactive view — a self-contained Plotly chart (the bundle is
+`timing.html` is the interactive view — self-contained (Plotly and the chart script are
 inlined, so it opens with no network): horizontal stacked bars, hover for exact seconds,
 legend-click to toggle a stage, zoom/pan/download from the modebar. `timing.svg` is the
-no-JS fallback for anything that can't run a browser.
+no-JS fallback; `timing.csv`/`timing.md` carry the full per-video, per-attempt detail.
+
+**Grouping is automatic.** The plan already groups videos by module — the first path
+segment of a video's first source — so an 85-video series is really 17 modules. When the
+ledger spans more than one module, the chart shows **one aggregate bar per module** and a
+click breaks that module down by video; a single-module series renders every video
+instead, since grouping it would be a pointless extra click. `--flat` forces the
+per-video chart for a multi-module series.
+
+**When to render it** — the ledger is the record and the views are free to regenerate, so
+this is never urgent:
+
+- **Series end** — always; this is the audit deliverable.
+- **Module boundary** — during a long run, when the next video's module differs from the
+  one just finished. The bar for that module is complete, so it is worth a look.
+- **On demand** — any time you or the user wants it.
+
+Do **not** render mid-video (a stage may be stamped, so its totals are partial) or after a
+`--force` re-plan (the ledger keys on the plan index, which reshuffling breaks).
 
 The stage lives in the `stage` *value*, never a column name, so stages can be added,
 renamed, or merged later without touching the file's shape.
@@ -279,11 +299,16 @@ node tools/stamp.mjs begin --out out/<name> --video <NN> --stage 4
 
 
 ```bash
-node tools/build-audio.mjs --script out/<name>/scripts/<NN>-*.json --out out/<name> --voice Aoede
+node tools/build-audio.mjs --script out/<name>/scripts/<NN>-*.json --out out/<name>/<NN> --voice Aoede
 ```
 
 Writes `narration/<seg>.wav`, `narration.wav`, `timeline.json`, and `timeline.js`
 (browser-loadable) — all into the work dir.
+
+A **partial** run (`--only <key>`, a smoke test) writes none of the three global
+artefacts. It stops with a segment-scoped `timeline.<key>.json` and leaves an
+existing `timeline.json` / `narration.wav` untouched, so a smoke test can never
+leave a finished video with a one-scene timeline.
 This is **the only network stage** — it spends the Gemini TTS key. The key is read from
 the OS secret store — macOS Keychain · Linux `secret-tool` · Windows Credential Manager — never env or
 a plaintext file. If it is missing, `build-audio` prints the exact one-time store command
@@ -476,7 +501,7 @@ declared hold or an error.
 ```
 write/edit a scene
   → pacing-check            (timing, shortfalls, dead air)
-  → render --shots 6,20,34 --work out/<name> --scene "src/scene-diagram.html?scene=<name>"
+  → render --shots 6,20,34 --work out/<name>/<NN> --scene "src/scene-diagram.html?scene=<name>"
   → LOOK at the stills      ← the step nothing automates
   → fix → repeat
 ```
@@ -659,7 +684,7 @@ node tools/stamp.mjs begin --out out/<name> --video <NN> --stage 8
 
 ```bash
 node tools/assemble.mjs --script out/<name>/scripts/<NN>-*.json \
-                        --work out/<name> --name <output> --dest <destination>
+                        --work out/<name>/<NN> --name <output> --dest <destination>
 ```
 
 With `--dest`, the finished MP4 lands in `<destination>/<NN>-<slug>/<output>.mp4` —

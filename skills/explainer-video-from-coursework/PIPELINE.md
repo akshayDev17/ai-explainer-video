@@ -147,7 +147,7 @@ it. The rules:
 ### 4 · `/audio` — TTS and the measured timeline
 
 ```bash
-node tools/build-audio.mjs --script out/<name>/scripts/NN-*.json --out out/<name> --voice Aoede
+node tools/build-audio.mjs --script out/<name>/scripts/NN-*.json --out out/<name>/<NN> --voice Aoede
 ```
 
 | | |
@@ -235,7 +235,7 @@ what is missing is the segmented progress bar and Google key moments. Nothing in
 
 ```bash
 node tools/assemble.mjs --script out/<name>/scripts/NN-*.json \
-                        --work out/<name> --name <output>
+                        --work out/<name>/<NN> --name <output>
 ```
 
 | | |
@@ -274,19 +274,19 @@ node tools/apply-enrichment.mjs --plan out/lld/plan.json --enrichment out/lld/en
 node tools/script-check.mjs --script out/lld/scripts/06-*.json --plan out/lld/plan.enriched.json
 
 # 4 — audio
-node tools/build-audio.mjs --script out/lld/scripts/06-*.json --out out/video6 --voice Aoede
+node tools/build-audio.mjs --script out/lld/scripts/06-*.json --out out/lld/06 --voice Aoede
 
 # 5 — scenes (agent writes 7 configs in scenes/, registered in scenes/manifest.json)
-node tools/pacing-check.mjs --scene scenes/<name>.js --timeline out/video6/timeline.json --segment <key>
+node tools/pacing-check.mjs --scene out/lld/06/scenes/<name>.js --timeline out/lld/06/timeline.json --segment <key>
 
 # 6 — publish (agent writes publish.json: chapters + blurb)
-node tools/publish.mjs --work out/video6 --script out/lld/scripts/06-*.json --dest <destination>
+node tools/publish.mjs --work out/lld/06 --script out/lld/scripts/06-*.json --dest <destination>
 
 # 7 + 8 — render and assemble
-node tools/assemble.mjs --script out/lld/scripts/06-*.json --work out/video6 --name video6-solid
+node tools/assemble.mjs --script out/lld/scripts/06-*.json --work out/lld/06 --name video6-solid
 ```
 
-Result: `out/video6/video6-solid.mp4` — 7 segments, 205.70s of picture against
+Result: `out/lld/06/video6-solid.mp4` — 7 segments, 205.70s of picture against
 199.00s of measured narration (the final segment holds past its narration).
 
 ---
