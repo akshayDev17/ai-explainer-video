@@ -173,6 +173,140 @@ export async function synthesize({
   return { wav, mime: audio.mime, usage: r.json?.usage || null, raw: r.json };
 }
 
+/* ---- Batch TTS (generateContent + batchGenerateContent) ----
+   Batch is token-metered, not request-metered, so it sidesteps the per-day RPD
+   wall. It is generateContent-only and uses a DIFFERENT voice schema than the
+   Interactions API: speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName. */
+
+export function genTtsRequest(text, style, voice) {
+  const part = { text };
+  if (style) part.speech_metadata = { style };
+  return {
+    contents: [{ role: 'user', parts: [part] }],
+    generationConfig: {
+      responseModalities: ['AUDIO'],
+      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
+    },
+  };
+}
+
+/**
+ * Synthesize many styled segments in one batch job. Returns the segments that
+ * produced audio, so a partial success still yields something.
+ *
+ * Fallback ladder: on a quota/transient failure the *remaining* segments spill
+ * onto `fallbackModel` — the "exhaust one model's daily budget, then the next"
+ * behaviour. The whole job is never silently downgraded; only the leftovers are.
+ *
+ * @returns {Promise<{segments: Array<{key, wav}>, jobs: number}>}
+ */
+export async function synthesizeBatch({
+  segments,                          // [{ key, text, style }]
+  voice = 'Kore',
+  model = DEFAULT_MODEL,
+  fallbackModel = FALLBACK_MODEL,
+  key,
+  pollMs = 15000,
+  timeoutMs = 30 * 60 * 1000,
+} = {}) {
+  const k = apiKey(key);
+  const done = new Map();            // key -> WAV Buffer
+
+  const submit = async (m, segs) => {
+    const body = {
+      batch: {
+        display_name: 'narration',
+        input_config: {
+          requests: {
+            requests: segs.map(s => ({ request: genTtsRequest(s.text, s.style, voice), metadata: { key: s.key } })),
+          },
+        },
+      },
+    };
+    const res = await fetch(`${API}/models/${m}:batchGenerateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': k },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    let json = null; try { json = JSON.parse(text); } catch {}
+    if (!res.ok) {
+      const msg = scrub(json?.error?.message || text).slice(0, 300).replace(/\s+/g, ' ');
+      const err = new Error(`batch ${res.status}: ${msg}`);
+      err.quota = /quota|per day|RESOURCE_EXHAUSTED|exhausted/i.test(msg);
+      err.transient = err.quota || res.status === 429 || res.status === 503;
+      throw err;
+    }
+    const name = json?.name || json?.metadata?.name;
+    if (!name) throw new Error('batch submit returned no job name');
+    return name;
+  };
+
+  const poll = async (name) => {
+    const deadline = Date.now() + timeoutMs;
+    let last = null;
+    for (;;) {
+      if (Date.now() > deadline) {
+        const e = new Error(`batch job not finished after ${Math.round(timeoutMs / 60000)} min (${name})`);
+        e.timeout = true; throw e;
+      }
+      await sleep(pollMs);
+      const res = await fetch(`${API}/${name}`, { headers: { 'x-goog-api-key': k } });
+      const gj = await res.json();
+      const state = gj?.state || gj?.metadata?.state;
+      if (state !== last) { process.stderr.write(`  [batch] ${state}\n`); last = state; }
+      if (state === 'BATCH_STATE_SUCCEEDED') return gj;
+      if (state === 'BATCH_STATE_FAILED' || state === 'BATCH_STATE_CANCELLED') {
+        throw new Error(`batch job ${state}`);
+      }
+    }
+  };
+
+  /* Map each inlined response back to its segment (by echoed metadata key, else
+     by request order) and stash any audio. Returns the segments still missing. */
+  const harvest = (job, segs) => {
+    const list = job?.metadata?.output?.inlinedResponses?.inlinedResponses
+      || job?.output?.inlinedResponses?.inlinedResponses || [];
+    list.forEach((item, i) => {
+      const parts = item?.response?.candidates?.[0]?.content?.parts || [];
+      const audio = parts.find(p => (p?.inlineData?.mimeType || '').startsWith('audio'));
+      if (!audio) return;
+      const mk = item?.metadata?.key;
+      const seg = mk ? segs.find(s => s.key === mk) : segs[i];
+      if (seg) done.set(seg.key, Buffer.from(audio.inlineData.data, 'base64'));
+    });
+    return segs.filter(s => !done.has(s.key));
+  };
+
+  const rungs = [model];
+  if (fallbackModel && fallbackModel !== model) rungs.push(fallbackModel);
+
+  let pending = segments.slice();
+  let jobs = 0;
+  for (const m of rungs) {
+    if (!pending.length) break;
+    let failed = [];
+    try {
+      const name = await submit(m, pending);
+      jobs++;
+      failed = harvest(await poll(name), pending);
+    } catch (e) {
+      if (!e.transient && !e.timeout && !/BATCH_STATE_FAILED/.test(e.message)) throw e;
+      process.stderr.write(`  [batch] ${m} unavailable — ${e.message.split('\n')[0]}\n`);
+      failed = pending.slice();       // retry everything on the next rung
+    }
+    pending = failed;
+  }
+
+  if (pending.length) {
+    throw new Error(`[batch] ${pending.length} segment(s) still lack audio after all models: ${pending.map(s => s.key).join(', ')}`);
+  }
+  return {
+    segments: segments.filter(s => done.has(s.key)).map(s => ({ key: s.key, wav: done.get(s.key) })),
+    jobs,
+  };
+}
+
 /** List voices available to this project (prebuilt + extended library + custom). */
 export async function listVoices(key) {
   const r = await call('/voices', null, apiKey(key), 'GET');
