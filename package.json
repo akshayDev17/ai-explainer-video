@@ -1,6 +1,6 @@
 {
   "name": "explainer-video-from-coursework",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Turn a directory of structured coursework notes into a narrated, animated explainer-video series.",
   "type": "module",
   "main": "lib/index.js",
