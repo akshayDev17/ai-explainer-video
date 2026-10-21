@@ -63,8 +63,11 @@ section, then re-run.
   (an absolute path is fine); `render` converts it to a `file://` URL itself.
 - **Videos are independent.** Nothing is shared between them, so two videos can
   coexist and either can be re-rendered or re-assembled on its own (ROADMAP §1,
-  *Work-dir layout*). The only shared resource is Chromium's `--port`, so run one
-  render/assemble at a time.
+  *Work-dir layout*). The only shared resource is Chromium's `--port`, so give every
+  concurrent `render`/`assemble` its own: `assemble.mjs --port <n>` forwards the port
+  to each segment render and **refuses a port already in use**, because sharing one
+  does not fail cleanly — the second run attaches to the first browser's page and
+  encodes the wrong video under its own filename, with exit 0.
 - **One video end-to-end is a valid stopping point** (a pilot, or a single-target
   run). The series is the full deliverable, but each video is produced
   independently.
@@ -655,6 +658,23 @@ sequence → ffmpeg H.264. It is not a whole-video renderer: `--scene` takes a s
 stage 8 drives. A window rendered with no `--narration` comes out silent, which is
 what assembly wants.
 
+**Each distinct frame is captured once.** `renderAt(t)` is a pure function of time, so
+consecutive frames are very often byte-identical — measured on this pipeline: 82% on a
+declarative diagram scene, 90% on an `svg` scene, 99.7% on a held card. A screenshot is
+~63 ms, the bulk of render wall time, so the capture loop asks the *page* instead: after
+each `renderAt(t)` it hashes the serialized `#stage` SVG (~4 ms) and, when the markup is
+unchanged, hardlinks the previous PNG to this frame number — same inode, zero extra
+bytes — leaving the ffmpeg step untouched. There is **no flag**; this is the only capture
+path. Two guards make a silently-wrong result impossible: a scene that declares CSS/web
+animations (`document.getAnimations()`) takes the plain capture path from frame 0, and
+every 30 frames a real screenshot is diffed against the frame that was written — on
+disagreement the run writes the truthful frame, re-captures every frame since the last
+audit, and drops to plain capture for the rest of the segment. Measured across two full
+videos (72 scenes, ~54,000 frames): SSIM 1.000000 against renders that photographed every
+frame, at 3.3× and 4.3× the speed. The final `[dedup]` line reports screenshots taken vs
+total, reuse %, and audit results; a `dedup off from frame N` line means a guard fired and
+is informational, not an error.
+
 If the run fails with `Playwright cache not found`, the headless Chromium is not
 installed — point the user at `SETUP.md` (*Headless Chromium*) rather than touching the
 scene.
@@ -695,8 +715,17 @@ node tools/stamp.mjs begin --out out/<name> --video <NN> --stage 8
 
 ```bash
 node tools/assemble.mjs --script out/<name>/scripts/<NN>-*.json \
-                        --work out/<name>/<NN> --name <output> --dest <destination>
+                        --work out/<name>/<NN> --name <output> --dest <destination> \
+                        [--port 9333]
 ```
+
+`--port` (default 9333) is forwarded to every per-segment `render.mjs`, so **two
+videos can assemble concurrently** when each is given its own port — the batch
+caveat from `SERIES.md` applies to stage 8 too. The run aborts before segment one
+if the port is already listening, because a shared port is the one failure this
+tool cannot detect afterwards: the second assembly silently encodes the first
+video's scene (verified — byte-identical frames, exit 0, a valid MP4 of the wrong
+video). This is why the per-video agent can own stage 8 end to end on its own port.
 
 With `--dest`, the finished MP4 lands in `<destination>/<NN>-<slug>/<output>.mp4` —
 the same folder `publish` (stage 6) wrote `description.md` and `captions.srt` into.
