@@ -226,8 +226,8 @@ what is missing is the segmented progress bar and Google key moments. Nothing in
 
 | | |
 |---|---|
-| Tool | `tools/render.mjs` |
-| Does | headless Chromium via CDP → PNG sequence → ffmpeg |
+| Tool | `tools/render.mjs` (+ `tools/frame-dedup.mjs`) |
+| Does | headless Chromium via CDP → PNG sequence → ffmpeg. Each **distinct** frame is captured once; repeats are hardlinked from their predecessor (measured 82% on a diagram scene, 90% on an svg scene, 99.7% on a held card). Guards: scenes declaring CSS/web animations take the plain capture path, and an audit every 30 frames diffs a real screenshot against the frame written. No flag — it is the only capture path. |
 | Flags | `--scene`, `--shots` (QA stills), `--range t0,t1`, `--outdir`, `--name`, `--narration` · also `--fps`, `--crf`, `--shot-dir`, `--keep-frames` |
 | Diagnose | `tools/debug-page.mjs` — prints boot-time console errors; `render.mjs` only reports "never exposed VIDEO_META" |
 

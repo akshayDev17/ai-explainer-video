@@ -11,6 +11,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, renameSync } from 'node:f
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { chromiumBinOrExit } from './chromium.mjs';
+import { runFrames } from './frame-dedup.mjs';
 import { requireNode, requireCmd } from './env.mjs';
 
 requireNode();
@@ -113,12 +114,15 @@ try {
   })();
   console.log(`[scene] ${meta.width}x${meta.height} @ ${meta.fps}fps, ${meta.total}s`);
 
+  const screenshot = async () => Buffer.from(
+    (await cdp.send('Page.captureScreenshot',
+      { format: 'png', fromSurface: true, captureBeyondViewport: false })).data, 'base64');
   const shoot = async (t) => {
     await cdp.send('Runtime.evaluate', { expression: `window.renderAt(${t})`, returnByValue: true });
-    const shot = await cdp.send('Page.captureScreenshot',
-      { format: 'png', fromSurface: true, captureBeyondViewport: false });
-    return Buffer.from(shot.data, 'base64');
+    return screenshot();
   };
+  const evaluate = async (expr) =>
+    (await cdp.send('Runtime.evaluate', { expression: expr, returnByValue: true })).result.value;
 
   /* ---- QA mode: a handful of stills ---- */
   if (SHOTS) {
@@ -135,24 +139,22 @@ try {
   } else {
     /* ---- full render ---- */
     const dir = resolve(WORK ? join(WORK, 'frames') : 'frames');
+    /* Wipe, never inherit. frame_%05d.png is numbered from 1 on every run, so leftover
+       frames from an earlier render in this dir would otherwise be encoded into this
+       one — the frames dir is derived, so nothing here is worth keeping. */
+    rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
     const slice = RANGE ? String(RANGE).split(',').map(Number) : [0, meta.total];
     const tStart = slice[0], tEnd = slice[1] == null ? meta.total : slice[1];
     const total = Math.max(1, Math.round((tEnd - tStart) * FPS));
     console.log(`[render] ${total} frames @ ${FPS}fps  (t ${tStart}s -> ${tEnd}s)`);
-    const t0 = Date.now();
-    for (let i = 0; i < total; i++) {
-      const t = tStart + i / FPS;
-      const buf = await shoot(t);
-      writeFileSync(join(dir, `frame_${String(i).padStart(5, '0')}.png`), buf);
-      if (i % 120 === 0 || i === total - 1) {
-        const el = (Date.now() - t0) / 1000;
-        const rate = (i + 1) / Math.max(el, 0.001);
-        const eta = (total - i - 1) / Math.max(rate, 0.001);
-        process.stdout.write(`\r[render] ${i+1}/${total}  ${rate.toFixed(1)} fps  eta ${eta.toFixed(0)}s   `);
-      }
-    }
-    process.stdout.write('\n');
+    /* Capture only the frames that actually change; repeat frames are hardlinked from
+       their predecessor. See tools/frame-dedup.mjs for the probe, the animation gate,
+       and the sampled audit that makes a wrong answer impossible to ship silently. */
+    const stats = await runFrames({ dir, fps: FPS, tStart, tEnd, evaluate, screenshot });
+    console.log(`[dedup] ${stats.screenshots}/${stats.total} screenshots · ` +
+      `${(100 * stats.reused / stats.total).toFixed(1)}% reused · ${stats.distinct} distinct states · ` +
+      `audits ${stats.audits} (${stats.mismatches} mismatched) · capture ${stats.captureSec.toFixed(1)}s`);
     cdp.close();
 
     /* ---- encode ---- */

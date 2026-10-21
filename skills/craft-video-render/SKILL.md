@@ -34,8 +34,18 @@ ffmpeg H.264. It is not a whole-video renderer: `--scene` takes a single
 `host?scene=<config>`, so a multi-scene video is rendered window by window. A window
 rendered with no `--narration` comes out silent, which is what assembly wants.
 
-`--shots 6,20,34` renders QA stills instead of a full sequence; `--keep-frames` retains
-the PNG sequence.
+**Each distinct frame is captured once** (no flag; it is the only capture path). Because
+`renderAt(t)` is pure, consecutive frames are often byte-identical — 82–99% measured — and
+a screenshot costs ~63 ms, so the loop hashes the serialized `#stage` SVG after each
+`renderAt(t)` and hardlinks the previous PNG when the markup is unchanged. Guards: scenes
+declaring CSS/web animations take the plain capture path from frame 0, and every 30 frames
+a real screenshot is diffed against the frame written (on disagreement it re-captures,
+rewinds since the last audit, and falls back to plain capture). Verified at SSIM 1.000000
+against every-frame renders on two full videos, 3.3×–4.3× faster. Read the closing
+`[dedup]` line — screenshots vs total, reuse %, audit mismatches.
+
+`--shots 6,20,34` renders QA stills instead of a full sequence (stills bypass the dedup
+loop — each is a different instant); `--keep-frames` retains the PNG sequence.
 
 **Done when:** the run exits **0** and prints `[done] …<name>.mp4`.
 
