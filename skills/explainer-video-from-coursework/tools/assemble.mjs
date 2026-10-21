@@ -18,13 +18,21 @@
    Usage:
      node tools/assemble.mjs --script out/<name>/scripts/NN-<slug>.json \
                              --work out/<name>/<NN> --name <output> \
-                              --dest <destination>
+                              --dest <destination> [--port 9333]
+
+   `--port` (default 9333) is forwarded to every per-segment render.mjs. Chromium's
+   CDP port is the ONE resource two concurrent assemblies share, and sharing it does
+   not fail cleanly: the second render attaches to the first browser's page and
+   encodes the FIRST video's scene under its own name (measured on two concurrent
+   runs — identical decoded frame hashes, exit 0, a valid MP4 of the wrong video).
+   Because that failure is silent, the port is asserted free before segment one.
    ========================================================================== */
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, readdirSync, copyFileSync } from 'node:fs';
 import { join, resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createConnection } from 'node:net';
 import { requireCmd } from './env.mjs';
 import { videoDir } from './naming.mjs';
 import { claimWorkDir } from './workdir.mjs';
@@ -47,6 +55,19 @@ const ONLY = flag('only', null);
 const KEEP = !!flag('keep-parts', false);
 const TOLERANCE = parseFloat(flag('audio-tolerance', '1.5'));   // dB
 const DEST = flag('dest', null);   // where to copy the finished mp4 (never committed)
+const PORT = String(flag('port', '9333'));  // CDP port, forwarded to every segment render.
+                                            // One per concurrent assembly (SERIES.md rule 2).
+
+/* Refuse a port someone else already owns. Without this, render.mjs attaches to the
+   other browser's page and encodes the wrong video with no error (see header). */
+function isPortFree(port) {
+  return new Promise((resolve) => {
+    const sock = createConnection({ host: '127.0.0.1', port: Number(port) });
+    sock.once('connect', () => { sock.destroy(); resolve(false); });  // someone is listening
+    sock.once('error', () => { sock.destroy(); resolve(true); });     // ECONNREFUSED -> free
+    setTimeout(() => { sock.destroy(); resolve(true); }, 750);
+  });
+}
 
 if (!SCRIPT || !existsSync(SCRIPT)) {
   console.error('usage: node tools/assemble.mjs --script <script.json> --work <dir> --name <output>');
@@ -101,9 +122,16 @@ const order = script.segments.map(s => s.key).filter(k => !ONLY || k === ONLY);
 const partDir = resolve(WORK, 'parts');
 mkdirSync(partDir, { recursive: true });
 
-console.log(`[assemble] ${order.length} segment(s) · timeline ${tl.total}s · narration ${existsSync(narration) ? 'present' : 'MISSING'}\n`);
+console.log(`[assemble] ${order.length} segment(s) · timeline ${tl.total}s · narration ${existsSync(narration) ? 'present' : 'MISSING'} · port ${PORT}\n`);
 
 /* ---------------- render each window, SILENT ---------------- */
+if (!(await isPortFree(PORT))) {
+  console.error(`\n[assemble] port ${PORT} is already in use — another render/assemble owns it.`);
+  console.error(`[assemble] Give this run its own --port (e.g. --port ${Number(PORT) + 1}).`);
+  console.error('[assemble] Sharing a CDP port does NOT fail cleanly: the second run attaches to the');
+  console.error('           first browser and encodes the other video\'s frames under its own name.');
+  process.exit(1);
+}
 for (const key of order) {
   const w = windows[key];
   const m = manifest.segments[key];
@@ -117,6 +145,7 @@ for (const key of order) {
     '--name', `part-${key}`,
     '--outdir', join(WORK, 'parts'),
     '--fps', FPS,
+    '--port', PORT,
   ]);
 }
 

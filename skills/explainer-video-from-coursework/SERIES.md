@@ -164,7 +164,10 @@ cannot starve the other videos waiting to be admitted.
 1. **Never write into another video's work dir.** One dir per video; the guard enforces
    it, and the refusal (exit 3) is not to be worked around by deleting the marker.
 2. **One port per agent.** Never omit `--port`; a second render on 9333 does not fail
-   cleanly, it attaches to the running browser's page.
+   cleanly, it attaches to the running browser's page. `assemble.mjs --port <n>` forwards
+   the port to its per-segment renders and **refuses a port already in use**, so the
+   per-video agent can own stage 8 end to end on its own port — and the `parallel`
+   batch applies to stage 8, not just to the stage-7 QA window.
 3. **Never run `build-audio --only` against a finished video.** Partial runs are isolated
    now, but the intent of `--only` is a smoke test on a video you have not finished.
 4. **Scope every per-video command at `out/<name>/<NN>`.** `stamp`, `planner` and

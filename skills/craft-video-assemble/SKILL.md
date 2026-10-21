@@ -27,8 +27,15 @@ description: Assemble one video from its segments — render each window silent,
 ```bash
 node ../explainer-video-from-coursework/tools/assemble.mjs --script out/<name>/scripts/<NN>-*.json \
                         --work out/<name>/<NN> --name <output> \
-                        --dest <destination>
+                        --dest <destination> [--port 9333]
 ```
+
+`--port` (default 9333) is forwarded to every per-segment `render.mjs`, so **two videos can
+assemble concurrently** when each is given its own port — one port per concurrent agent.
+The run aborts before segment one if the port is already listening, because a shared CDP
+port does not fail cleanly: the second assembly attaches to the first browser's page and
+encodes the *other* video's scene under its own filename, exit 0. Verified — byte-identical
+frames from the wrong video. This is what lets a per-video agent own stage 8 end to end.
 
 Per segment: render its own window through its own host + config, **silent** — parts
 are silent on purpose, because muxing narration onto each would restart the whole track
