@@ -78,13 +78,20 @@ jobs:
       - name: Release
         id: release
         env:
-          # The `||` is part of the temporary tag-push entry point: a push event
-          # carries no inputs, so a dispatch-only expression would arrive empty.
-          BUMP: ${{ inputs.bump || 'minor' }}
+          # Empty on the temporary tag-push entry point (a push event carries no
+          # inputs); the step defaults it in shell, where the semantics are plain.
+          BUMP: ${{ inputs.bump }}
           VERSION_OVERRIDE: ${{ inputs.version }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # Everything this step prints lands in the log file Notify attaches — and,
+          # while the temporary telemetry step exists, in a branch readable without a
+          # GitHub token or API quota.
+          exec > >(tee "$RUNNER_TEMP/release.log") 2>&1
+
+          BUMP=${BUMP:-minor}
+          echo "bump=$BUMP"
           PKG=$(node -p "require('./package.json').name")
           CURRENT=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true); CURRENT=${CURRENT#v}
           [ -z "$CURRENT" ] && CURRENT=$(node -p "require('./package.json').version")
@@ -140,7 +147,7 @@ jobs:
               git tag "v$NEXT"
             fi
             git push origin "v$NEXT" HEAD:main
-          } 2>&1 | tee "$RUNNER_TEMP/release.log"
+          }
 
           echo "released=true" >> "$GITHUB_OUTPUT"
           echo "version=$NEXT" >> "$GITHUB_OUTPUT"
@@ -177,3 +184,30 @@ jobs:
         run: |
           python -m pip install --quiet jinja2
           python .github/scripts/notify.py
+
+      # TEMPORARY, deleted with the tag-push entry point above. GitHub requires admin
+      # rights to read a job's log and the unauthenticated API is quota-limited, so a
+      # release driven from a machine without a token cannot see what it did. This
+      # publishes the same log the Notify step attaches, plus the step outcomes, to a
+      # side branch — an outcome channel that needs no credentials.
+      - name: Publish outcome (temporary)
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p .telemetry
+          cp "$RUNNER_TEMP/release.log" .telemetry/release.log 2>/dev/null \
+            || echo "(the Release step never reached its first echo)" > .telemetry/release.log
+          {
+            echo "outcome=${{ steps.release.outcome }}"
+            echo "released=${{ steps.release.outputs.released }}"
+            echo "version=${{ steps.release.outputs.version }}"
+            echo "run_id=${{ github.run_id }}"
+            echo "ref=${{ github.ref }}"
+            echo "event=${{ github.event_name }}"
+            echo "sha=${{ github.sha }}"
+          } > .telemetry/status.txt
+          git checkout -q -B telemetry
+          git add -f .telemetry
+          git -c user.name=ci -c user.email=ci@localhost commit -qm "telemetry run ${{ github.run_id }}"
+          git push -q -f origin telemetry
+          cat .telemetry/status.txt
