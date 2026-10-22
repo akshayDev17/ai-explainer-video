@@ -23,6 +23,13 @@ on:
         description: "Explicit version, e.g. 0.3.0 (optional — overrides bump)"
         required: false
         type: string
+  # TEMPORARY tag-push entry point, removed right after this release. The machine
+  # driving it has an SSH key but no GitHub token, so it cannot call
+  # workflow_dispatch; a tag push is the only authenticated action available. A
+  # GITHUB_TOKEN bridge could not dispatch either ("Resource not accessible").
+  # workflow_dispatch above remains the real, documented interface.
+  push:
+    tags: ["go-release-v*"]
 
 permissions:
   contents: write        # push the release commit + tag
@@ -71,7 +78,9 @@ jobs:
       - name: Release
         id: release
         env:
-          BUMP: ${{ inputs.bump }}
+          # The `||` is part of the temporary tag-push entry point: a push event
+          # carries no inputs, so a dispatch-only expression would arrive empty.
+          BUMP: ${{ inputs.bump || 'minor' }}
           VERSION_OVERRIDE: ${{ inputs.version }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
