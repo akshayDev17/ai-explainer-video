@@ -22,7 +22,16 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with: { node-version: "22" }
-      - run: for f in tools/*.mjs scripts/*.mjs scripts/lib/*.mjs lib/*.js; do node --check "$f"; done
+      # The tools live inside the skill dir, not at the repo root. Globs are expanded
+      # here (fail-fast if nothing matches), so a moved directory breaks loudly instead
+      # of handing `node --check` a literal pattern -- which is what failed CI run #1.
+      - run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(scripts/*.mjs scripts/lib/*.mjs skills/*/tools/*.mjs skills/*/src/*.js lib/*.js)
+          [ ${#files[@]} -gt 0 ] || { echo "no source files matched — the layout moved"; exit 1; }
+          for f in "${files[@]}"; do node --check "$f"; done
+          echo "parsed ${#files[@]} files"
       - run: echo "all tools parse"
 
   vendored-skill:
