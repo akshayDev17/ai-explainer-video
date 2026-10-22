@@ -39,8 +39,11 @@ rmSync(DEST, { recursive: true, force: true });
 cpSync(skillSrc, DEST, { recursive: true });
 
 const sha = hashDir(DEST);
+// No timestamp: the marker is a committed file, so a stamp would make every resync
+// produce a diff even when the content is identical — and "sync is a no-op" would never
+// hold. Provenance is package + version + content hash; the commit date supplies the rest.
 writeFileSync(join(DEST, '.synced-from'),
-  JSON.stringify({ package: SKILL, version, sha256: sha, syncedAt: new Date().toISOString() }, null, 2) + '\n');
+  JSON.stringify({ package: SKILL, version, sha256: sha }, null, 2) + '\n');
 
 const files = hashDir(DEST);
 console.log(`[sync] ${SKILL}@${version} → skills/${SKILL}`);
