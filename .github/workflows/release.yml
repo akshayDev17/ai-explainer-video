@@ -127,7 +127,10 @@ jobs:
             done
             echo "registry confirms $PKG@$NEXT"
 
-            git add package.json plugin.json .claude-plugin/plugin.json
+            # The marketplaces too: they pin the version a host installs from npm, and
+            # leaving them out of this commit is how they fell six releases behind.
+            git add package.json plugin.json .claude-plugin/plugin.json \
+                    .claude-plugin/marketplace.json .agents/plugins/marketplace.json
             if git diff --cached --quiet; then
               echo "note: manifests already at $NEXT — nothing to commit"
             else

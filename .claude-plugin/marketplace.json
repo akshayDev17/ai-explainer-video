@@ -11,7 +11,7 @@
       "source": {
         "source": "npm",
         "package": "explainer-video-from-coursework",
-        "version": "^0.1.0"
+        "version": "^0.4.0"
       },
       "category": "Productivity"
     }

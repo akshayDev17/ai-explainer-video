@@ -43,8 +43,9 @@ jobs:
           set -euo pipefail
           tmp=$(mktemp -d)
           cp package.json plugin.json "$tmp/"
-          mkdir -p "$tmp/.claude-plugin"
-          cp .claude-plugin/plugin.json "$tmp/.claude-plugin/"
+          mkdir -p "$tmp/.claude-plugin" "$tmp/.agents/plugins"
+          cp .claude-plugin/plugin.json .claude-plugin/marketplace.json "$tmp/.claude-plugin/"
+          cp .agents/plugins/marketplace.json "$tmp/.agents/plugins/"
           v=$(node -p "require('./package.json').version")
           cd "$tmp"
           node "$GITHUB_WORKSPACE/scripts/bump.mjs" "$v"
@@ -52,7 +53,17 @@ jobs:
           for f in package.json plugin.json .claude-plugin/plugin.json; do
             grep -q '"version": "9.9.9"' "$f" || { echo "::error::$f was not bumped"; exit 1; }
           done
+          # The marketplaces pin a range, which is what Claude/Codex/Gemini install
+          # from. A bump that skips them is a release those hosts never see.
+          for f in .claude-plugin/marketplace.json .agents/plugins/marketplace.json; do
+            grep -q '"version": "\^9.9.9"' "$f" || { echo "::error::$f pin was not bumped"; exit 1; }
+          done
           echo "bump: idempotent at the current version, complete at a new one"
+
+      # The pin that sent Claude, Codex and Gemini to 0.1.2 for six releases while the
+      # package was on 0.4.0. Nothing read it; now something does.
+      - name: Marketplace pins track the package version
+        run: node scripts/check-marketplace-pins.mjs
 
   vendored-skill:
     name: skills/coursework-author in sync
