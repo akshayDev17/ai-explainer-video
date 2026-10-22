@@ -1,0 +1,12 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "packageRules": [
+    {
+      "matchPackageNames": ["coursework-author"],
+      "groupName": "coursework-author",
+      "automerge": false,
+      "labels": ["dependencies", "vendored-skill"]
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+# CI — the checks that cost nothing and catch the things humans don't.
+#
+# The vendored-skill gate is the generated-artifact check: skills/coursework-author is
+# COPIED out of the coursework-author package because the four plugin hosts (Claude,
+# Codex, Gemini, DSH) only load skills from a plugin's own tree. That copy must never be
+# hand-edited, so CI regenerates the comparison and fails on any drift.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: write          # the bot job below commits the resync to the PR branch
+
+jobs:
+  tools:
+    name: tools parse
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: "22" }
+      - run: for f in tools/*.mjs scripts/*.mjs scripts/lib/*.mjs lib/*.js; do node --check "$f"; done
+      - run: echo "all tools parse"
+
+  vendored-skill:
+    name: skills/coursework-author in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: "22" }
+
+      # The dependency is a `file:` spec until coursework-author is published; a sibling
+      # checkout isn't available on CI, so the gate arms itself only once it is a registry
+      # range (e.g. "^1.0.0"). It is a hard failure from that moment on.
+      - id: dep
+        run: |
+          spec=$(node -p "require('./package.json').devDependencies?.['coursework-author'] ?? ''")
+          echo "spec: $spec"
+          case "$spec" in
+            file:*|link:*|"") echo "run=false" >> "$GITHUB_OUTPUT" ;;
+            *)                echo "run=true"  >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - if: steps.dep.outputs.run == 'true'
+        run: npm install --no-audit --no-fund
+      - if: steps.dep.outputs.run == 'true'
+        run: npm run check:coursework-author-sync
+
+      # A dependency bump opened by a bot must arrive with the regenerated copy, or the
+      # human merges a PR that fails its own gate. So the bot finishes its own PR.
+      - if: steps.dep.outputs.run == 'true' && (github.actor == 'renovate[bot]' || github.actor == 'dependabot[bot]')
+        run: |
+          npm run sync:coursework-author
+          if [ -n "$(git status --porcelain skills/coursework-author)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add skills/coursework-author
+            git commit -m "chore(skills): resync coursework-author from $(node -p "require('./node_modules/coursework-author/package.json').version")"
+            git push
+          else
+            echo "already in sync"
+          fi

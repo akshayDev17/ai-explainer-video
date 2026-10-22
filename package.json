@@ -11,12 +11,29 @@
     "name": "Akshay Prabhakant"
   },
   "license": "MIT",
+  "scripts": {
+    "sync:coursework-author": "node scripts/sync-coursework-author.mjs",
+    "check:coursework-author-sync": "node scripts/check-coursework-author-sync.mjs"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/akshayDev17/ai-explainer-video.git"
   },
-  "keywords": ["explainer-video", "coursework", "narration", "animation", "text-to-speech", "video"],
-  "files": ["plugin.json", ".claude-plugin/plugin.json", "skills/", "lib/", "cordis.patch.yml"],
+  "keywords": [
+    "explainer-video",
+    "coursework",
+    "narration",
+    "animation",
+    "text-to-speech",
+    "video"
+  ],
+  "files": [
+    "plugin.json",
+    ".claude-plugin/plugin.json",
+    "skills/",
+    "lib/",
+    "cordis.patch.yml"
+  ],
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
