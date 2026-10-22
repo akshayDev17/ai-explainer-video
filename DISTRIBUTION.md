@@ -1,7 +1,7 @@
 # Distribution & installation
 
 **One** npm package and one git repo serve all four platforms. Each consumer reads its own
-manifest surface out of the same package and ignores the rest, so the nine skills exist once
+manifest surface out of the same package and ignores the rest, so the eleven skills exist once
 and nothing can drift out of step.
 
 ## Packages
@@ -11,18 +11,23 @@ and nothing can drift out of step.
 | `explainer-video-from-coursework` | Claude Code, Codex, DeepSeek Harness | npm |
 | `akshayDev17/ai-explainer-video` | Antigravity + the marketplace catalogue | git |
 
-## Publish — a tag, not a command
+## Publish — a dispatch, not a commit
 
-Publishing runs in GitHub Actions on a version tag, over OIDC (no npm token) and **staged** —
-a maintainer approves before anything becomes installable.
-[`RELEASING.md`](./RELEASING.md) owns the one-time Trusted Publisher setup and the full flow.
+Commits to `main` do nothing. A release is a manual dispatch of the `release` workflow
+(Actions → release → Run workflow), which computes the next version from the latest `v*` tag,
+bumps every manifest **and both marketplace catalogue pins**, publishes straight to npm over
+OIDC, and only then commits + tags. The click is the single gate and the release is live
+immediately — there is no second approval step, deliberately (see
+[`RELEASING.md`](./RELEASING.md#why-direct-not-staged)).
 
-```sh
-git tag v0.1.3 && git push origin main --tags     # CI stages it; you approve on npmjs.com
-```
+The publish is **confirmed against the registry, not assumed**: the workflow polls
+`https://registry.npmjs.org/<package>/<version>` for up to 12 minutes, because npm answers 404
+for a version it accepted seconds earlier — 7.5 minutes was measured. Nothing is committed or
+tagged until it answers 200. If a run dies after publishing but before its bookkeeping,
+re-dispatching the same version skips the publish and finishes the release.
 
 The manual fallback still works — `npm publish --otp <2FA_OTP>` from the repo root — but it
-carries no provenance attestation.
+bypasses the version computation, the catalogue pins and the tag, so treat it as break-glass.
 
 ## Install — four one-liners
 
@@ -71,9 +76,16 @@ agy plugin install https://github.com/akshayDev17/ai-explainer-video
   the harness supplies `dsh-skill-filesystem` through its own module fallback, verified end
   to end. That keeps the manifest Claude Code and Codex install free of it.
 
-All four surfaces resolve the same **nine** skills: `explainer-video-from-coursework` plus
-its eight `craft-video-<stage>` siblings, all top-level under `skills/` so a single-level
-scan finds every one.
+All four surfaces resolve the same **eleven** skills: `explainer-video-from-coursework`, its
+nine `craft-video-<stage>` siblings, and the vendored `coursework-author` — all top-level under
+`skills/` so a single-level scan finds every one.
+
+Each catalogue pins the version a host installs from npm (`source: npm`, `version: ^x.y.z`).
+That pin is written by `scripts/bump.mjs` during a release and checked in CI
+(`scripts/check-marketplace-pins.mjs`), because a hand-maintained range rots without a symptom:
+this one sat at `^0.1.0` while the package reached 0.4.0, so Claude, Codex and Gemini were
+installing a six-release-old version with nine skills in it. The shelf repo
+(`akshayDev17/my-skills-package`) carries the matching catalogue for `coursework-author`.
 
 ## Sources
 

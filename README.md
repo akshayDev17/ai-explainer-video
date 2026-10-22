@@ -60,7 +60,9 @@ agy plugin install https://github.com/akshayDev17/ai-explainer-video
 ```
 
 All four commands install the **same** npm package — one package, three manifest surfaces,
-one copy of the nine skills. How each platform reads it, and how to publish, is in
+one copy of all eleven skills: the ten video skills plus `coursework-author`, the companion
+skill for writing the coursework these videos come from. How each platform reads it, and how
+to publish, is in
 [`DISTRIBUTION.md`](./DISTRIBUTION.md).
 
 ## Prerequisites
@@ -102,7 +104,8 @@ plugin.json                              Agent Plugins manifest (Codex, Antigrav
 .agents/plugins/                         marketplace.json (Codex)
 cordis.patch.yml + lib/index.js          DSH bundle plugin (serves this package's skills/)
 skills/explainer-video-from-coursework/  the main skill: SKILL.md, tools/, src/, scenes/, SETUP.md
-skills/craft-video-<stage>/              the 8 stage skills, separately invocable
+skills/craft-video-<stage>/              the 9 stage skills, separately invocable
+skills/coursework-author/                the companion skill: authoring the coursework (vendored copy)
 DISTRIBUTION.md                          publish + install commands
 ```
 

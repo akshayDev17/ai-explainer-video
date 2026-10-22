@@ -15,7 +15,8 @@ The one package carries three manifest surfaces, and each consumer reads only it
 | `plugin.json` (root) + `.agents/plugins/marketplace.json` | Codex, Antigravity |
 | `dsh.bundle.patch` → `cordis.patch.yml` → `lib/index.js` | DeepSeek Harness |
 
-`skills/` holds all nine skills once, and every surface points at that single copy.
+`skills/` holds all eleven skills once (ten video skills plus the vendored `coursework-author`),
+and every surface points at that single copy.
 
 ## A release is a button click
 
@@ -28,9 +29,16 @@ The form asks two things:
 - **version** — optional. Type an explicit version like `0.3.0` to override the bump.
 
 Click **Run workflow** and CI does the rest: it computes the next version from the latest tag,
-bumps `package.json`, `plugin.json` and `.claude-plugin/plugin.json` in lockstep, publishes
-straight to npm, and only then commits + tags `v<version>`. If the publish fails, nothing is
+bumps `package.json`, `plugin.json`, `.claude-plugin/plugin.json` **and both marketplace
+catalogue pins** in lockstep, publishes straight to npm, waits for the registry to confirm the
+version is readable, and only then commits + tags `v<version>`. If the publish fails, nothing is
 committed or tagged — the next run recomputes the same version and retries cleanly.
+
+The wait is not paranoia: npm answers 404 for a version it accepted seconds earlier, and says so
+itself (*"your package is being processed and may take a few minutes to become available"*). A
+7.5-minute lag was measured on the sibling package, so the workflow polls for up to 12 minutes
+before giving up. Reading that 404 as a failed publish is how a correct release goes red **and**
+leaves a tag claiming a version the registry had not published yet.
 
 The release is **live immediately** — there is no second approval step. The manual click is the
 single gate: clicking Run workflow *is* the "ship this now" decision.
@@ -95,11 +103,14 @@ Four things it does deliberately:
   links the package page rather than asking for an approval click.
 - **Unconfigured is not broken.** With no SMTP settings it warns in the log and exits 0: a notifier
   you have not set up yet must not fail a release that did succeed.
-- **A configured send that fails exits 1.** The opposite case is worth a red run. You asked to be
-  told about every release, and silence is the one outcome you cannot debug — so if the mail cannot
-  go out, the run should say so. GitHub emails the actor when a run fails, which makes that mail the
-  backstop telling you the notifier itself broke. Either way the release is unaffected: it was
-  published and tagged before this step ran.
+- **A configured send that fails no longer fails the release.** The step runs under
+  `continue-on-error: true`: a mail problem shows as a failed step with its reason in the log,
+  while the job stays green. This reverses the original design, for a concrete reason — the publish
+  succeeded and the whole release went red on `invalid_grant` from a misconfigured `SMTP_USER`,
+  which said nothing about the release itself. The cost is real: a broken notifier is now quieter
+  than before, so leave GitHub's own run notifications on (*Settings → Notifications → System →
+  Actions*) as the backstop. Delete the `continue-on-error: true` line to restore a red run on mail
+  failure.
 
 ### One-time setup (Gmail)
 
@@ -271,9 +282,13 @@ when a rollback workflow exists.
 
 ## If a release fails
 
-- **The publish failed** — the release email carries the tail of `release.log`. Because publishing
+- **The publish failed** — the release log carries the tail of `release.log`. Because publishing
   happens *before* commit + tag, nothing was committed or tagged: the next manual run recomputes the
   same version and retries cleanly.
+- **It published, but the run died before committing/tagging** (registry never confirmed within the
+  12-minute window, or the job was cancelled) — the version is live but the repo is behind.
+  Re-dispatch with an explicit `version` equal to the published one: the workflow sees it already on
+  the registry, skips the publish, and only does the commit + tag.
 - **Published and bad** — npm will not let you republish that version. Release the next one and
   `npm deprecate explainer-video-from-coursework@X.Y.Z "broken — use <next>"`.
 
@@ -281,5 +296,6 @@ when a rollback workflow exists.
 
 - **A GitHub Release per tag** — a `gh release create` step after the tag push.
 - **Tag protection** — a repository rule on `v*` stops a tag being moved or deleted.
-- **A post-publish smoke test** — `npm view <pkg> version` and a clean install in a scratch
-  directory, after publish, so a bad tarball is caught before anyone consumes it.
+- **A post-publish smoke test** — a clean install of the published tarball in a scratch directory,
+  so a bad tarball is caught before anyone consumes it. The registry check that *is* wired covers
+  availability, not installability.
