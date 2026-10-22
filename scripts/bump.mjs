@@ -11,6 +11,28 @@ if (!version || !/^\d+\.\d+\.\d+/.test(version)) {
   process.exit(1);
 }
 
+const pkg = JSON.parse(readFileSync(resolve("package.json"), "utf8")).name;
+const MARKETPLACES = [".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"];
+
+// Read and validate the catalogues BEFORE writing a manifest: a release that rewrote
+// three manifests and then died on a missing catalogue entry left a half-bumped tree.
+const catalogues = MARKETPLACES.map((file) => {
+  const path = resolve(file);
+  let json;
+  try {
+    json = JSON.parse(readFileSync(path, "utf8"));
+  } catch (err) {
+    console.error(`bump: cannot read ${file}: ${err.message}`);
+    process.exit(1);
+  }
+  const entry = (json.plugins ?? []).find((p) => p.source?.package === pkg);
+  if (!entry) {
+    console.error(`bump: ${file} does not list ${pkg} — that host would get no update`);
+    process.exit(1);
+  }
+  return { file, path, json, entry };
+});
+
 const MANIFESTS = ["package.json", "plugin.json", ".claude-plugin/plugin.json"];
 const VERSION = /"version"\s*:\s*"([^"]*)"/;
 let found = 0;
@@ -43,30 +65,9 @@ if (!found) {
 }
 console.log(`bump: ${found} manifest(s), ${touched} changed`);
 
-// The marketplaces are how Claude, Codex and Gemini install this plugin: each entry
-// points at the npm package with a version RANGE, and a range that was right when it
-// was written quietly rots. `^0.1.0` was still sitting in both files after six
-// releases, so those hosts were installing 0.1.2 — nine skills, and none of the fixes
-// since. Pinning it here means a release cannot leave them behind.
-const pkg = JSON.parse(readFileSync(resolve("package.json"), "utf8")).name;
-const MARKETPLACES = [".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"];
-
-for (const file of MARKETPLACES) {
-  const path = resolve(file);
-  let json;
-  try {
-    json = JSON.parse(readFileSync(path, "utf8"));
-  } catch (err) {
-    console.error(`bump: cannot read ${file}: ${err.message}`);
-    process.exit(1);
-  }
-  const entry = (json.plugins ?? []).find((p) => p.source?.package === pkg);
-  if (!entry) {
-    console.error(`bump: ${file} does not list ${pkg} — that host would get no update`);
-    process.exit(1);
-  }
+// Then write the pins: same no-op contract as the manifests.
+for (const { file, path, json, entry } of catalogues) {
   const want = `^${version}`;
-  const before = readFileSync(path, "utf8");
   if (entry.source.version === want) {
     console.log(`bump: ${file} already ${want}`);
     continue;
@@ -75,4 +76,3 @@ for (const file of MARKETPLACES) {
   writeFileSync(path, `${JSON.stringify(json, null, 2)}\n`);
   console.log(`bump: ${file} -> ${want}`);
 }
-
