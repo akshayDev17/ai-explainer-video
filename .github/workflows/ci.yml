@@ -34,6 +34,26 @@ jobs:
           echo "parsed ${#files[@]} files"
       - run: echo "all tools parse"
 
+      # A release re-run bumps to the version it is already at. That used to be
+      # reported as "no version field found" (the no-op replace and the missing field
+      # were the same branch), so the recovery path a dead release needs was itself
+      # broken. Runs in a temp copy, since bump.mjs writes the manifests in place.
+      - name: bump is idempotent and touches every manifest
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          cp package.json plugin.json "$tmp/"
+          mkdir -p "$tmp/.claude-plugin"
+          cp .claude-plugin/plugin.json "$tmp/.claude-plugin/"
+          v=$(node -p "require('./package.json').version")
+          cd "$tmp"
+          node "$GITHUB_WORKSPACE/scripts/bump.mjs" "$v"
+          node "$GITHUB_WORKSPACE/scripts/bump.mjs" 9.9.9
+          for f in package.json plugin.json .claude-plugin/plugin.json; do
+            grep -q '"version": "9.9.9"' "$f" || { echo "::error::$f was not bumped"; exit 1; }
+          done
+          echo "bump: idempotent at the current version, complete at a new one"
+
   vendored-skill:
     name: skills/coursework-author in sync
     runs-on: ubuntu-latest
