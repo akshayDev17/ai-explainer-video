@@ -57,9 +57,17 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      # One step so a single outcome drives the notification. Order matters:
-      # publish BEFORE commit+tag, so a failed publish does not consume the
-      # version — the next manual run recomputes the same version and retries.
+      # One step so a single outcome drives the notification, and the order inside it
+      # is the design: publish, then WAIT for the registry to admit the version
+      # exists, then commit + tag. Nothing is recorded in git until the registry
+      # confirms, so a publish that consumed a version without shipping it can never
+      # be papered over by a tag.
+      #
+      # Waiting is not paranoia. npm answers 404 for a version it accepted seconds
+      # ago and says so itself ("Your package is being processed and may take a few
+      # minutes to become available"). Measured on the sibling package: 7.5 minutes
+      # between "+ coursework-author@1.0.1" and the version becoming readable.
+      # Reading that 404 as a failed publish is how a correct release goes red.
       - name: Release
         id: release
         env:
@@ -68,6 +76,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          PKG=$(node -p "require('./package.json').name")
           CURRENT=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true); CURRENT=${CURRENT#v}
           [ -z "$CURRENT" ] && CURRENT=$(node -p "require('./package.json').version")
           if [ -n "$VERSION_OVERRIDE" ]; then
@@ -75,14 +84,52 @@ jobs:
           else
             NEXT=$(node scripts/next-version.mjs "$CURRENT" "$BUMP")
           fi
-          echo "releasing: $CURRENT -> $NEXT"
+          echo "releasing: $PKG $CURRENT -> $NEXT"
           node scripts/bump.mjs "$NEXT"
 
+          # Ask the registry itself, not npm's cache, so a stale packument cannot
+          # answer for the registry. Anonymous reads suffice: public package.
+          registry_has() {
+            curl -fsS -H 'Accept: application/json' \
+              "https://registry.npmjs.org/$1/$2" -o /dev/null
+          }
+
           {
-            npx --yes npm@11.15.0 publish
+            if registry_has "$PKG" "$NEXT"; then
+              # A previous run may have published this version and died before the
+              # bookkeeping below. Publishing again would be refused ("cannot publish
+              # over the previously published versions"), so resume instead: finish
+              # the release the registry already agreed to.
+              echo "note: $PKG@$NEXT is already published — resuming the release"
+            else
+              npx --yes npm@11.15.0 publish
+            fi
+
+            ATTEMPTS=48          # 48 x 15s = 12 minutes, twice the measured worst case
+            for attempt in $(seq 1 "$ATTEMPTS"); do
+              registry_has "$PKG" "$NEXT" && break
+              if [ "$attempt" -eq "$ATTEMPTS" ]; then
+                echo "::error::$PKG@$NEXT is still absent from the registry after 12 minutes."
+                echo "Check https://www.npmjs.com/package/$PKG/v/$NEXT before re-dispatching:"
+                echo "if it landed, re-dispatch with version=$NEXT and the publish is skipped."
+                exit 1
+              fi
+              echo "waiting for $PKG@$NEXT (attempt $attempt/$ATTEMPTS)"
+              sleep 15
+            done
+            echo "registry confirms $PKG@$NEXT"
+
             git add package.json plugin.json .claude-plugin/plugin.json
-            git commit -m "chore(release): $NEXT"
-            git tag "v$NEXT"
+            if git diff --cached --quiet; then
+              echo "note: manifests already at $NEXT — nothing to commit"
+            else
+              git commit -m "chore(release): $NEXT"
+            fi
+            if git rev-parse -q --verify "refs/tags/v$NEXT" > /dev/null; then
+              echo "note: tag v$NEXT already exists"
+            else
+              git tag "v$NEXT"
+            fi
             git push origin "v$NEXT" HEAD:main
           } 2>&1 | tee "$RUNNER_TEMP/release.log"
 
@@ -91,8 +138,15 @@ jobs:
 
       # Email on success or failure; silent only if the release step was skipped
       # (which cannot happen for a manual dispatch, but notify.py is defensive).
+      #
+      # continue-on-error: a mail server must not be able to turn a release that
+      # published correctly into a red run. That happened: the publish succeeded and
+      # the job failed on "OAuth token refresh failed — HTTP 400: invalid_grant",
+      # which was a wrong SMTP_USER, not a release problem. The failure is still
+      # visible as a warning and the log is attached; it just cannot fail the job.
       - name: Notify
         if: always()
+        continue-on-error: true
         env:
           RELEASE_OUTCOME: ${{ steps.release.outcome }}
           RELEASED: ${{ steps.release.outputs.released }}
