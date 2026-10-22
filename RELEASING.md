@@ -103,14 +103,11 @@ Four things it does deliberately:
   links the package page rather than asking for an approval click.
 - **Unconfigured is not broken.** With no SMTP settings it warns in the log and exits 0: a notifier
   you have not set up yet must not fail a release that did succeed.
-- **A configured send that fails no longer fails the release.** The step runs under
-  `continue-on-error: true`: a mail problem shows as a failed step with its reason in the log,
-  while the job stays green. This reverses the original design, for a concrete reason — the publish
-  succeeded and the whole release went red on `invalid_grant` from a misconfigured `SMTP_USER`,
-  which said nothing about the release itself. The cost is real: a broken notifier is now quieter
-  than before, so leave GitHub's own run notifications on (*Settings → Notifications → System →
-  Actions*) as the backstop. Delete the `continue-on-error: true` line to restore a red run on mail
-  failure.
+- **A configured send that fails exits 1.** The opposite case is worth a red run. You asked to be
+  told about every release, and silence is the one outcome you cannot debug — so if the mail cannot
+  go out, the run should say so. GitHub emails the actor when a run fails, which makes that mail the
+  backstop telling you the notifier itself broke. Either way the release is unaffected: it was
+  published and tagged before this step ran.
 
 ### One-time setup (Gmail)
 

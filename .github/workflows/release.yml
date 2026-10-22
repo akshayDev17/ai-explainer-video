@@ -150,14 +150,14 @@ jobs:
       # Email on success or failure; silent only if the release step was skipped
       # (which cannot happen for a manual dispatch, but notify.py is defensive).
       #
-      # continue-on-error: a mail server must not be able to turn a release that
-      # published correctly into a red run. That happened: the publish succeeded and
-      # the job failed on "OAuth token refresh failed — HTTP 400: invalid_grant",
-      # which was a wrong SMTP_USER, not a release problem. The failure is still
-      # visible as a warning and the log is attached; it just cannot fail the job.
+      # No continue-on-error, deliberately. A *configured* send that fails exits 1 and
+      # turns the run red: you asked to be told about every release, and silence is the
+      # one outcome you cannot debug. An *unconfigured* notifier warns and exits 0, so
+      # a not-yet-set-up mailer never fails a release. The cost is that a broken
+      # notifier can redden a run that published correctly — that is the chosen trade,
+      # because the release itself is already published and tagged before this runs.
       - name: Notify
         if: always()
-        continue-on-error: true
         env:
           RELEASE_OUTCOME: ${{ steps.release.outcome }}
           RELEASED: ${{ steps.release.outputs.released }}
