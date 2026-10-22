@@ -40,6 +40,6 @@
     }
   },
   "devDependencies": {
-    "coursework-author": "^1.0.0"
+    "coursework-author": "^1.0.2"
   }
 }
