@@ -2,11 +2,13 @@
 /* =============================================================================
    publish.mjs — /publish stage (stage 6): chapters and captions.
 
-   The agent writes out/<name>/<NN>/publish.json (chapters[] + blurb); this tool
-   resolves each chapter's timecode from the measured windows, generates the SRT
-   from narration/<key>.src, validates YouTube's chapter rules, and writes the two
-   deliverables into the video's destination folder (`--dest/<NN>-<slug>/`) beside the MP4:
+   The agent writes out/<name>/<NN>/publish.json (chapters[] + blurb + youtubeTitle);
+   this tool resolves each chapter's timecode from the measured windows, generates the
+   SRT from narration/<key>.src, checks YouTube's chapter rules and title limits, and
+   writes the three deliverables into the video's destination folder
+   (`--dest/<NN>-<slug>/`) beside the MP4:
 
+       title.txt        — the upload title, one line, ≤100 chars
        description.md   — the blurb, then the chapter block, paste-ready plain text
        captions.srt     — one cue per segment, verbatim spoken text
 
@@ -16,7 +18,7 @@
                             [--dest <destination>]
    ========================================================================== */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, readdirSync } from 'node:fs';
 import { join, resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { videoDir } from './naming.mjs';
@@ -118,6 +120,49 @@ if (!Array.isArray(chapters) || chapters.length === 0) {
   }
 }
 
+/* ---- youtubeTitle: the one line a viewer reads before deciding ---- */
+/* `title` is structural: set at stage 2, it names the folder and must never move.
+   `youtubeTitle` is what YouTube actually shows, and it can only be written once the
+   video exists — which is here. title.txt is also the file `upload_yt_video` reads out
+   of the video's folder, so a missing one is an incomplete upload, not a cosmetic gap. */
+const scriptTitle = script && script.title ? String(script.title) : '';
+const rawTitle = pub.youtubeTitle == null ? '' : String(pub.youtubeTitle);
+let ytTitle = rawTitle.replace(/\s+/g, ' ').trim();
+
+if (!ytTitle) {
+  const fallback = scriptTitle.replace(/\s+/g, ' ').trim();
+  if (fallback) {
+    ytTitle = fallback;
+    warnings.push(`no "youtubeTitle" in publish.json — title.txt fell back to the script title "${fallback}". Author one: it is the only line a viewer reads before deciding to click.`);
+  } else {
+    errors.push('no "youtubeTitle" in publish.json, and no script title (pass --script) to fall back to');
+  }
+}
+
+if (ytTitle) {
+  if (/[\r\n]/.test(rawTitle)) errors.push('"youtubeTitle" contains a line break — title.txt must be a single line');
+  if (ytTitle.length > 100) errors.push(`"youtubeTitle" is ${ytTitle.length} chars — YouTube's hard limit is 100`);
+  else if (ytTitle.length > 70) warnings.push(`"youtubeTitle" is ${ytTitle.length} chars — past ~70 it truncates in mobile listings`);
+  const letters = ytTitle.replace(/[^A-Za-z]/g, '');
+  if (letters.length >= 8 && letters === letters.toUpperCase()) warnings.push('"youtubeTitle" is all uppercase — reads as a gimmick and truncates badly');
+  if (/[!?]{2,}/.test(ytTitle)) warnings.push('"youtubeTitle" stacks "!" or "?" — the same shape as the clickbait it competes with');
+
+  /* A series whose parts are titled near-identically buries itself. Siblings are read
+     opportunistically: a half-written neighbour is not this video's problem. */
+  try {
+    const parent = dirname(workDir);
+    const mine = normTitle(ytTitle);
+    for (const e of readdirSync(parent, { withFileTypes: true })) {
+      if (!e.isDirectory() || join(parent, e.name) === workDir) continue;
+      const sib = join(parent, e.name, 'publish.json');
+      if (!existsSync(sib)) continue;
+      let other = '';
+      try { other = String(JSON.parse(readFileSync(sib, 'utf8')).youtubeTitle || ''); } catch { continue; }
+      if (other && normTitle(other) === mine) warnings.push(`"youtubeTitle" matches video ${e.name}'s ("${other}") — each part of a series needs its own reason to be clicked`);
+    }
+  } catch { /* nothing to compare against */ }
+}
+
 /* ---- captions: one cue per segment, verbatim from the audio ---- */
 const cues = [];
 segments.forEach(sg => {
@@ -159,14 +204,18 @@ const description = descLines.join('\n') + '\n';
 
 const srt = cues.map((c, i) => `${i + 1}\n${srtTs(c.start)} --> ${srtTs(c.end)}\n${c.text}\n`).join('\n');
 
+const titleOut = join(workDir, 'title.txt');
 const descOut = join(workDir, 'description.md');
 const srtOut = join(workDir, 'captions.srt');
+writeFileSync(titleOut, `${ytTitle}\n`);
 writeFileSync(descOut, description);
 writeFileSync(srtOut, srt);
 
+console.log(`  title    : ${ytTitle.length} chars — "${ytTitle}"`);
 console.log(`  chapters : ${resolved.length}  (${chapterTs(resolved[0].start)} → ${chapterTs(resolved[resolved.length - 1].start)})`);
 console.log(`  captions : ${cues.length} cues  (${(tl.total).toFixed(1)}s of narration)`);
-console.log(`\n[out] ${descOut}`);
+console.log(`\n[out] ${titleOut}`);
+console.log(`[out] ${descOut}`);
 console.log(`[out] ${srtOut}`);
 
 if (DEST) {
@@ -174,6 +223,7 @@ if (DEST) {
      namespace, so the fixed description.md / captions.srt can never collide. */
   const dir = join(resolve(DEST), videoDir(script, basename(workDir)));
   mkdirSync(dir, { recursive: true });
+  copyFileSync(titleOut, join(dir, 'title.txt'));
   copyFileSync(descOut, join(dir, 'description.md'));
   copyFileSync(srtOut, join(dir, 'captions.srt'));
   console.log(`[dest] ${dir}`);

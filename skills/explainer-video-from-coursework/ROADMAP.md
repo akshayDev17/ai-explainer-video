@@ -488,6 +488,51 @@ no beats, and the 83 harness configs no longer exist.
 
 ---
 
+### 2.12 Shorts track — parked design *(P1)*
+
+Shorts are YouTube's discovery surface; the long videos are the product, but the Shorts
+are how anyone finds them. Parked here mid-design, with the open questions intact.
+
+Settled so far:
+
+- **Separate, optional track.** Presence of `shorts.json` is the switch — no flag. Absent,
+  stages 4–8 behave exactly as they do today; present, only the producing stage reads it,
+  and a stale one warns rather than blocking the main pipeline.
+- **Authored right after the script (stage 3.5).** A Short is **re-narrated and
+  compressed**, not sliced out of the long audio. That matters: slicing would need cut
+  points that only exist after stage 4/4b, whereas a re-narrated Short gets fresh TTS and
+  therefore fresh timings. The one objection that does not apply here is the timing one.
+- **Mining unit: the script's own segments.** Each is already a self-contained beat, so
+  mining per segment is an auditable partition rather than a vibe; 1–2 *adjacent* segments
+  are allowed when a single one is too thin. Candidates record disjointness, so three
+  Shorts cannot be mined out of the same 40 seconds.
+- **Each candidate is scored on four axes:** hook potential (a counterintuitive claim, a
+  number, a common mistake, a before/after) · self-containment (what it references outside
+  itself) · vertical survivability (its lane — a wide `diagram` is the expensive case) ·
+  loop/payoff point (does it end somewhere that rewards a rewatch).
+- **Compression targets 25–45 seconds**, not "under 2 minutes". 2:00 is the ceiling, not
+  the goal; retention falls off well before that.
+- **Cost is real:** every Short is one TTS call + one alignment pass + one vertical render.
+  Mining ten per video is not free, which is an argument for choosing candidates well.
+
+Blocked on one open question: `render.mjs` hardcodes a `1920×1080` viewport, and the scene
+lanes are authored wide. Vertical needs the viewport parameterised **and** an answer to
+crop-vs-re-author — cropping a wide diagram or code block to 9:16 either clips it or
+shrinks it past phone legibility. That decision sizes the whole track.
+
+Recorded disagreements (mine, not settled):
+
+1. **Misleading hooks have a hard ceiling.** Retention past the hook is measured; a promise
+   the video does not keep is the one pattern that gets actively suppressed.
+2. **The controllable lever is the number of independent attempts**, not the perfection of
+   one — which argues for breadth and cheap production over polish per Short.
+3. **For technical coursework the realistic goal is niche reach plus funnel** to the long
+   form, not broad virality: 5k views from people who would watch a 12-minute explainer is
+   worth more than 500k from people who will not.
+4. **Contiguous range vs ordered selection** is mostly moot while Shorts are re-narrated
+   (the compression pass may reorder freely), but if a Short ever reuses existing audio,
+   ordered selection becomes mandatory and audio splicing becomes the constraint.
+
 ## 3. Design decisions worth challenging
 
 These are the calls I made. Some may be wrong.

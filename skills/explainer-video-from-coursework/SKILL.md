@@ -82,8 +82,8 @@ and scratch so the user only adjusts, never invents:
   otherwise list candidate directories that contain `.md` files and let them pick.
 - **Destination** — where the finished video(s) land. Default: `videos/` beside the
   source. Each finished video lands in its **own folder** under the destination —
-  `<destination>/<NN>-<slug>/` — holding the `.mp4`, `description.md` and
-  `captions.srt`. The folder name is derived from the plan's `videoIndex` (the
+  `<destination>/<NN>-<slug>/` — holding the `.mp4`, `title.txt`, `description.md`
+  and `captions.srt`. The folder name is derived from the plan's `videoIndex` (the
   consumption order) and a slug of the title, so a series sorts into watch order and
   a shared destination can never collide across videos. If the user puts it **inside**
   the source — `<source>/videos/` is a common choice — Stage 1 must `--exclude` it, or
@@ -560,6 +560,7 @@ You write `out/<name>/<NN>/publish.json`:
 
 ```json
 {
+  "youtubeTitle": "The Harness Is Not the Prompt",
   "chapters": [
     { "segments": ["framing"], "title": "What Is a Harness?" },
     { "segments": ["demo"],    "title": "The Demo That Worked" }
@@ -567,6 +568,12 @@ You write `out/<name>/<NN>/publish.json`:
   "blurb": "Two or three sentences on what the video covers."
 }
 ```
+
+`youtubeTitle` is the line YouTube shows, and the one a viewer reads before deciding.
+Write it **here**, not at stage 2: only now does the video exist to be described
+honestly. It must be a subject someone would actually search, it must not promise what
+the video does not deliver, and it must differ from every other video in the series — a
+series whose parts are titled alike buries itself.
 
 A chapter is a **list of segment keys** plus a short title. One per segment by
 default; grouping is just two keys in one list. A chapter's timestamp is the
@@ -621,7 +628,7 @@ timecode, a blurb above the block and a 2:39 runtime were each verified live on 
 channels, and the hard checks above already mirror YouTube's rules.
 
 Outputs, copied into the video's own folder — `--dest/<NN>-<slug>/` — alongside the
-MP4 because they are deliverables rather than scratch — just two files:
+MP4 because they are deliverables rather than scratch — three files:
 
 - **`description.md`** — the blurb, then the chapter block, **paste-ready as plain
   text**. YouTube reads chapters only from the description, so the block lives here and
@@ -629,8 +636,10 @@ MP4 because they are deliverables rather than scratch — just two files:
   markdown syntax (`#`, `**`, backticks) — the description field does not render
   markdown, so those characters would paste in literally.
 - **`captions.srt`** — the cue list, uploaded as a caption track.
+- **`title.txt`** — one line: the `youtubeTitle`. This is the file `upload_yt_video`
+  reads out of the folder, so a video folder without it is an incomplete upload.
 
-**Done when:** `publish` exits 0 and those two files land in `--dest/<NN>-<slug>/`
+**Done when:** `publish` exits 0 and those three files land in `--dest/<NN>-<slug>/`
 next to the MP4. The folder name is derived by the tool from the script's
 `videoIndex` + title — do not hand-pick a different folder name, or a series will
 sprawl out of watch order.
@@ -821,6 +830,7 @@ Written per video at `out/<name>/<NN>/publish.json`, then resolved and checked b
 
 ```json
 {
+  "youtubeTitle": "The Harness Is Not the Prompt",
   "chapters": [
     { "segments": ["framing"], "title": "What Is a Harness?" },
     { "segments": ["demo"],    "title": "The Demo That Worked" },
@@ -829,6 +839,14 @@ Written per video at `out/<name>/<NN>/publish.json`, then resolved and checked b
   "blurb": "Module one of a harness-engineering course: what a harness is, the six failure families, and how value and risk sit in different layers of three real products."
 }
 ```
+
+`youtubeTitle` is the upload title written to `title.txt`, and the only field a viewer
+sees before deciding whether to click. ≤100 chars is a hard error (YouTube's limit);
+past ~70 warns (mobile truncation); all-caps and stacked punctuation warn; a
+near-duplicate of a sibling video's title warns. Omitted, it falls back to the script
+title with a warning — the fallback exists so the folder is never upload-incomplete, not
+because the script title is a good marketing title. It is deliberately **not** the
+`title` used for `<NN>-<slug>`: that one is structural and must not move.
 
 `segments` holds one or more segment `key`s from the script, in playlist order; the
 chapter's timestamp is the **first** one's window start. Grouping is expressed by
