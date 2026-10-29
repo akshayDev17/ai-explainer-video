@@ -1,0 +1,10 @@
+{
+  "entries": [
+    "queue-consumer jobs.tasks:cleanup_task jobs.cleanup",
+    "queue-consumer jobs.tasks:export_task jobs.export"
+  ],
+  "links": [
+    "jobs.service:export -> jobs.tasks:export_task queue registry [prod]",
+    "tests.test_service:test_export_enqueues -> jobs.tasks:export_task queue registry [test]"
+  ]
+}

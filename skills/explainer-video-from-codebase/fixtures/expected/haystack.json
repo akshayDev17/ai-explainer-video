@@ -1,0 +1,9 @@
+{
+  "entries": [],
+  "links": [
+    "pipe.build:index -> ext:haystack.components.preprocessors.DocumentSplitter.run framework haystack.pipeline",
+    "pipe.build:index -> pipe.components:Cleaner.run framework haystack.pipeline",
+    "pipe.build:index -> pipe.components:LocalEmbedder.run dispatch haystack.pipeline",
+    "pipe.build:index -> pipe.components:RemoteEmbedder.run dispatch haystack.pipeline"
+  ]
+}

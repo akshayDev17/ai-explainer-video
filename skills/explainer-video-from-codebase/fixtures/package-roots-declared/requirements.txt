@@ -1,0 +1,2 @@
+Stripe>=5.0  # payments
+-r base.txt

@@ -1,0 +1,14 @@
+{
+  "entries": [
+    "main tool.__main__:<main>",
+    "queue-consumer worker.broker:do_work work.do",
+    "registered-callback server:lifespan",
+    "scheduled worker.broker:tick work.tick"
+  ],
+  "links": [
+    "harness.start:run_tool -> tool.__main__:<main> spawn process-spawn",
+    "harness.start:start_scheduler -> worker.broker:tick spawn process-spawn",
+    "harness.start:start_server -> server:lifespan spawn process-spawn",
+    "harness.start:start_worker -> worker.broker:do_work spawn process-spawn"
+  ]
+}

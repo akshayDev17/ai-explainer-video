@@ -1,0 +1,7 @@
+{
+  "entries": [
+    "cli cli:greet",
+    "cli cli:serve"
+  ],
+  "links": []
+}

@@ -1,0 +1,2 @@
+def formatdate():
+    return ""

@@ -13,7 +13,10 @@
   "license": "MIT",
   "scripts": {
     "sync:coursework-author": "node scripts/sync-coursework-author.mjs",
-    "check:coursework-author-sync": "node scripts/check-coursework-author-sync.mjs"
+    "check:coursework-author-sync": "node scripts/check-coursework-author-sync.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "sync:tree-sitter": "node scripts/sync-tree-sitter.mjs",
+    "check:tree-sitter-vendor": "node scripts/check-tree-sitter-vendor.mjs"
   },
   "repository": {
     "type": "git",
@@ -31,6 +34,7 @@
     "plugin.json",
     ".claude-plugin/plugin.json",
     "skills/",
+    "!skills/*/fixtures/",
     "lib/",
     "cordis.patch.yml"
   ],
@@ -40,6 +44,13 @@
     }
   },
   "devDependencies": {
-    "coursework-author": "^1.0.2"
+    "coursework-author": "^1.0.2",
+    "tree-sitter-c": "0.24.1",
+    "tree-sitter-cpp": "0.23.4",
+    "tree-sitter-go": "0.25.0",
+    "tree-sitter-javascript": "0.25.0",
+    "tree-sitter-python": "0.25.0",
+    "tree-sitter-typescript": "0.23.2",
+    "web-tree-sitter": "0.27.1"
   }
 }
