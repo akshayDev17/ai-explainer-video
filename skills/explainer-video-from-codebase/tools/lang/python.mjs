@@ -356,9 +356,9 @@ export function resolverFor(py, deps = new Set()) {
       const live = cs.filter(c => inRepo(at(c)));
       const own = live.filter(c => dir === c.root || dir.startsWith(c.root + '/')).sort((a, b) => b.root.length - a.root.length)[0];
       if (own) return { key: at(own) };
+      if (!live.length || deps.has(normaliseDep(parts[0]))) return {};   // a declared library, however many roots claim it
       if (live.length > 1) return { ambiguous: { name: alias, roots: live.map(c => c.root).sort() } };
-      if (live.length && !deps.has(normaliseDep(parts[0]))) return { key: at(live[0]), cross: { name: alias, root: live[0].root } };
-      return {};
+      return { key: at(live[0]), cross: { name: alias, root: live[0].root } };
     }
     return {};
   };
@@ -372,7 +372,8 @@ export function resolverFor(py, deps = new Set()) {
     const l = locate(t.from, t.in), from = l.key, m = from && modules.get(from);
     if (m?.defs.has(t.name)) return { id: m.defs.get(t.name), ...via(l) };
     const followed = m?.imports.has(t.name) ? resolveImport(m.imports.get(t.name), depth + 1) : null;
-    if (followed && !followed.missing) return followed;
+    // a re-export reached through another root still counts as cross-root; the inner lookup's own note wins
+    if (followed && !followed.missing) return { ...via(l), ...followed };
     if (!from) { const s = locate(`${t.from}.${t.name}`, t.in); return s.key ? { module: s.key, ...via(s) } : { ext: `${t.from}.${t.name}`, ...via(l), ...via(s) }; }
     const sub = `${from}.${t.name}`;
     // `missing`: an in-repo module that does not define the name; counted as an in-repo miss

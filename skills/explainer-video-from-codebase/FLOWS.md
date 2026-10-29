@@ -38,7 +38,8 @@ When several roots claim a name, the one holding the importing file wins; otherw
 claim under a root that does not hold the importing file resolves across roots, unless the repo declares the
 top-level name as a dependency (requirements*.txt, pyproject.toml `[project]` / Poetry dependencies, setup.cfg
 `install_requires` / `extras_require`, Pipfile; case, `-` and `_` normalised): `integrations/stripe/` never
-captures a declared `stripe`. A top-level name of the standard library never
+captures a declared `stripe`, and a declared name several roots claim is a library import, never reported as
+ambiguous. A top-level name of the standard library never
 resolves to an in-repo loose module, namespace directory or nested package (`app/logging/` never captures
 `import logging`); only a repo-root package `logging/__init__.py` shadows it. `selfCheck.packageRoots` lists the
 package roots below the repo root. A call made at module level has `from: pkg.module:<module>`.

@@ -1,5 +1,6 @@
 [project]
 name = "shop"
 dependencies = [
+  "uvicorn[standard]>=0.2",
   "httpx>=0.27",
 ]
