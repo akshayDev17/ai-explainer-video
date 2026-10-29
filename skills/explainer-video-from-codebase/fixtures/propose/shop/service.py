@@ -21,6 +21,11 @@ class OrderService:
         return total
 
 
+class RushOrderService(OrderService):
+    # the same place() under a second receiver: its notifier dispatch is one point, walked twice
+    pass
+
+
 def refund(order_id):
     def _do():
         return log_event("refund " + order_id)

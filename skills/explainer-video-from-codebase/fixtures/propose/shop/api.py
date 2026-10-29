@@ -1,6 +1,6 @@
 from fastapi import APIRouter, FastAPI
 
-from shop.service import OrderService, cancel, refund
+from shop.service import OrderService, RushOrderService, cancel, refund
 from shop.util import log_event
 
 router = APIRouter(prefix="/v1")
@@ -9,6 +9,8 @@ router = APIRouter(prefix="/v1")
 @router.post("/orders")
 def place_order(order: dict):
     log_event("route")
+    if order.get("rush"):
+        return RushOrderService().place(order)
     return OrderService().place(order)
 
 

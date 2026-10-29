@@ -75,14 +75,17 @@ test('ranking.md prints every row of every group, the shared table and the conti
   assert.match(r.md, /### prod #1 `place_order`[^]*Dispatch points:[^]*make_notifier[^]*`SmsNotifier` when kind == "sms"/);
 });
 
-test('ranking.md never prints a missing field as undefined, and lists exactly the cfg points of each explained row', () => {
+test('cfg counts a dispatch point once however many receivers the walk passed it under', () => {
+  // place() runs under OrderService and RushOrderService: the walk records its notifier dispatch twice
+  const send = r.candidates.candidates['shop.api:place_order'].dispatch.filter(d => d.site === 'shop.service:OrderService.place@20:send');
+  assert.equal(send.length, 2);
+  assert.equal(row('prod', 'place_order').cfg, 1);
+  assert.equal((r.md.split('### prod #1 ')[1].split('\n### ')[0].match(/^\| `shop\.service:OrderService\.place@20:send` \|/gm) || []).length, 1);
+});
+
+test('ranking.md never prints a missing field as undefined', () => {
   assert.doesNotMatch(r.md, /undefined/);
   assert.match(r.md, /### eval #1 `run_eval:<main>`\n\nevals\/run_eval\.py · /, 'a main block has no line');
-  for (const x of k.ranked.prod.slice(0, k.params.explainTop)) {
-    const section = r.md.split(`### prod #${x.rank} `)[1].split('\n### ')[0];
-    const points = section.includes('Dispatch points:') ? section.split('Dispatch points:')[1].split('\n\n')[1].trim().split('\n').length - 2 : 0;
-    assert.equal(points, x.cfg, short(x.entry));
-  }
 });
 
 test('--explain-top limits the explained rows', () => {

@@ -115,7 +115,7 @@ export function indexCodemap(m, { fanin = 6, leafy = 5, ifaceFold = true } = {})
           continue;
         }
         if (CROSSING.has(e.kind)) {
-          crossings.push({ from: id, to: e.to, kind: e.kind, evidence: e.evidence, intoGroup: G(e.to) });
+          if (!crossings.some(x => x.from === id && x.to === e.to && x.kind === e.kind)) crossings.push({ from: id, to: e.to, kind: e.kind, evidence: e.evidence, intoGroup: G(e.to) });
           if (!stopAtCrossing) visit(e.to, null, depth + 1, e.kind, id);
           continue;
         }
