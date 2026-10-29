@@ -716,6 +716,6 @@ material comes from:
 | `explainer-video` | no source — a narrow-to-broad topic description | author the study material first (a pre-stage that builds the notes), then feed it through the same plan→video pipeline |
 | `explainer-video-from-codebase` | a codebase's major code flows (Python, TS/JS, Go, C, C++, or a mix) | mine the code (tree-sitter, grouped prod/test/eval/dev, tests as evidence), propose candidate flows, the agent proposes the series with reasons, the user approves the flow list, then a coursework-shaped plan reuses stages 3–8 |
 
-`explainer-video-from-codebase` is being built one milestone at a time (stage 1's mining
-tool exists); the other two are not started. Recorded here so the naming is reserved and
+`explainer-video-from-codebase` is being built one milestone at a time (stage 1's mine,
+propose and rank tools exist); the other two are not started. Recorded here so the naming is reserved and
 the "from coursework" scope of this skill stays explicit.
