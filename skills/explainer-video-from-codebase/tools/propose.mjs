@@ -4,10 +4,9 @@
    from the code map; plus how far each test's direct links reach.
 
    Usage:
-     node tools/propose.mjs --codemap out/<name>/codemap.json [--out out/<name>]
-                            [--fanin 6] [--leafy 5] [--no-iface-fold]
+     node tools/propose.mjs --codemap out/<name>/codemap.json [--fanin 6] [--leafy 5] [--no-iface-fold]
 
-   Writes candidates.json beside the code map (or in --out). Each candidate is
+   Writes candidates.json beside the code map. Each candidate is
    the tree of paths from its entry: every node with how it was reached and why
    it was folded (helper, interface, alternative, uses-prod), cut into segments
    at same-group crossings, with dispatch points, config-guarded branches, the
@@ -17,34 +16,33 @@
    test's direct links (from mine) are walked, stopping at what it mocks, to
    record what it exercises. No candidate is chosen here; rank.mjs orders them.
 
-   Exit: 0 ok · 1 bad flags, unreadable code map, or --out inside the repo
+   Exit: 0 ok · 1 bad flags, unreadable code map, or the code map inside the repo
          · 2 an entry could not be walked (its symbol is not in the code map)
    ========================================================================== */
-import { readFileSync, writeFileSync, mkdirSync, existsSync, realpathSync } from 'node:fs';
-import { join, resolve, dirname, basename, sep, relative } from 'node:path';
+import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
+import { join, resolve, dirname, sep, relative } from 'node:path';
 import { indexCodemap } from './lib/walk.mjs';
 
 const fail = (code, msg) => { console.error(`[propose] ${msg}`); process.exit(code); };
 
 /* ---------------- args ---------------- */
 const argv = process.argv.slice(2);
-const VALUED = new Set(['--codemap', '--out', '--fanin', '--leafy']);
+const VALUED = new Set(['--codemap', '--fanin', '--leafy']);
 const flags = new Map();
 for (let i = 0; i < argv.length; i++) {
   if (VALUED.has(argv[i])) { if (argv[i + 1] == null) fail(1, `${argv[i]} needs a value`); flags.set(argv[i], argv[++i]); }
   else if (argv[i] === '--no-iface-fold') flags.set(argv[i], true);
   else fail(1, `unknown argument ${argv[i]}`);
 }
-if (!flags.has('--codemap')) fail(1, 'usage: propose.mjs --codemap out/<name>/codemap.json [--out out/<name>] [--fanin 6] [--leafy 5] [--no-iface-fold]');
+if (!flags.has('--codemap')) fail(1, 'usage: propose.mjs --codemap out/<name>/codemap.json [--fanin 6] [--leafy 5] [--no-iface-fold]');
 const count = (flag, d) => { const v = flags.has(flag) ? Number(flags.get(flag)) : d; if (!Number.isInteger(v) || v < 0) fail(1, `${flag} must be a whole number`); return v; };
 const params = { fanin: count('--fanin', 6), leafy: count('--leafy', 5), ifaceFold: !flags.has('--no-iface-fold') };
 const CODEMAP = resolve(flags.get('--codemap'));
 let m;
 try { m = JSON.parse(readFileSync(CODEMAP, 'utf8')); } catch (e) { fail(1, `cannot read the code map ${CODEMAP}: ${e.message}`); }
 if (m.schema !== 1 || !Array.isArray(m.symbols) || !Array.isArray(m.edges)) fail(1, `${CODEMAP} is not a mine.mjs code map (schema 1)`);
-const OUT = resolve(flags.get('--out') || dirname(CODEMAP));
-const realOut = p => existsSync(p) ? realpathSync(p) : join(realOut(dirname(p)), basename(p));
-if (m.root && existsSync(m.root)) { const root = realpathSync(m.root), o = realOut(OUT); if (o === root || o.startsWith(root + sep)) fail(1, `refusing to write inside the repo: ${OUT}`); }
+const OUT = dirname(CODEMAP);
+if (m.root && existsSync(m.root)) { const root = realpathSync(m.root), o = realpathSync(OUT); if (o === root || o.startsWith(root + sep)) fail(1, `refusing to write inside the repo: ${OUT}`); }
 
 /* ---------------- candidates ---------------- */
 const t0 = Date.now();
@@ -69,7 +67,6 @@ for (const c of cands) for (const x of c.crossings) if (entryIds.has(x.to) && x.
 /* ---------------- tests: direct links (mine's) and what each reaches ---------------- */
 // reach starts at the direct target with the call site's receiver, stops at the test's mocks and at crossings,
 // and counts only expanded code (and helpers): reach, not proof
-const edgeAt = new Map(m.edges.map(e => [`${e.from}|${e.to}|${e.line}`, e]));
 const direct = new Map(), exercised = new Map();
 const addTo = (map, k, t) => (map.get(k) || map.set(k, new Set()).get(k)).add(t);
 const testLinks = (m.tests || []).map(t => {
@@ -77,8 +74,7 @@ const testLinks = (m.tests || []).map(t => {
   const ex = new Set();
   for (const l of t.direct) {
     addTo(direct, l.to, t.id);
-    const recv = edgeAt.get(`${l.viaId}|${l.to}|${l.line}`)?.recvClass;
-    const w = W.expand({ id: l.to }, { grp: G(l.to), stopAtCrossing: true, stop: mocked, ctx0: recv || declCls(l.to) });
+    const w = W.expand({ id: l.to }, { grp: G(l.to), stopAtCrossing: true, stop: mocked, ctx0: l.recvClass || declCls(l.to) });
     for (const n of w.order) if ((!n.folded || n.folded === 'helper') && !n.id.startsWith('ext:')) ex.add(n.id);
   }
   for (const x of ex) addTo(exercised, x, t.id);
@@ -110,7 +106,6 @@ const result = {
     prodFunctionsReached: prodFns.filter(s => direct.has(s.id) || exercised.has(s.id)).length,
   },
   unwalked: unwalked.map(e => ({ id: e.id, group: e.group, file: e.file, line: e.line })),
-  testEntries: m.entries.filter(e => e.group === 'test').map(e => ({ id: e.id, kind: e.kind, file: e.file, line: e.line })),
   candidates: Object.fromEntries(cands.map(c => [c.entry.id, { ...brief(c),
     ownIds: [...c.own],
     nodes: c.order.map(n => ({ id: n.id, depth: n.depth, via: n.via, ctx: n.ctx || undefined, parent: n.parent || undefined, folded: n.folded || undefined })),
@@ -122,13 +117,11 @@ const result = {
     .map(s => [s, { direct: [...(direct.get(s) || [])].sort(), exercised: exercised.get(s)?.size || 0 }])),
   symbols,
 };
-mkdirSync(OUT, { recursive: true });
 writeFileSync(join(OUT, 'candidates.json'), JSON.stringify(result, null, 1) + '\n');
 
 const t = result.totals;
 console.log(`[propose] ${t.entries} entries ${JSON.stringify(t.byGroup)} walked in ${walkMs} ms · ${t.continuations} continuations · top-level ${JSON.stringify(t.topLevel)}`);
 console.log(`[propose] helpers (same-group fan-in >= ${params.fanin}, subtree <= ${params.leafy}) ${t.helpers} · test doubles refused by production walks ${t.testDoublesRefused} · interface folding ${params.ifaceFold ? 'on' : 'off'}`);
 console.log(`[propose] tests ${t.tests} · production functions ${t.prodFunctions}: direct test links ${t.prodFunctionsDirect}, reached from tests ${t.prodFunctionsReached}`);
-if (result.testEntries.length) console.log(`[propose] ${result.testEntries.length} entries in the test group are not walked: ${result.testEntries.map(e => e.id).join(', ')}`);
 console.log(`[propose] wrote ${relative(process.cwd(), join(OUT, 'candidates.json'))}`);
 if (unwalked.length) { console.error(`[propose] ${unwalked.length} entries could not be walked (no such symbol in the code map): ${unwalked.map(e => e.id).join(', ')}`); process.exit(2); }

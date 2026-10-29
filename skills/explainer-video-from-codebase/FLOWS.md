@@ -130,8 +130,7 @@ a high rate means those in-repo calls are not linked.
 
 ## `candidates.json` (`propose.mjs`)
 
-One candidate per prod, eval and dev entry (test-group entries are not walked; they are listed in
-`testEntries`). A candidate is the tree of paths from its entry, walked over `static`, `ctor`, `framework`,
+One candidate per prod, eval and dev entry (test-group entries are not walked). A candidate is the tree of paths from its entry, walked over `static`, `ctor`, `framework`,
 `dispatch`, `virtual`, `queue`, `http` and `spawn` edges with the receiver class carried, so a `self.m()` call
 resolves under the class that was constructed. No candidate is chosen here.
 
@@ -182,10 +181,10 @@ tables.
 |---|---|
 | `params` | `explainTop` (10) and `explainTopEval` (5): how many prod and eval rows `ranking.md` explains in full |
 | `totals` | top-level rows and universe (distinct own symbols) per group, continuations |
-| `ranked.{prod,eval,dev}[]` | per row: `rank`, the entry and its route or key, `gain` (new own symbols), `cumulative`, `coverage`, `own`, `folded`, `modules`, `crossings`; `nearest` (the most-overlapping higher row) and `jaccard`; `pinned` (own functions with a direct test link), `tests` (distinct tests pinning own code), `testsNew` (tests pinning this row's new code); `cfg` (dispatch points with two or more concrete targets, or Haystack selectors); `evals` (top-level eval rows whose `uses-prod` leaves or crossings reach this row's own code). Eval and dev rows add `exercises[]` and `usesProd[]`, each with `flowRank`, the first production row that owns it |
+| `ranked.{prod,eval,dev}[]` | per row: `rank`, the entry and its route or key, `gain` (new own symbols), `cumulative`, `coverage`, `own`, `folded`, `modules`, `crossings`; `nearest` (the most-overlapping higher row) and `jaccard`; `pinned` (own functions with a direct test link), `tests` (distinct tests pinning own code), `testsNew` (tests pinning this row's new code); `cfg` (distinct dispatch points, one per site and target set, that a config read narrows, that have two or more concrete targets, or that Haystack selectors pick: the same points the explained rows list); `evals` (top-level eval rows whose `uses-prod` leaves or crossings reach this row's own code). Eval and dev rows add `exercises[]` and `usesProd[]`, each with `flowRank`, the first production row that owns it |
 | `merged[]` | prod and eval top-level rows on one list, evidence only |
 | `shared[]` | production modules whose functions appear in at least 3 production rows and that at least 5 tests pin directly: `module`, `candidates`, `firstOwner` (rank) and `firstOwnerEntry`, `functions`, `directTests`. Cross-cutting code (auth, retry, tokens) has no entry point of its own, so this table is where it shows |
-| `continuations[]`, `testEntries[]` | every continuation with its parents; entries in the test group (not ranked) |
+| `continuations[]` | every continuation with its parents |
 
 `ranking.md` prints every row of every group with these columns, what each eval row exercises, the dev group as
 filtered by default (promotable in `flows.json`), the shared table, the continuations, the merged order, and for the

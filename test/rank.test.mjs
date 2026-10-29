@@ -75,6 +75,16 @@ test('ranking.md prints every row of every group, the shared table and the conti
   assert.match(r.md, /### prod #1 `place_order`[^]*Dispatch points:[^]*make_notifier[^]*`SmsNotifier` when kind == "sms"/);
 });
 
+test('ranking.md never prints a missing field as undefined, and lists exactly the cfg points of each explained row', () => {
+  assert.doesNotMatch(r.md, /undefined/);
+  assert.match(r.md, /### eval #1 `run_eval:<main>`\n\nevals\/run_eval\.py · /, 'a main block has no line');
+  for (const x of k.ranked.prod.slice(0, k.params.explainTop)) {
+    const section = r.md.split(`### prod #${x.rank} `)[1].split('\n### ')[0];
+    const points = section.includes('Dispatch points:') ? section.split('Dispatch points:')[1].split('\n\n')[1].trim().split('\n').length - 2 : 0;
+    assert.equal(points, x.cfg, short(x.entry));
+  }
+});
+
 test('--explain-top limits the explained rows', () => {
   const one = proposeAndRank(FIXTURE, { rankFlags: ['--explain-top', '1', '--explain-top-eval', '0'] });
   assert.equal((one.md.match(/^### (prod|eval) #/gm) || []).length, 1);
@@ -91,15 +101,17 @@ const candidatesFile = (name, mutate = x => x) => { const dir = join(TMP, name);
 test('exit 1: no --candidates, the removed series flags, an unreadable or foreign file', () => {
   assert.equal(run().status, 1);
   for (const flag of ['--min-new', '--min-share', '--series']) assert.equal(run('--candidates', candidatesFile('a'), flag, '3').status, 1, flag);
+  assert.equal(run('--candidates', candidatesFile('a'), '--out', TMP).status, 1, 'output always goes beside candidates.json');
   assert.equal(run('--candidates', join(TMP, 'missing.json')).status, 1);
   assert.match(run('--candidates', candidatesFile('b', x => ({ ...x, schema: 2 }))).stderr, /not a propose\.mjs candidates file/);
 });
 
 test('exit 1: refuses to write inside the mined repo', () => {
-  const r1 = run('--candidates', candidatesFile('c'), '--out', join(FIXTURE, 'out'));
+  const r1 = run('--candidates', candidatesFile('c', x => ({ ...x, root: join(TMP, 'c') })));   // candidates placed inside the repo they came from
   assert.equal(r1.status, 1);
   assert.match(r1.stderr, /refusing to write inside the repo/);
-  assert.equal(existsSync(join(FIXTURE, 'out')), false);
+  assert.equal(existsSync(join(TMP, 'c', 'ranking.json')), false);
+  assert.equal(existsSync(join(TMP, 'c', 'ranking.md')), false);
 });
 
 test('two runs produce byte-identical rankings', () => {

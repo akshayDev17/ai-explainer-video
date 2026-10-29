@@ -125,15 +125,16 @@ test('exit 1: no --codemap, an unknown flag, a bad number, an unreadable or fore
   assert.equal(run().status, 1);
   assert.equal(run('--codemap', codemapFile('a'), '--series', '3').status, 1, 'there is no series flag');
   assert.equal(run('--codemap', codemapFile('b'), '--fanin', 'many').status, 1);
+  assert.equal(run('--codemap', codemapFile('b'), '--out', TMP).status, 1, 'output always goes beside the code map');
   assert.equal(run('--codemap', join(TMP, 'missing.json')).status, 1);
   assert.match(run('--codemap', codemapFile('c', x => ({ ...x, schema: 9 }))).stderr, /not a mine\.mjs code map/);
 });
 
 test('exit 1: refuses to write inside the mined repo', () => {
-  const r1 = run('--codemap', codemapFile('d'), '--out', join(FIXTURE, 'out'));
+  const r1 = run('--codemap', codemapFile('d', x => ({ ...x, root: join(TMP, 'd') })));   // a code map placed inside the repo it mined
   assert.equal(r1.status, 1);
   assert.match(r1.stderr, /refusing to write inside the repo/);
-  assert.equal(existsSync(join(FIXTURE, 'out')), false);
+  assert.equal(existsSync(join(TMP, 'd', 'candidates.json')), false);
 });
 
 test('exit 2: an entry whose symbol is not in the code map is reported, the rest still written', () => {

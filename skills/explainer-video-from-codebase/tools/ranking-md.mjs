@@ -6,6 +6,11 @@ const table = (head, rows) => rows.length ? [`| ${head.join(' | ')} |`, `|${head
 const what = x => x.path ? `${x.method} ${x.path}` : x.key || '';
 const pct = x => `${Math.round(100 * x)}%`;
 
+// a dispatch point whose targets depend on config: narrowed by a config read, picked by selectors, or a collaborator
+// with more than one concrete implementation; one per site and target set, however many times the walk passed it
+export const configDispatchPoints = dispatch => { const seen = new Set();
+  return dispatch.filter(d => d.config || d.selectors || (d.collaborator && d.after > 1)).filter(d => { const key = d.site + d.targets.join(); return !seen.has(key) && seen.add(key); }); };
+
 export function renderRanking(k, r) {
   const out = [];
   const t = k.totals;
@@ -46,7 +51,6 @@ export function renderRanking(k, r) {
   out.push('## Continuations', '', 'Entries reached through another candidate\'s same-group crossing. They are shown inside their parent, not ranked on their own.', '',
     table(['entry', 'group', 'route / key', 'own', 'reached from'], k.continuations.map(c => [`\`${short(c.entry)}\``, c.group, what(c), c.own,
       c.parents.map(p => `${prodRank.has(p) ? `#${prodRank.get(p)} ` : ''}\`${short(p)}\``).join(', ')])), '');
-  if (k.testEntries.length) out.push('## Entries in the test group (not ranked)', '', ...k.testEntries.map(e => `- \`${e.id}\` (${e.file}:${e.line}) — if this is a script, re-mine with \`--group '${e.file}=dev'\``), '');
 
   out.push('## Merged prod + eval order (evidence only)', '', 'Where eval flows would land on one list. Groups stay separate; this order decides nothing.', '',
     table(['rank', 'entry', 'group', 'gain'], k.merged.map(x => [x.rank, `\`${short(x.entry)}\``, x.group, x.gain])), '');
@@ -55,10 +59,9 @@ export function renderRanking(k, r) {
     for (const x of k.ranked[grp].slice(0, n)) {
       const c = r.candidates[x.entry];
       out.push(`### ${grp} #${x.rank} \`${short(x.entry)}\`${what(x) ? ` — ${what(x)}` : ''}`, '',
-        `${c.file}:${c.line} · ${x.own} own, ${c.folded} folded, ${x.modules} modules, depth ${c.maxDepth} · ${c.testDoubles.length} test doubles refused`, '',
+        `${c.file}${c.line ? `:${c.line}` : ''} · ${x.own} own, ${c.folded} folded, ${x.modules} modules, depth ${c.maxDepth} · ${c.testDoubles.length} test doubles refused`, '',
         table(['segment root', 'reached from', 'via', 'own', 'folded'], c.segments.map(s => [`\`${short(s.root)}\``, s.from ? `\`${short(s.from)}\`` : '(entry)', s.kind || '', s.own, s.folded])), '');
-      const seen = new Set();
-      const points = c.dispatch.filter(d => d.config || d.selectors || (d.collaborator && d.after > 1)).filter(d => { const key = d.site + d.targets.join(); return !seen.has(key) && seen.add(key); });
+      const points = configDispatchPoints(c.dispatch);
       if (points.length) out.push('Dispatch points:', '', table(['site', 'how', 'targets', 'config'], points.map(d => [`\`${d.site}\``, `${d.how} ${d.before}→${d.after}${d.narrowedBy ? ` by \`${short(d.narrowedBy)}\`` : ''}`,
         d.targets.map(short).join(', '), d.config ? `${d.config.classification}: ${d.config.alternatives.map(a => `\`${short(a.cls)}\` when ${a.guards.join(' & ') || '(fallthrough)'}`).join('; ')}` : ''])), '');
       const bseen = new Set();

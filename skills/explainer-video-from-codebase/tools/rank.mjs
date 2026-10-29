@@ -4,11 +4,10 @@
    and print every row with the evidence the agent reads to propose a series.
 
    Usage:
-     node tools/rank.mjs --candidates out/<name>/candidates.json [--out out/<name>]
-                         [--explain-top 10] [--explain-top-eval 5]
+     node tools/rank.mjs --candidates out/<name>/candidates.json [--explain-top 10] [--explain-top-eval 5]
 
-   Writes ranking.json and ranking.md beside candidates.json (or in --out). Per
-   group (prod, eval, dev) the order is greedy marginal coverage of that group's
+   Writes ranking.json and ranking.md beside candidates.json. Per group
+   (prod, eval, dev) the order is greedy marginal coverage of that group's
    own symbols, ties broken by more crossings. There is no cut line and no series:
    each row carries its nearest higher-ranked row with their Jaccard overlap, how
    many of its functions tests pin, which evals exercise it, and its config-
@@ -17,32 +16,31 @@
    of its own. The merged prod+eval order is evidence only. Dev rows are printed
    and filtered by default.
 
-   Exit: 0 ok · 1 bad flags, unreadable candidates, or --out inside the repo
+   Exit: 0 ok · 1 bad flags, unreadable candidates, or candidates.json inside the repo
    ========================================================================== */
-import { readFileSync, writeFileSync, mkdirSync, existsSync, realpathSync } from 'node:fs';
-import { join, resolve, dirname, basename, sep, relative } from 'node:path';
-import { renderRanking } from './ranking-md.mjs';
+import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
+import { join, resolve, dirname, sep, relative } from 'node:path';
+import { renderRanking, configDispatchPoints } from './ranking-md.mjs';
 
 const fail = (code, msg) => { console.error(`[rank] ${msg}`); process.exit(code); };
 
 /* ---------------- args ---------------- */
 const argv = process.argv.slice(2);
-const VALUED = new Set(['--candidates', '--out', '--explain-top', '--explain-top-eval']);
+const VALUED = new Set(['--candidates', '--explain-top', '--explain-top-eval']);
 const flags = new Map();
 for (let i = 0; i < argv.length; i++) {
   if (VALUED.has(argv[i])) { if (argv[i + 1] == null) fail(1, `${argv[i]} needs a value`); flags.set(argv[i], argv[++i]); }
   else fail(1, `unknown argument ${argv[i]}`);
 }
-if (!flags.has('--candidates')) fail(1, 'usage: rank.mjs --candidates out/<name>/candidates.json [--out out/<name>] [--explain-top 10] [--explain-top-eval 5]');
+if (!flags.has('--candidates')) fail(1, 'usage: rank.mjs --candidates out/<name>/candidates.json [--explain-top 10] [--explain-top-eval 5]');
 const count = (flag, d) => { const v = flags.has(flag) ? Number(flags.get(flag)) : d; if (!Number.isInteger(v) || v < 0) fail(1, `${flag} must be a whole number`); return v; };
 const params = { explainTop: count('--explain-top', 10), explainTopEval: count('--explain-top-eval', 5) };
 const CANDIDATES = resolve(flags.get('--candidates'));
 let r;
 try { r = JSON.parse(readFileSync(CANDIDATES, 'utf8')); } catch (e) { fail(1, `cannot read ${CANDIDATES}: ${e.message}`); }
 if (r.schema !== 1 || !r.candidates || !r.bySymbol) fail(1, `${CANDIDATES} is not a propose.mjs candidates file (schema 1)`);
-const OUT = resolve(flags.get('--out') || dirname(CANDIDATES));
-const realOut = p => existsSync(p) ? realpathSync(p) : join(realOut(dirname(p)), basename(p));
-if (r.root && existsSync(r.root)) { const root = realpathSync(r.root), o = realOut(OUT); if (o === root || o.startsWith(root + sep)) fail(1, `refusing to write inside the repo: ${OUT}`); }
+const OUT = dirname(CANDIDATES);
+if (r.root && existsSync(r.root)) { const root = realpathSync(r.root), o = realpathSync(OUT); if (o === root || o.startsWith(root + sep)) fail(1, `refusing to write inside the repo: ${OUT}`); }
 
 /* ---------------- rank ---------------- */
 const cands = Object.entries(r.candidates).map(([id, c]) => ({ id, ...c, own: new Set(c.ownIds) }));
@@ -67,7 +65,7 @@ function rankPool(pool) {
     const tests = new Set([...best.own].flatMap(pinnedBy)), testsNew = new Set(newSyms.flatMap(pinnedBy));
     ranked.push({ c: best, gain: bestGain, cumulative: covered.size, nearest: near ? near.c.id : null, jaccard: near ? Number(nj.toFixed(2)) : null,
       pinned: [...best.own].filter(s => pinnedBy(s).length).length, tests: tests.size, testsNew: testsNew.size,
-      cfg: best.dispatch.filter(d => (d.collaborator && d.after > 1) || d.selectors).length,
+      cfg: configDispatchPoints(best.dispatch).length,
       evals: evalPool.filter(e => e.usesProd.some(s => best.own.has(s)) || exercisesOf(e).some(s => best.own.has(s))).map(e => e.id) });
   }
   return { universe, ranked };
@@ -102,16 +100,15 @@ const shared = [...mods].map(([file, x]) => ({ module: file, candidates: x.cands
   .filter(x => x.candidates >= 3 && x.directTests >= 5)
   .sort((a, b) => b.directTests - a.directTests || b.candidates - a.candidates || (a.module < b.module ? -1 : 1));
 
-const continuations = cands.filter(c => c.continues).map(c => ({ entry: c.id, group: c.group, kind: c.kind, path: c.path, key: c.key, parents: c.continues, own: c.own.size }));
+const continuations = cands.filter(c => c.continues).map(c => ({ entry: c.id, group: c.group, kind: c.kind, method: c.method, path: c.path, key: c.key, parents: c.continues, own: c.own.size }));
 const ranking = {
   schema: 1, tool: { name: 'rank.mjs' }, root: r.root, commit: r.commit, treeHash: r.treeHash, params,
   totals: { topLevel: Object.fromEntries(Object.entries(pools).map(([g, p]) => [g, p.ranked.length])),
     universe: Object.fromEntries(Object.entries(pools).map(([g, p]) => [g, p.universe.size])), continuations: continuations.length },
   ranked,
   merged: merged.ranked.map((x, i) => ({ rank: i + 1, entry: x.c.id, group: x.c.group, gain: x.gain })),
-  shared, continuations, testEntries: r.testEntries,
+  shared, continuations,
 };
-mkdirSync(OUT, { recursive: true });
 writeFileSync(join(OUT, 'ranking.json'), JSON.stringify(ranking, null, 1) + '\n');
 writeFileSync(join(OUT, 'ranking.md'), renderRanking(ranking, r));
 
