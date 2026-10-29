@@ -7,6 +7,7 @@ const BARE = /[A-Za-z0-9_-]+/y;
 const SCALAR = /\d{4}-\d{2}-\d{2}[ T]\d{2}:[^\s,\]}#]*|[^\s,\]}#]+/y;
 const ESC = { b: '\b', t: '\t', n: '\n', f: '\f', r: '\r', e: '\x1b', '"': '"', '\\': '\\' };
 const isTable = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+const table = () => Object.create(null);
 
 export function parseToml(src) {
   let i = 0;
@@ -60,7 +61,7 @@ export function parseToml(src) {
   // the table a path names, created on the way; an array of tables is entered at its last element
   const tableAt = (obj, path) => {
     for (const k of path) {
-      if (!(k in obj)) obj[k] = {};
+      if (!(k in obj)) obj[k] = table();
       const v = Array.isArray(obj[k]) ? obj[k][obj[k].length - 1] : obj[k];
       if (!isTable(v)) err(`\`${k}\` is not a table`);
       obj = v;
@@ -86,7 +87,7 @@ export function parseToml(src) {
       }
     }
     if (c === '{') {
-      i++; const out = {};
+      i++; const out = table();
       for (;;) {
         gap();
         if (src[i] === '}') { i++; return out; }
@@ -101,7 +102,7 @@ export function parseToml(src) {
     i += m[0].length; return m[0];
   }
 
-  const root = {};
+  const root = table();
   let cur = root;
   for (;;) {
     gap();
@@ -116,7 +117,7 @@ export function parseToml(src) {
         const parent = tableAt(root, path.slice(0, -1)), k = path[path.length - 1];
         if (!(k in parent)) parent[k] = [];
         if (!Array.isArray(parent[k])) err(`\`${k}\` is not an array of tables`);
-        parent[k].push(cur = {});
+        parent[k].push(cur = table());
       }
     } else {
       const path = key();
