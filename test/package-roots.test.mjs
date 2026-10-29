@@ -1,7 +1,7 @@
 // An absolute import resolves at the repo root, beside a file in a non-package dir, or through a package root: the
-// top of a contiguous run of __init__.py dirs. A name two files claim stays external, a standard-library name is never
-// captured by an in-repo loose module, namespace dir or nested package, and calls into a namespace package (no
-// __init__.py) named like an in-repo dir are reported by the self-check.
+// top of a contiguous run of __init__.py dirs. Of several claims the one under the importer's root wins, a claim
+// under another root never captures a declared dependency, a standard-library name is never captured, and the
+// self-check reports cross-root, ambiguous and namespace-package calls.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
@@ -19,6 +19,16 @@ test('backend/app imported as app.* resolves, from inside the package and from t
   assert.deepEqual(edgesFrom(m, 'backend.app.main:handle').map(e => e.to).sort(), ['backend.app.services:send', 'backend.app.services:send']);
   assert.deepEqual(m.tests.find(t => short(t.id) === 'test_send').direct.map(d => d.to), ['backend.app.services:send']);
   assert.deepEqual(m.tests.find(t => short(t.id) === 'test_go').direct.map(d => d.to), ['worker.src.jobs.run:go']);
+});
+
+test('a module in a namespace subpackage of a package resolves by either import form', () => {
+  assert.deepEqual(edgesFrom(m, 'backend.app.main:route').map(e => e.to), ['backend.app.api.routes:h', 'backend.app.api.routes:h']);
+});
+
+test('a call through a package root that does not hold the importing file is reported with its count', () => {
+  assert.deepEqual(m.selfCheck.crossRootImports, [{ name: 'jobs.run', root: 'worker/src', calls: 1 }]);
+  assert.deepEqual(m.selfCheck.ambiguousImports, []);
+  assert.match(r.md, /1 calls resolve through a package root that does not hold the importing file .*`jobs\.run` → `worker\/src\/` 1/);
 });
 
 test('a patch target is looked up through the package roots too', () => {
@@ -53,13 +63,27 @@ test('app/logging, app/http, app/email, a loose logging.py and a package email/ 
   assert.equal(s.codemap.selfCheck.externalLikeRepoDirs.calls, 0);
 });
 
-test('a dotted name two package roots claim stays external; a file beside one of them still reaches its own', () => {
+test('a name two package roots claim: each importer reaches the claim under its own root; one under neither is reported lost', () => {
   const a = mine(join(FIXTURES, 'package-roots-ambiguous'));
   assert.equal(a.status, 0, a.stderr);
   assert.deepEqual(a.codemap.selfCheck.packageRoots, ['services/a', 'services/b']);
-  assert.deepEqual(edgesFrom(a.codemap, 'services.run_all:go'), []);
-  assert.equal(a.codemap.selfCheck.unresolvedByOrigin.external, 1);
+  assert.deepEqual(edgesFrom(a.codemap, 'services.a.app.main:handle').map(e => e.to), ['services.a.app.util:f']);
+  assert.deepEqual(edgesFrom(a.codemap, 'services.b.app.main:handle').map(e => e.to), ['services.b.app.util:f']);
   assert.deepEqual(edgesFrom(a.codemap, 'services.a.run:go').map(e => e.to), ['services.a.app.util:f']);
+  assert.deepEqual(edgesFrom(a.codemap, 'services.run_all:go'), []);
+  assert.deepEqual(a.codemap.selfCheck.ambiguousImports, [{ name: 'app.util', roots: ['services/a', 'services/b'], calls: 1 }]);
+  assert.deepEqual(a.codemap.selfCheck.crossRootImports, []);
+  assert.match(a.md, /\*\*1 calls are not linked: their import names a module several package roots claim and none holds the importing file\*\*: `app\.util` 1 \(`services\/a\/`, `services\/b\/`\)/);
+});
+
+test('a package under another root never captures a declared dependency (integrations/stripe, clients/httpx); an undeclared one resolves and is reported', () => {
+  const d = mine(join(FIXTURES, 'package-roots-declared'));
+  assert.equal(d.status, 0, d.stderr);
+  assert.deepEqual(d.codemap.selfCheck.packageRoots, ['clients', 'integrations', 'plugins']);
+  assert.deepEqual(edgesFrom(d.codemap, 'app.billing:charge'), [], '`Stripe` in requirements.txt declares `import stripe`');
+  assert.deepEqual(edgesFrom(d.codemap, 'app.fetch:fetch'), [], '`httpx` in pyproject [project] dependencies');
+  assert.deepEqual(edgesFrom(d.codemap, 'app.notify:ping').map(e => e.to), ['plugins.acme:ping']);
+  assert.deepEqual(d.codemap.selfCheck.crossRootImports, [{ name: 'acme', root: 'plugins', calls: 1 }]);
 });
 
 test('calls into a namespace package (no __init__.py) named like an in-repo dir are reported, with their rate', () => {

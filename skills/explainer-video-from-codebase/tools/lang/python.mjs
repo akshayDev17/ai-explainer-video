@@ -10,6 +10,7 @@
    from the callee that runs it (B17), and a call inside an `except` is labelled "on failure". */
 import { dirname } from 'node:path';
 import { STDLIB } from './python-stdlib.mjs';
+import { normaliseDep } from './python-deps.mjs';
 
 export function newPythonModel() {
   return {
@@ -20,6 +21,7 @@ export function newPythonModel() {
     typeAliases: new Map(),   // alias symbol -> { type, provider, module, imports }: filled by rule packs before resolveCalls
     edges: [], dispatchSites: [], callStats: { resolved: 0, unresolvedName: 0, unresolvedAttr: 0 },
     unresolved: { inRepo: 0, external: 0, builtin: 0, local: 0 }, externalCalls: new Map(),
+    importNotes: { cross: new Map(), ambiguous: new Map() },   // calls whose head import crossed package roots / lost to two claims
     defNodes: 0, defsVisited: 0, defScopes: 0,
   };
 }
@@ -308,9 +310,9 @@ const initDirsOf = py => new Set([...py.modules.values()].filter(M => M.file.end
 /* Modules are named from the repo root; an absolute import is also resolved the way Python finds it from a package
    root below it. A file's package root is the top of the contiguous run of ancestor directories holding an
    __init__.py, and its dotted name there is that run plus the file: `backend/app/x.py`, with `backend/app/__init__.py`
-   and no `backend/__init__.py`, is also `app.x`. A dotted name resolves only when exactly one file claims it, and
-   never when its top-level name is a standard-library module (an in-repo `logging/` never captures `import logging`).
-   Returns the unique names and the package roots (the directories those runs sit in). */
+   and no `backend/__init__.py`, is also `app.x` (claimed under the root `backend`). A name whose top-level part is a
+   standard-library module is never claimed (an in-repo `logging/` never captures `import logging`). Returns every
+   claim, `alias -> [{ key, root }]`, and the package roots. */
 export function packageAliases(py) {
   const initDirs = initDirsOf(py), claims = new Map(), roots = new Set();
   for (const [key, M] of py.modules) {
@@ -320,18 +322,18 @@ export function packageAliases(py) {
     if (!k || !root.length) continue;
     const alias = key.slice(root.join('.').length + 1);
     if (STDLIB.has(alias.split('.')[0])) continue;
-    (claims.get(alias) || claims.set(alias, new Set()).get(alias)).add(key);
+    (claims.get(alias) || claims.set(alias, []).get(alias)).push({ key, root: root.join('/') });
     roots.add(root.join('/'));
   }
-  return { aliases: new Map([...claims].filter(([, ks]) => ks.size === 1).map(([a, ks]) => [a, [...ks][0]])), roots: [...roots].sort() };
+  return { claims, roots: [...roots].sort() };
 }
 
 /* ---------------- resolution ---------------- */
 
-export function resolverFor(py) {
+export function resolverFor(py, deps = new Set()) {
   const { modules, classes, symbols } = py;
   const pkgs = packagesOf(py), initDirs = initDirsOf(py);
-  const { aliases, roots: packageRoots } = packageAliases(py);
+  const { claims, roots: packageRoots } = packageAliases(py);
   const inRepo = m => modules.has(m) || pkgs.has(m);
   // a standard-library name resolves at the repo root only to a package (`logging/__init__.py`), never a loose module
   const atRoot = name => { const top = name.split('.')[0]; return inRepo(name) && (!STDLIB.has(top) || !!modules.get(top)?.file.endsWith('__init__.py')); };
@@ -339,19 +341,40 @@ export function resolverFor(py) {
   const sibling = (name, from) => { const f = modules.get(from)?.file, dir = f && dirname(f);
     if (!dir || dir === '.' || initDirs.has(dir) || f.endsWith('__init__.py') || STDLIB.has(name.split('.')[0])) return null;
     const m = `${dir.split('/').join('.')}.${name}`; return inRepo(m) ? m : null; };
+  /* through the package roots: the longest claimed dotted prefix, the rest appended (`app.api.routes` via `app` when
+     api/ has no __init__.py). Several claims: the one whose root holds the importing file wins, else the name stays
+     external (`ambiguous`). A claim under another root resolves (`cross`) unless the repo declares the top-level name
+     as a dependency (`integrations/stripe/` never captures a declared `stripe`). */
+  const claimed = (name, from) => {
+    const parts = name.split('.'), dir = dirname(modules.get(from)?.file || '.');
+    for (let i = parts.length; i >= 1; i--) {
+      const alias = parts.slice(0, i).join('.'), cs = claims.get(alias);
+      if (!cs) continue;
+      const at = c => [c.key, ...parts.slice(i)].join('.');
+      const live = cs.filter(c => inRepo(at(c)));
+      const own = live.filter(c => dir === c.root || dir.startsWith(c.root + '/')).sort((a, b) => b.root.length - a.root.length)[0];
+      if (own) return { key: at(own) };
+      if (live.length > 1) return { ambiguous: { name: alias, roots: live.map(c => c.root).sort() } };
+      if (live.length && !deps.has(normaliseDep(parts[0]))) return { key: at(live[0]), cross: { name: alias, root: live[0].root } };
+      return {};
+    }
+    return {};
+  };
+  const locate = (name, from) => atRoot(name) ? { key: name } : (n => n ? { key: n } : claimed(name, from))(sibling(name, from));
   // an absolute module name as the importing module sees it, or null when no in-repo module answers to it
-  const findModule = (name, from) => atRoot(name) ? name : sibling(name, from) || aliases.get(name) || null;
+  const findModule = (name, from) => locate(name, from).key || null;
+  const via = l => ({ ...(l.cross ? { cross: l.cross } : {}), ...(l.ambiguous ? { ambiguous: l.ambiguous } : {}) });
   function resolveImport(t, depth = 0) {
     if (!t || depth > 4) return null;
-    if (t.module) { const mod = findModule(t.module, t.in); return mod ? { module: mod } : { ext: t.module }; }
-    const from = findModule(t.from, t.in), m = from && modules.get(from);
-    if (m?.defs.has(t.name)) return { id: m.defs.get(t.name) };
+    if (t.module) { const l = locate(t.module, t.in); return l.key ? { module: l.key, ...via(l) } : { ext: t.module, ...via(l) }; }
+    const l = locate(t.from, t.in), from = l.key, m = from && modules.get(from);
+    if (m?.defs.has(t.name)) return { id: m.defs.get(t.name), ...via(l) };
     const followed = m?.imports.has(t.name) ? resolveImport(m.imports.get(t.name), depth + 1) : null;
     if (followed && !followed.missing) return followed;
-    if (!from) { const sub = findModule(`${t.from}.${t.name}`, t.in); return sub ? { module: sub } : { ext: `${t.from}.${t.name}` }; }
+    if (!from) { const s = locate(`${t.from}.${t.name}`, t.in); return s.key ? { module: s.key, ...via(s) } : { ext: `${t.from}.${t.name}`, ...via(l), ...via(s) }; }
     const sub = `${from}.${t.name}`;
     // `missing`: an in-repo module that does not define the name; counted as an in-repo miss
-    return inRepo(sub) ? { module: sub } : { missing: sub };
+    return inRepo(sub) ? { module: sub, ...via(l) } : { missing: sub };
   }
   function resolveName(name, c) {
     if (c.locals && c.locals.has(name)) return { id: c.locals.get(name) };
@@ -466,7 +489,11 @@ export function resolveCalls(py, R) {
     else if (BUILTINS.has(head)) py.unresolved.builtin++;
     else py.unresolved.local++;
   };
+  const tally = (map, note) => { const k = JSON.stringify(note); (map.get(k) || map.set(k, { ...note, calls: 0 }).get(k)).calls++; };
   for (const c of py.rawCalls) {
+    const head = (c.attr ? c.obj : c.expr).split('.')[0], r0 = head.includes('(') ? null : R.resolveName(head, c);
+    if (r0?.cross) tally(py.importNotes.cross, r0.cross);
+    if (r0?.ambiguous) tally(py.importNotes.ambiguous, r0.ambiguous);
     const alias = py.fnAlias.get(c.from);
     const cg = (c.guards || []).filter(x => readsConfig(x, alias));
     const extra = { ...(cg.length ? { cfg: cg.map(x => (x.neg ? 'not ' : '') + x.text.replace(/\s+/g, ' ')) } : {}), ...(c.onFailure ? { onFailure: c.onFailure } : {}) };

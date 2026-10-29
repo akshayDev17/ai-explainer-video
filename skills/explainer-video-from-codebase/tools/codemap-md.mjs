@@ -21,6 +21,10 @@ export function renderCodemap(m) {
     `- **${sc.ok ? 'ok' : 'FAILED'}**: ${sc.defsExtracted} of ${sc.defNodes} parsed definitions extracted (${sc.defLinesRaw} \`def\`/\`class\` lines by regex) · ${sc.defScopes} distinct definitions, ${sc.symbols} symbols`,
     `- calls: ${sc.calls.resolved} resolved · unresolved by origin ${JSON.stringify(sc.unresolvedByOrigin)} · in-repo miss rate ${(sc.inRepoMissRate * 100).toFixed(1)}%`,
     `- Python package roots below the repo root: ${sc.packageRoots.length ? sc.packageRoots.map(r => `\`${r}/\``).join(', ') : 'none'}`,
+    ...(sc.ambiguousImports.length ? [`- **${sc.ambiguousImports.reduce((n, x) => n + x.calls, 0)} calls are not linked: their import names a module several package roots claim and none holds the importing file**: ` +
+      sc.ambiguousImports.map(x => `\`${x.name}\` ${x.calls} (${x.roots.map(r => `\`${r}/\``).join(', ')})`).join(', ')] : []),
+    ...(sc.crossRootImports.length ? [`- ${sc.crossRootImports.reduce((n, x) => n + x.calls, 0)} calls resolve through a package root that does not hold the importing file (right only if that root is on its sys.path): ` +
+      sc.crossRootImports.map(x => `\`${x.name}\` → \`${x.root}/\` ${x.calls}`).join(', ')] : []),
     ...(sc.externalLikeRepoDirs.calls ? [`- **${sc.externalLikeRepoDirs.calls} calls (${(sc.externalLikeRepoDirs.rate * 100).toFixed(1)}%) go to imports resolved as external although an in-repo directory with no \`__init__.py\` has their name**: ` +
       sc.externalLikeRepoDirs.names.map(x => `\`${x.name}\` ${x.calls} (${x.dirs.map(d => `\`${d}/\``).join(', ')})`).join(', ') + ' — if these are in-repo namespace packages, these calls are not linked'] : []),
     `- files with syntax errors: ${sc.filesWithErrors.length ? sc.filesWithErrors.map(f => `\`${f}\``).join(', ') : 'none'}`, '');

@@ -24,6 +24,7 @@ import { loadGrammars } from './lib/tree-sitter.mjs';
 import { PATH_RULES, DEFAULT_RULE, classifyFile, parseOverrides } from './lib/groups.mjs';
 import { newPythonModel, extractPythonFile, resolverFor, resolveCalls, pythonEntries } from './lang/python.mjs';
 import { STDLIB } from './lang/python-stdlib.mjs';
+import { DEPENDENCY_FILES, declaredDependencies } from './lang/python-deps.mjs';
 import { classifyDispatch } from './lang/python-config.mjs';
 import * as fastapi from './rules/fastapi.mjs';
 import * as celeryTaskiq from './rules/celery-taskiq.mjs';
@@ -76,6 +77,7 @@ function walk(root, dir, out, skip) {
     const p = join(dir, name), rel = relative(root, p).split(sep).join('/'), st = lstatSync(p);
     if (st.isSymbolicLink() || skip(rel)) continue;
     if (st.isDirectory()) { if (!name.startsWith('.')) walk(root, p, out, skip); continue; }
+    if (DEPENDENCY_FILES.test(rel)) out.deps.push(rel);
     const reader = READERS.find(([, r]) => r.matches(rel));
     if (reader && st.size < 512 * 1024) out.config.push({ rel, reader: reader[0] });
     if (name.startsWith('.')) continue;
@@ -83,13 +85,13 @@ function walk(root, dir, out, skip) {
   }
   return out;
 }
-const newWalk = () => ({ code: [], config: [] });
+const newWalk = () => ({ code: [], config: [], deps: [] });
 // git-tracked files under a directory (relative to it); null when it is not in a git work tree
 const trackedFiles = root => {
   try { return new Set(execFileSync('git', ['-c', 'core.fsmonitor=false', '-C', root, 'ls-files', '-z'], { stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 28 })
     .toString().split('\0').filter(Boolean)); } catch { return null; }
 };
-const { code, config } = walk(ROOT, ROOT, newWalk(), excluded);
+const { code, config, deps } = walk(ROOT, ROOT, newWalk(), excluded);
 const pyFiles = code.filter(f => CODE_EXT[extname(f)] === 'python');
 if (!pyFiles.length) fail(1, `no supported source files under ${ROOT} (supported: ${LANGS.join(', ')})`);
 
@@ -120,7 +122,7 @@ const groupOfFile = new Map(files.map(f => [f.path, f.group]));
 
 /* ---------------- resolve: core rules, then framework packs ---------------- */
 fastapi.registerAliases(py);
-const R = resolverFor(py);
+const R = resolverFor(py, declaredDependencies(deps.map(rel => ({ rel, text: readText(rel) }))));
 const tests = pytest.findTests(py, R);
 const fixtures = pytest.findFixtures(py);
 const fixtureBindings = pytest.bindFixtures(py, tests, fixtures);
@@ -189,6 +191,8 @@ const selfCheck = {
   calls: py.callStats, unresolvedByOrigin: py.unresolved,
   inRepoMissRate: inRepoCalls ? Number((py.unresolved.inRepo / inRepoCalls).toFixed(4)) : 0,
   packageRoots: R.packageRoots,
+  crossRootImports: [...py.importNotes.cross.values()].sort((a, b) => b.calls - a.calls || (a.name < b.name ? -1 : 1)),
+  ambiguousImports: [...py.importNotes.ambiguous.values()].sort((a, b) => b.calls - a.calls || (a.name < b.name ? -1 : 1)),
   externalLikeRepoDirs: { calls: likeRepoCalls, rate: likeRepoCalls ? Number((likeRepoCalls / (inRepoCalls + likeRepoCalls)).toFixed(4)) : 0, names: likeRepoDirs },
   ok: py.defsVisited === py.defNodes && definedSymbols >= py.defScopes,
 };
@@ -240,5 +244,5 @@ console.log(`[mine] entries ${JSON.stringify(nk)} · Depends ${depends.length} �
 console.log(`[mine] tests ${ts.tests} (asserting ${ts.asserting}) · fixtures ${ts.fixtures} (autouse ${ts.autouse}) · fixture links ${ts.fixtureLinks} · mocks ${ts.mocks} (resolved ${ts.mocksResolved}, session-wide ${ts.sessionMocks}) · prod functions with a direct test link ${ts.prodFunctionsWithDirectLink}/${ts.prodFunctions}`);
 for (const d of notGitWorkTree) console.log(`[mine] config not read from ${d}: not a git work tree, so no config file can be proven tracked`);
 console.log(`[mine] config: ${dispatch.sites.length} factory dispatch sites · profiles ${dispatch.profiles.map(p => `${p.name} (${p.group})`).join(', ')}`);
-console.log(`[mine] self-check ${selfCheck.ok ? 'ok' : 'FAILED'}: ${selfCheck.defsExtracted}/${selfCheck.defNodes} definitions extracted · ${definedSymbols} distinct symbols for ${selfCheck.defScopes} distinct definitions · package roots ${selfCheck.packageRoots.join(', ') || 'none'} · external calls named like repo dirs ${likeRepoCalls} · in-repo miss rate ${(selfCheck.inRepoMissRate * 100).toFixed(1)}% · wrote ${relative(process.cwd(), OUT) || '.'}/codemap.{json,md}`);
+console.log(`[mine] self-check ${selfCheck.ok ? 'ok' : 'FAILED'}: ${selfCheck.defsExtracted}/${selfCheck.defNodes} definitions extracted · ${definedSymbols} distinct symbols for ${selfCheck.defScopes} distinct definitions · package roots ${selfCheck.packageRoots.join(', ') || 'none'} · calls across package roots ${selfCheck.crossRootImports.reduce((n, x) => n + x.calls, 0)} · calls lost to an ambiguous import ${selfCheck.ambiguousImports.reduce((n, x) => n + x.calls, 0)} · external calls named like repo dirs ${likeRepoCalls} · in-repo miss rate ${(selfCheck.inRepoMissRate * 100).toFixed(1)}% · wrote ${relative(process.cwd(), OUT) || '.'}/codemap.{json,md}`);
 if (!selfCheck.ok) process.exit(2);

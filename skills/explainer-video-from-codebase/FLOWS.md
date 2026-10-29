@@ -33,7 +33,12 @@ for an `if __name__ == "__main__":` block. Modules are named from the repo root 
 directory with no `__init__.py`, to a module beside it; else through a package root: a file's package root is the
 top of the contiguous run of ancestor directories holding an `__init__.py`, and its dotted name there is that run
 plus the file, so with `backend/app/__init__.py` (and no `backend/__init__.py`) `from app.x import f` finds
-`backend/app/x.py`. A name claimed by two files stays external. A top-level name of the standard library never
+`backend/app/x.py`; the longest claimed prefix carries the rest (`app.api.routes` when `api/` has no `__init__.py`).
+When several roots claim a name, the one holding the importing file wins; otherwise the name stays external. A
+claim under a root that does not hold the importing file resolves across roots, unless the repo declares the
+top-level name as a dependency (requirements*.txt, pyproject.toml `[project]` / Poetry dependencies, setup.cfg
+`install_requires` / `extras_require`, Pipfile; case, `-` and `_` normalised): `integrations/stripe/` never
+captures a declared `stripe`. A top-level name of the standard library never
 resolves to an in-repo loose module, namespace directory or nested package (`app/logging/` never captures
 `import logging`); only a repo-root package `logging/__init__.py` shadows it. `selfCheck.packageRoots` lists the
 package roots below the repo root. A call made at module level has `from: pkg.module:<module>`.
@@ -115,6 +120,8 @@ JWT, a provider token, a long random string) is written as `set (redacted)` ever
 both branches of an `if` / `try` is one). Also reported: files with syntax errors, resolved calls, unresolved calls
 by where their head name comes from (`inRepo`, `external`, `builtin`, `local`), and the in-repo miss rate:
 calls whose head is an in-repo name but whose target could not be resolved. `packageRoots` lists the package roots
-below the repo root (above). `externalLikeRepoDirs` counts calls into imports that resolved as external although an
+below the repo root (above); `crossRootImports` the calls resolved through a root that does not hold the importing
+file (`name`, `root`, `calls`: right only when that root is on its sys.path) and `ambiguousImports` the calls lost
+because several roots claim their import and none holds the importer (`name`, `roots`, `calls`). `externalLikeRepoDirs` counts calls into imports that resolved as external although an
 in-repo directory with no `__init__.py` (a namespace package) has their name, with their `rate` among in-repo calls:
 a high rate means those in-repo calls are not linked.
