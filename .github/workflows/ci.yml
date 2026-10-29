@@ -28,7 +28,7 @@ jobs:
       - run: |
           set -euo pipefail
           shopt -s nullglob
-          files=(scripts/*.mjs scripts/lib/*.mjs skills/*/tools/*.mjs skills/*/src/*.js lib/*.js)
+          files=(scripts/*.mjs scripts/lib/*.mjs skills/*/tools/*.mjs skills/*/tools/*/*.mjs skills/*/src/*.js lib/*.js test/*.mjs)
           [ ${#files[@]} -gt 0 ] || { echo "no source files matched — the layout moved"; exit 1; }
           for f in "${files[@]}"; do node --check "$f"; done
           echo "parsed ${#files[@]} files"
@@ -65,6 +65,32 @@ jobs:
       - name: Marketplace pins track the package version
         run: node scripts/check-marketplace-pins.mjs
 
+  # The miner's behaviour on small synthetic repos: group rules, each rule pack against its
+  # golden links, the resolver fixes, test-to-code links, the CLI contract. Offline and
+  # dependency-free: the tools run on the vendored tree-sitter, so no npm install.
+  tests:
+    name: npm test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: "22" }
+      - run: npm test
+
+  # skills/explainer-video-from-codebase/vendor/tree-sitter is COPIED from the pinned
+  # devDependencies (Antigravity installs by git clone and never runs npm install). Like the
+  # coursework-author gate: regenerate the comparison and fail on any drift, including a
+  # version bump that skipped the resync.
+  vendored-grammars:
+    name: vendored tree-sitter in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: "22" }
+      - run: npm ci --no-audit --no-fund --ignore-scripts
+      - run: node scripts/check-tree-sitter-vendor.mjs --installed
+
   vendored-skill:
     name: skills/coursework-author in sync
     runs-on: ubuntu-latest
@@ -85,8 +111,10 @@ jobs:
             *)                echo "run=true"  >> "$GITHUB_OUTPUT" ;;
           esac
 
+      # --ignore-scripts: the tree-sitter grammar packages carry native-build install scripts
+      # nothing here uses; only their prebuilt WASM is vendored.
       - if: steps.dep.outputs.run == 'true'
-        run: npm install --no-audit --no-fund
+        run: npm install --no-audit --no-fund --ignore-scripts
       - if: steps.dep.outputs.run == 'true'
         run: npm run check:coursework-author-sync
 
