@@ -23,6 +23,22 @@ export function mine(repo, ...flags) {
   return { status: r.status, stdout: r.stdout, stderr: r.stderr, codemap, md };
 }
 
+// mine, then propose, then rank, each as a child process writing into one scratch out dir
+export function proposeAndRank(repo, { mineFlags = [], proposeFlags = [], rankFlags = [] } = {}) {
+  const out = join(scratch(), 'out');
+  const run = (tool, args) => spawnSync(process.execPath, [join(SKILL, 'tools', tool), ...args], { cwd: tmpdir(), encoding: 'utf8' });
+  const steps = [run('mine.mjs', [repo, '--out', out, ...mineFlags]),
+    run('propose.mjs', ['--codemap', join(out, 'codemap.json'), ...proposeFlags]),
+    run('rank.mjs', ['--candidates', join(out, 'candidates.json'), ...rankFlags])];
+  const read = f => existsSync(join(out, f)) ? readFileSync(join(out, f), 'utf8') : null;
+  const json = f => { const t = read(f); return t && JSON.parse(t); };
+  const result = { statuses: steps.map(s => s.status), stderr: steps.map(s => s.stderr).join(''), stdout: steps.map(s => s.stdout).join(''),
+    codemap: json('codemap.json'), candidates: json('candidates.json'), ranking: json('ranking.json'), md: read('ranking.md'),
+    raw: { candidates: read('candidates.json'), ranking: read('ranking.json') } };
+  cleanup(dirname(out));
+  return result;
+}
+
 // a git work tree: config is read only from tracked files. Copies `from` (a fixture) when given; `track` adds every file
 export const git = (dir, ...args) => { const r = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); };
 export function gitRepo(from) {
