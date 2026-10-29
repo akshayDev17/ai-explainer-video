@@ -52,7 +52,6 @@ const text = readText(VALIDATED, 'the validated flows');
 let v;
 try { v = JSON.parse(text); } catch (e) { fail(1, `${VALIDATED} is not valid JSON: ${e.message}`); }
 if (v?.schema !== 1 || v.tool?.name !== 'apply-flows.mjs' || v.ok !== true) fail(1, `${VALIDATED} is not a passing apply-flows.mjs output (schema 1)`);
-const candidates = JSON.parse(readText(join(OUT, v.inputs.candidates.file), 'the candidates')).candidates;
 const items = new Map([...v.flows, ...v.cores].map(x => [x.id, x]));
 const one = flags.get('--flow');
 if (one != null && !items.has(one)) fail(1, `no flow or core "${one}" in ${VALIDATED} (have: ${[...items.keys()].join(', ')})`);
@@ -103,7 +102,7 @@ function map() {
       if (!edges.has(k) || CROSS.has(s.kind)) edges.set(k, { id: `e${edges.size}`, from: ids.get(a), to: ids.get(b), arrow: true, color: COLOR[s.kind] || 'client' });
       if (CROSS.has(s.kind)) crossings.push({ item: it.id, hop: h.index, from: s.from, to: s.to, kind: s.kind, evidence: s.evidence || null });
     }
-    const x = h.exercises ? exercisedBy(it, h) : null;
+    const x = h.exercises ? h.drive : null;
     if (x && ids.has(moduleOf(x.to))) {
       const a = moduleOf(h.symbol), b = moduleOf(x.to);
       edges.set(`${a}>${b}`, { id: '', from: ids.get(a), to: ids.get(b), arrow: true, color: COLOR[x.kind] || 'client' });
@@ -139,32 +138,22 @@ function sequence() {
   for (const h of it.hops.filter(x => x.exercises)) {
     const tgt = items.get(h.exercises), vid = videoOf(h.exercises);
     const id = `flow:${h.exercises}`;
-    parts.push({ id, label: tgt.title, sub: vid.video ? `see video ${vid.video}` : 'a production flow' });
-    messages.push({ from: part(moduleOf(h.symbol)), to: id, label: `drives ${h.exercises}`, kind: exercisedBy(it, h)?.kind || 'call', hop: h.index, via: 0 });
+    if (!parts.some(p => p.id === id)) parts.push({ id, label: tgt.title, sub: vid.video ? `see video ${vid.video}` : 'a production flow' });
+    messages.push({ from: part(moduleOf(h.symbol)), to: id, label: `drives ${h.exercises}`, kind: h.drive.kind, hop: h.index, via: 0 });
   }
   return { host: 'svg', as: 'sequence', flow: it.id, primitive: 'sequence',
     params: { x: 160, y: 170, w: 1600, h: 800, at: 0, participants: parts, messages } };
 }
 
 /* ---------------- exercises ---------------- */
-// the crossing by which an eval or dev hop drives the production flow it names: the candidate walk's crossing, else a
-// recorded edge, else a declared link
-function exercisedBy(it, h) {
-  const tgt = items.get(h.exercises);
-  const code = new Set([tgt.from, ...tgt.hops.map(x => x.symbol), ...(candidates[tgt.from]?.ownIds || [])]);
-  const c = (candidates[it.from]?.crossings || []).find(x => x.from === h.symbol && code.has(x.to));
-  if (c) return { kind: c.kind, to: c.to, evidence: c.evidence || null };
-  const l = (it.links || []).find(x => x.from === h.symbol && code.has(x.to));
-  if (l) return { kind: l.kind, to: l.to, evidence: l.evidence };
-  return null;
-}
+// how an eval or dev hop drives the production flow it names is apply-flows' `drive`: {kind, to, evidence}
 function exercises() {
   const it = items.get(one);
   const drives = it.hops.filter(h => h.exercises);
   if (!drives.length) fail(1, `${one} has no hop that exercises a production flow: --as exercises draws an eval or dev flow's hand-off`);
   const targets = [...new Set(drives.map(h => h.exercises))];
   const ys = spread(Math.max(it.hops.length, targets.length), 220, 900);
-  const links = drives.map(h => ({ hop: h.index, symbol: h.symbol, target: h.exercises, targetTitle: items.get(h.exercises).title, ...videoOf(h.exercises), ...(exercisedBy(it, h) || { kind: null, to: null, evidence: null }) }));
+  const links = drives.map(h => ({ hop: h.index, symbol: h.symbol, target: h.exercises, targetTitle: items.get(h.exercises).title, ...videoOf(h.exercises), ...h.drive }));
   const nodes = [
     ...it.hops.map((h, i) => ({ id: `h${h.index}`, kind: 'box', column: 'harness', row: i, label: h.name, stereotype: `${it.group} · hop ${h.index}`, size: { w: 420, h: 96 } })),
     ...targets.map((t, i) => { const l = links.find(x => x.target === t); return { id: `flow:${t}`, kind: 'box', column: 'production', row: i, label: t, stereotype: 'production flow', members: [l.video ? `see video ${l.video}` : 'not in this series'], sub: items.get(t).title }; }),

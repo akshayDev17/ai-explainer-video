@@ -18,7 +18,7 @@ test('each new language colours its own keywords, strings and comments', () => {
   assert.deepEqual(kinds('func Get(k string) error { // hit', 'go').filter(s => /^[ktsc]:/.test(s)), ['k:func', 't:Get', 't:string', 't:error', 'c:// hit']);
   assert.ok(kinds('s := `raw "x"`', 'go').includes('s:`raw "x"`'));
   assert.deepEqual(kinds('export async function f(): Promise<number> {', 'ts').filter(s => /^[kt]:/.test(s)), ['k:export', 'k:async', 'k:function', 't:Promise', 't:number']);
-  assert.ok(kinds('const s = `a ${b}`;', 'typescript').includes('s:`a ${b}`'));
+  assert.ok(kinds('const s = `a ${b}`;', 'js').includes('s:`a ${b}`'));
   assert.deepEqual(kinds('#include <stdio.h>', 'c').slice(0, 1), ['k:#include']);
   assert.deepEqual(kinds('static size_t n = sizeof(x); /* n */', 'c').filter(s => /^[ktc]:/.test(s)), ['k:static', 't:size_t', 'k:sizeof', 'c:/* n */']);
   assert.deepEqual(kinds('template <typename T> class Box {', 'cpp').filter(s => /^k:/.test(s)), ['k:template', 'k:typename', 'k:class']);
@@ -42,7 +42,6 @@ test('an excerpt panel shows its real line numbers, and its elision markers blan
   assert.match(html, /^<div class="ln" data-i="0"><span class="num">9<\/span>/);
   assert.match(html, /<div class="ln elided" data-i="1"><span class="num"><\/span><span class="txt">    ⋯ 6 lines<\/span><\/div>/);
   assert.match(html, /<div class="ln" data-i="2"><span class="num">16<\/span>/);
-  assert.match(CodeScenes.panelLinesHtml({ lines: ['a', 'b'], firstLine: 40 }), /<span class="num">41<\/span>/);
 });
 
 test('focus: an excerpt panel has one window per sentence, chained without flashing back; a coursework panel keeps its first', () => {

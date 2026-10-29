@@ -59,7 +59,7 @@ test('a run of blank lines is shown, not elided; the cap counts shown lines', ()
   const over = tool('excerpt.mjs', '--codemap', codemap, '--symbol', 'pkg.m:run');
   assert.equal(over.status, 2);
   assert.match(over.stderr, /31 lines shown, over the 22-line cap/);
-  assert.equal(tool('excerpt.mjs', '--codemap', codemap, '--symbol', 'pkg.m:run', '--max', '40').status, 0);
+  assert.equal(tool('excerpt.mjs', '--codemap', codemap, '--symbol', 'pkg.m:run', '--max', '40').status, 1, 'the cap is fixed');
 });
 
 test('a test panel: its def line, the line that calls the hop and its assertions, elided between', () => {
@@ -109,17 +109,19 @@ const goodScene = () => ({
   ],
 });
 let w = 0;
-// a work dir: manifest.json, one scene per segment, lines.json; `extra` adds more code segments
-function work(scene = goodScene(), { extra = {}, lines = LINES } = {}) {
+// a work dir: manifest.json, one scene per segment, lines.json, script.json; `extra` adds more code segments, `pauses`
+// names the segments whose script segment carries a pause
+function work(scene = goodScene(), { extra = {}, lines = LINES, pauses = [] } = {}) {
   const dir = join(TMP, `work${w++}`); mkdirSync(join(dir, 'scenes'), { recursive: true });
   const all = { hop2: scene, ...extra };
   writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ hosts: { code: 'src/scene-code.html' }, segments: Object.fromEntries(Object.keys(all).map(k => [k, { host: 'code', scene: k }])) }));
   for (const [k, cfg] of Object.entries(all)) writeFileSync(join(dir, 'scenes', `${k}.js`), `window.SCENE_CONFIG = ${JSON.stringify(cfg, null, 1)};\n`);
   if (lines) writeFileSync(join(dir, 'lines.json'), JSON.stringify({ segments: Object.fromEntries(Object.keys(all).map(k => [k, lines])) }));
+  writeFileSync(join(dir, 'script.json'), JSON.stringify({ videoIndex: 2, title: 'x', segments: Object.keys(all).map(k =>
+    pauses.includes(k) ? { key: k, text: 'Pause the video here and read this block.', pause: { dwell: 2 } } : { key: k, text: 'Read on.' }) }));
   return dir;
 }
-const check = (dir, repo = REPO, ...extra) => tool('excerpt-check.mjs', '--work', dir, '--repo', repo, ...extra);
-const script = (dir, segments) => { const f = join(dir, 'script.json'); writeFileSync(f, JSON.stringify({ videoIndex: 2, title: 'x', segments })); return f; };
+const check = (dir, repo = REPO) => tool('excerpt-check.mjs', '--work', dir, '--repo', repo, '--script', join(dir, 'script.json'));
 
 test('excerpt-check passes panels cut by excerpt with every shown line in a narration-synced focus window', () => {
   const r = check(work());
@@ -178,27 +180,34 @@ test('focus exits 3: a shown line no focus window covers, a window off the narra
 
 test('a pause segment may show a whole block unfocused, with its badge; at most three per video', () => {
   const whole = goodScene(); whole.acts = whole.acts.filter(a => a.op !== 'focus'); whole.acts.push({ op: 'pause', from: 4, to: 6 });
-  const dir = work(whole);
-  const seg = k => ({ key: k, text: 'Pause the video here and read this block.', pause: { dwell: 2 } });
-  assert.equal(check(dir, REPO, '--script', script(dir, [seg('hop2')])).status, 0);
-  assert.equal(check(dir).status, 0, 'without a script, the pause act marks the pause segment');
+  assert.equal(check(work(whole, { pauses: ['hop2'] })).status, 0);
+  const badgeOnly = check(work(whole));
+  assert.equal(badgeOnly.status, 3, 'a badge alone does not make a pause segment: the script must ask for it');
+  assert.match(badgeOnly.stdout, /a pause badge on a segment whose narration does not ask for a pause/);
   const noBadge = goodScene(); noBadge.acts = noBadge.acts.filter(a => a.op !== 'focus');
-  const nb = work(noBadge), rb = check(nb, REPO, '--script', script(nb, [seg('hop2')]));
+  const rb = check(work(noBadge, { pauses: ['hop2'] }));
   assert.equal(rb.status, 3);
   assert.match(rb.stdout, /a pause segment shows no pause badge/);
   const stray = goodScene(); stray.acts.push({ op: 'pause', from: 4, to: 6 });
-  const sd = work(stray);
-  assert.match(check(sd, REPO, '--script', script(sd, [{ key: 'hop2', text: 'Read on.' }])).stdout, /a pause badge on a segment whose narration does not ask for a pause/);
-  const four = work(whole, { extra: { a: whole, b: whole, c: whole } });
+  assert.match(check(work(stray)).stdout, /a pause badge on a segment whose narration does not ask for a pause/);
+  const four = work(whole, { extra: { a: whole, b: whole, c: whole }, pauses: ['hop2', 'a', 'b', 'c'] });
   const rf = check(four);
   assert.equal(rf.status, 3);
   assert.match(rf.stdout, /4 pause segments \(max 3\)/);
 });
 
-test('excerpt-check needs lines.json and code scenes (exit 1)', () => {
+test('excerpt-check needs --script, a manifest, code scenes and lines.json (exit 1)', () => {
+  const dir = work();
+  const noScript = tool('excerpt-check.mjs', '--work', dir, '--repo', REPO);
+  assert.equal(noScript.status, 1);
+  assert.match(noScript.stderr, /usage: .*--script/);
   assert.equal(check(work(goodScene(), { lines: null })).status, 1);
-  const empty = join(TMP, 'empty'); mkdirSync(join(empty, 'scenes'), { recursive: true });
-  assert.equal(check(empty).status, 1);
-  rmSync(join(empty, 'scenes'), { recursive: true });
-  assert.equal(check(empty).status, 1);
+  const noManifest = work(); rmSync(join(noManifest, 'manifest.json'));
+  const rm = check(noManifest);
+  assert.equal(rm.status, 1);
+  assert.match(rm.stderr, /no manifest\.json/);
+  const noCode = work(); writeFileSync(join(noCode, 'manifest.json'), JSON.stringify({ hosts: {}, segments: { hop2: { host: 'diagram', scene: 'hop2' } } }));
+  assert.match(check(noCode).stderr, /no code scenes/);
+  rmSync(join(noCode, 'scenes'), { recursive: true });
+  assert.equal(check(noCode).status, 1);
 });

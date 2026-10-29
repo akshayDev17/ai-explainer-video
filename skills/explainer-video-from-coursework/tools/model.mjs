@@ -12,6 +12,10 @@
                         videos we have not measured yet.
 
    If a future run measures a different pace, change it HERE, not in the tools.
+
+   MAX_PAUSES = 3 pause prompts per code video (design §5.5): script-check and the
+   codebase skill's excerpt-check enforce the same cap; a fourth forces a split.
    ========================================================================== */
 export const WPM = 153;
 export const EXPANSION = 1.10;
+export const MAX_PAUSES = 3;

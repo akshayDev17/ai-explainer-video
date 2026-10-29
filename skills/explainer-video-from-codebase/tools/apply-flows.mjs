@@ -374,10 +374,14 @@ for (const [id, it] of items) for (const h of hopsOf.get(id)) {
   if (!target || itemGroup(h.exercises, target) !== 'prod') { problem(at, `exercises "${h.exercises}", which is not a production flow in this file`); continue; }
   const code = new Set([target.def.from, ...(variantsOf.get(h.exercises) || []).map(v => v.entry)].flatMap(c => [...(r.candidates[c]?.ownIds || []), c]));
   for (const x of hopsOf.get(h.exercises)) code.add(x.symbol);
+  // how it drives it: the walk's crossing, else a declared link, else a direct call folded as a uses-prod leaf
   const c = r.candidates[it.def.from];
-  const drives = (c?.nodes || []).some(n => n.parent === h.symbol && n.folded === 'uses-prod' && code.has(n.id)) || (c?.crossings || []).some(x => x.from === h.symbol && code.has(x.to))
-    || linksOf.get(id).some(l => l.from === h.symbol && code.has(l.to));
-  if (!drives) problem(at, `${h.symbol} exercises ${h.exercises}, but it calls none of that flow's code`);
+  const cross = (c?.crossings || []).find(x => x.from === h.symbol && code.has(x.to));
+  const link = linksOf.get(id).find(l => l.from === h.symbol && code.has(l.to));
+  const call = (c?.nodes || []).find(n => n.parent === h.symbol && n.folded === 'uses-prod' && code.has(n.id));
+  h.drive = cross ? { kind: cross.kind, to: cross.to, evidence: cross.evidence || null } : link ? { kind: link.kind, to: link.to, evidence: link.evidence }
+    : call ? { kind: 'call', to: call.id, evidence: null } : null;
+  if (!h.drive) problem(at, `${h.symbol} exercises ${h.exercises}, but it calls none of that flow's code`);
 }
 const usesGraph = new Map([...items].filter(([, it]) => it.kind === 'core').map(([id]) => [id, hopsOf.get(id).map(h => h.uses).filter(u => items.get(u)?.kind === 'core')]));
 const cycle = (id, stack = []) => stack.includes(id) ? [...stack, id] : (usesGraph.get(id) || []).map(u => cycle(u, [...stack, id])).find(Boolean) || null;

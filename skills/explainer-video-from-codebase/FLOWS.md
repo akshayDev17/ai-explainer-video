@@ -243,7 +243,7 @@ whose evidence starts with `file:line` or `file:a-b` that exists in the repo.
 code map and ranking files with their sha256), `params` (`explainTop`, `explainTopEval`: the effective K, never below 10 and 5; `maxPath`), `series[]`
 (`kind`, `id`, `title`, `why`, `rank`), `flows[]` and `cores[]` with every hop resolved (`symbol`, `name`, `file`,
 `start`, `end`, `sha256`, `lines`, `connection` (`how`: entry, start, variant, candidate, edges or link; `path`; `steps[{from, to, kind, rule, evidence, down}]`),
-`crossing`, `break`, `uses`, `exercises`, `selectedBy`,
+`crossing`, `break`, `uses`, `exercises`, `drive` (an `exercises` hop's `{kind, to, evidence}`: the walk's crossing into that flow's code, else a declared link, else a direct call, `kind: "call"`), `selectedBy`,
 `pinnedBy[{test, file, line, end, asserts, assertLines, lines, say, strength, via, observed}]`), segments with their
 decision, variants with their rank, `teach[{dispatch, guard, say, hop, alternatives}]` (the hop that holds the
 point, else its nearest narrated ancestor), `links`; `skipped`, `promote`, `excluded` (with what each rule matched);
@@ -312,7 +312,7 @@ the code map's, and a symbol's span its own; else exit 2: re-mine):
 
 `--lines` ("54-65,70", inside the span) picks the narrated lines; each unshown run inside the span becomes one
 marker, `⋯ N lines`, at the run's outer indent (a run of blank lines is shown instead). Without it the whole span is
-shown. More than `--max` (22) shown lines exits 2. With `--test <id>` the span is the test's: its def line, the line
+shown. More than 22 shown lines exits 2. With `--test <id>` the span is the test's: its def line, the line
 where it calls `--symbol` (when that call is in its own body; a fixture or helper calls from elsewhere, recorded in
 `via`) and its assertion lines. The test must have a direct link to the symbol and must not mock it (C3′), else
 exit 2.
@@ -324,8 +324,8 @@ focus act. A `{op: "pause", from, to, text?}` act shows the pause badge.
 
 ## `excerpt-check.mjs` (C6)
 
-`--work out/<name>/<NN> --repo <root> [--script …]` reads the video's code scenes (the manifest's `code` segments,
-else every `scenes/*.js` that declares panels) and `lines.json` (exit 1 without either):
+`--work out/<name>/<NN> --repo <root> --script …` reads the video's code scenes (the manifest's `code` segments),
+`lines.json` and the video's script (exit 1 without any of them):
 
 - **drift, exit 2**: every panel has an excerpt `source`; the file it names is the mined one (the working tree's
   file when its sha256 matches, else `git show <commit>:<file>`); the span's sha256 matches; each numbered line
@@ -333,13 +333,12 @@ else every `scenes/*.js` that declares panels) and `lines.json` (exit 1 without 
   exactly its gap; at most 22 shown lines.
 - **focus, exit 3**: every shown non-blank line is in a focus act whose `narration` names lines of the segment in
   `lines.json` and whose window starts at the first line's onset and ends between the last line's end and the next
-  line's onset (scene time = line time + `lead`, ±0.06 s). A pause segment (its script segment carries `pause`;
-  without `--script`, its scene has a `pause` act) is exempt, must carry a `pause` act, and a video has at most 3;
+  line's onset (scene time = line time + `lead`, ±0.06 s). A pause segment (its script segment carries `pause`) is exempt, must carry a `pause` act, and a video has at most 3;
   a `pause` act on any other segment is an error.
 
 A pause segment's script carries `"pause": {"dwell": <s>}` with 0 < dwell ≤ 2, said out loud ("pause" in its
-text), with `pad` equal to the dwell; `script-check` adds the dwell to its estimate and errors on a fourth pause
-segment (`--max-pauses 3`).
+text), with `pad` equal to the dwell; `script-check` adds the dwell to its estimate and errors on a `pad` that
+differs from the dwell and on a fourth pause segment.
 
 ## Diagram skeletons (`flow-diagram.mjs`)
 
@@ -350,7 +349,7 @@ flags, an unknown flow, or `exercises` on a flow with no `exercises` hop.
 |---|---|
 | `map` | `{host: "diagram", items, config: {layout, nodes, edges}, crossings}`: one `box` per module the hops run through (every series item, or `--flow`'s), members = its hops, an arrow per call between modules (queue amber, HTTP green, spawn red); `crossings` lists every queue, HTTP and spawn hand-off and every eval hop's drive into production, with evidence |
 | `sequence` | `{host: "svg", primitive: "sequence", params: {participants, messages}}` for `SceneCore.primitives.sequence`: the caller (an HTTP entry's route, a queue key, a command), then each module in order; one message per hop from the module that calls it (`kind` call / http / queue / spawn; `via` counts the unnarrated calls between) |
-| `exercises` | `{host: "diagram", exercises, config}` for an eval or dev flow: its hops as the harness lane, each production flow it drives as one box with `see video N`, and the crossing between (`kind`, `to`, `evidence`) |
+| `exercises` | `{host: "diagram", exercises, config}` for an eval or dev flow: its hops as the harness lane, each production flow it drives as one box with `see video N`, and its `drive` between (`kind`, `to`, `evidence`) |
 
 The video number comes from `plan.json` beside the validated flows when it was planned from that exact file
 (`videoFrom: "plan.json"`), else from the planner at the default cap (`videoFrom: "estimate …"`).

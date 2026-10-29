@@ -11,20 +11,20 @@
      4. COVERAGE    every source section the plan assigned must be narrated
      5. PAUSES      code videos only, inert unless a segment carries `pause`:
                     a pause prompt is spoken ("pause" in its text), dwells
-                    0 < dwell <= 2 s, and a video has at most --max-pauses (3);
-                    a fourth is an error that forces a split
+                    0 < dwell <= 2 s realised as an equal `pad`, and a video has
+                    at most 3; a fourth is an error that forces a split
 
    Duration is ESTIMATED here, never trusted: the real number comes from measuring
    the generated audio downstream.
 
    Usage:
      node tools/script-check.mjs --script out/<name>/scripts/NN-<slug>.json \
-                                 [--plan out/<name>/plan.enriched.json] [--max-min 25] [--max-pauses 3]
+                                 [--plan out/<name>/plan.enriched.json] [--max-min 25]
    ========================================================================== */
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { WPM as DEFAULT_WPM, EXPANSION as DEFAULT_EXPANSION } from './model.mjs';
+import { WPM as DEFAULT_WPM, EXPANSION as DEFAULT_EXPANSION, MAX_PAUSES } from './model.mjs';
 
 const argv = process.argv.slice(2);
 const flag = (n, d) => {
@@ -91,12 +91,11 @@ const seen = new Set();
    Narration is the reading time: a code panel shows only the lines being narrated. A
    pause prompt is the rare exception, for a block that must be read whole: the
    narration says so out loud, a badge shows it, and the segment dwells at most 2 s
-   longer (realised as its `pad`). More than --max-pauses means the video asks the
+   longer (realised as its `pad`). More than MAX_PAUSES means the video asks the
    viewer to read silently too often: split it. */
 const pauses = (script.segments || []).filter(s => s.pause != null);
 let pauseDwell = 0;
 if (pauses.length) {
-  const MAX_PAUSES = parseInt(flag('max-pauses', '3'), 10);
   pauses.forEach(s => {
     const at = `segment ${script.segments.indexOf(s) + 1} (${s.key})`;
     const dwell = s.pause && typeof s.pause === 'object' ? s.pause.dwell : undefined;
@@ -104,7 +103,7 @@ if (pauses.length) {
     if (typeof dwell !== 'number' || !(dwell > 0 && dwell <= 2)) errors.push(`${at}: pause.dwell must be a number of seconds, 0 < dwell <= 2 (got ${JSON.stringify(dwell)})`);
     else {
       pauseDwell += dwell;
-      if (Number(s.pad) !== dwell) warnings.push(`${at}: pause.dwell ${dwell}s is realised as the segment's pad — set "pad": ${dwell}`);
+      if (Number(s.pad) !== dwell) errors.push(`${at}: pause.dwell ${dwell}s is realised as the segment's pad, which is ${JSON.stringify(s.pad)} — set "pad": ${dwell}`);
     }
   });
   if (pauses.length > MAX_PAUSES) errors.push(`${pauses.length} pause prompts (max ${MAX_PAUSES}) — a video that asks for that much silent reading must be split`);

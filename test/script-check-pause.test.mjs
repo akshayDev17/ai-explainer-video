@@ -33,12 +33,10 @@ test('up to three pause prompts pass, and their dwell is counted in the estimate
   assert.match(over.stdout, /estimated 1\.0 min exceeds the 0\.9 min cap/);
 });
 
-test('a fourth pause prompt is an error that forces a split; --max-pauses moves the limit', () => {
-  const four = [paused(1), paused(2), paused(3), paused(4)];
-  const r = check(four);
+test('a fourth pause prompt is an error that forces a split', () => {
+  const r = check([paused(1), paused(2), paused(3), paused(4)]);
   assert.equal(r.status, 2);
   assert.match(r.stdout, /4 pause prompts \(max 3\) — a video that asks for that much silent reading must be split/);
-  assert.equal(check(four, '--max-pauses', '4').status, 0);
 });
 
 test('a pause segment must say "pause" and dwell more than 0 and at most 2 seconds', () => {
@@ -50,7 +48,14 @@ test('a pause segment must say "pause" and dwell more than 0 and at most 2 secon
     assert.equal(r.status, 2, JSON.stringify(pause));
     assert.match(r.stdout, /pause\.dwell must be a number of seconds, 0 < dwell <= 2/);
   }
-  assert.match(check([{ ...paused(1), pad: undefined }]).stdout, /pause\.dwell 2s is realised as the segment's pad — set "pad": 2/);
+});
+
+test('a pause segment\'s pad is its dwell: a longer hold, or none, is an error', () => {
+  for (const pad of [6, undefined, 1]) {
+    const r = check([plain(1), { ...paused(2), pad }]);
+    assert.equal(r.status, 2, String(pad));
+    assert.match(r.stdout, /segment 2 \(s2\): pause\.dwell 2s is realised as the segment's pad, which is .* — set "pad": 2/);
+  }
 });
 
 test('without a pause segment the rule is inert: no pause line in the report', () => {

@@ -3,7 +3,7 @@
 // named by its video number instead of re-drawn.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, cpSync } from 'node:fs';
 import { join } from 'node:path';
 import { FIXTURES, scratch, cleanup, mineInto, tool } from './helpers.mjs';
 
@@ -73,6 +73,34 @@ test('the video number comes from plan.json when it was planned from this file',
   // a plan made from another validated list is not trusted for numbering
   writeFileSync(join(DIR, 'plan.json'), JSON.stringify({ ...plan, inputs: { ...plan.inputs, validated: { ...plan.inputs.validated, sha256: '0'.repeat(64) } } }));
   assert.equal(diagram('--as', 'exercises', '--flow', 'eval-borrow').exercises[0].videoFrom, 'estimate (no plan.json from this file)');
+});
+
+test('a hop that drives production by a direct call is drawn with apply-flows\' drive; one box per driven flow', () => {
+  const repo = join(TMP, 'direct-repo'); cpSync(join(FIXTURES, 'flows', 'repo'), repo, { recursive: true });
+  const evalPy = join(repo, 'evals', 'run_eval.py');
+  writeFileSync(evalPy, readFileSync(evalPy, 'utf8')
+    .replace('import httpx\n', 'import httpx\n\nfrom library.members import check_member\n')
+    .replace('\n\nif __name__', '\n\ndef check_rule():\n    return grade(check_member({"active": True}))\n\n\nif __name__')
+    .replace('    print(check_borrow("http://localhost:8000"))\n', '    print(check_borrow("http://localhost:8000"))\n    print(check_rule())\n'));
+  const candidates = mineInto(repo, join(TMP, 'direct-out'));
+  const dir = join(TMP, 'direct-flows'); mkdirSync(dir);
+  const f = JSON.parse(readFileSync(join(FIXTURES, 'flows', 'flows.json'), 'utf8'));
+  f.flows.find(x => x.id === 'eval-borrow').hops.splice(2, 0, { symbol: 'evals.run_eval:check_rule', exercises: 'lending' });
+  writeFileSync(join(dir, 'flows.json'), JSON.stringify(f));
+  const applied = tool('apply-flows.mjs', '--candidates', candidates, '--flows', join(dir, 'flows.json'));
+  assert.equal(applied.status, 0, applied.stdout + applied.stderr);
+  const run = (...a) => { const r = tool('flow-diagram.mjs', '--flows', join(dir, 'flows.validated.json'), ...a); assert.equal(r.status, 0, r.stderr); return JSON.parse(r.stdout); };
+  const call = { kind: 'call', to: 'library.members:check_member', evidence: null };
+  const x = run('--as', 'exercises', '--flow', 'eval-borrow');
+  assert.deepEqual(x.exercises.map(l => [l.symbol, l.kind, l.to]), [['evals.run_eval:check_borrow', 'http', 'library.api:borrow'], ['evals.run_eval:check_rule', call.kind, call.to]]);
+  assert.deepEqual(x.config.nodes.filter(n => n.column === 'production').map(n => n.label), ['lending']);
+  const m = run('--as', 'map');
+  assert.deepEqual(m.crossings.filter(c => c.exercises).map(c => `${c.kind} ${c.from} -> ${c.to}`), ['http evals.run_eval:check_borrow -> library.api:borrow', 'call evals.run_eval:check_rule -> library.members:check_member']);
+  const byLabel = Object.fromEntries(m.config.nodes.map(n => [n.label, n.id]));
+  assert.ok(m.config.edges.some(e => e.from === byLabel['evals.run_eval'] && e.to === byLabel['library.members']), 'the direct call is an arrow into production');
+  const s = run('--as', 'sequence', '--flow', 'eval-borrow').params;
+  assert.equal(s.participants.filter(p => p.id === 'flow:lending').length, 1, 'two hops driving one flow share its participant');
+  assert.deepEqual(s.messages.filter(x => x.to === 'flow:lending').map(x => [x.hop, x.kind]), [[2, 'http'], [3, 'call']]);
 });
 
 test('flow-diagram refuses bad flags, an unknown flow, and exercises on a flow that drives none (exit 1)', () => {

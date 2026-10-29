@@ -3,8 +3,8 @@
    excerpt.mjs — one code panel for a scene, cut from the repo as it was mined.
 
    Usage:
-     node tools/excerpt.mjs --codemap out/<name>/codemap.json --symbol <id> [--lines a-b,…] [--max 22]
-     node tools/excerpt.mjs --codemap out/<name>/codemap.json --symbol <id> --test <test id> [--lines a-b,…] [--max 22]
+     node tools/excerpt.mjs --codemap out/<name>/codemap.json --symbol <id> [--lines a-b,…]
+     node tools/excerpt.mjs --codemap out/<name>/codemap.json --symbol <id> --test <test id> [--lines a-b,…]
 
    Prints a panel fragment for scene-code.js (design §4.6):
      { file, lang, lines[], numbers[], elided[], source }
@@ -26,7 +26,7 @@
 
    Exit: 0 ok · 1 bad flags or unreadable code map · 2 symbol or test missing, a
          line outside the span, a test that does not pin the symbol, the file
-         changed since it was mined, or more than --max shown lines
+         changed since it was mined, or more than 22 shown lines
    ========================================================================== */
 import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -36,15 +36,14 @@ const fail = (code, msg) => { console.error(`[excerpt] ${msg}`); process.exit(co
 
 /* ---------------- args ---------------- */
 const argv = process.argv.slice(2);
-const VALUED = new Set(['--codemap', '--symbol', '--lines', '--test', '--max']);
+const VALUED = new Set(['--codemap', '--symbol', '--lines', '--test']);
 const flags = new Map();
 for (let i = 0; i < argv.length; i++) {
   if (VALUED.has(argv[i])) { if (argv[i + 1] == null) fail(1, `${argv[i]} needs a value`); flags.set(argv[i], argv[++i]); }
   else fail(1, `unknown argument ${argv[i]}`);
 }
-if (!flags.has('--codemap') || !flags.has('--symbol')) fail(1, 'usage: excerpt.mjs --codemap out/<name>/codemap.json --symbol <id> [--lines a-b,…] [--test <test id>] [--max 22]');
-const MAX = flags.has('--max') ? Number(flags.get('--max')) : 22;
-if (!Number.isInteger(MAX) || MAX < 1) fail(1, '--max must be a positive whole number of lines');
+if (!flags.has('--codemap') || !flags.has('--symbol')) fail(1, 'usage: excerpt.mjs --codemap out/<name>/codemap.json --symbol <id> [--lines a-b,…] [--test <test id>]');
+const MAX = 22;
 let m;
 try { m = JSON.parse(readFileSync(resolve(flags.get('--codemap')), 'utf8')); } catch (e) { fail(1, `cannot read the code map: ${e.message}`); }
 if (m?.schema !== 1 || !Array.isArray(m.symbols)) fail(1, 'not a mine.mjs code map (schema 1)');

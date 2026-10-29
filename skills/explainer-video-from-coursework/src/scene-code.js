@@ -82,8 +82,6 @@
     },
   };
   LANGS.js = LANGS.ts;
-  LANGS.typescript = LANGS.tsx = LANGS.javascript = LANGS.jsx = LANGS.ts;
-  LANGS['c++'] = LANGS.cpp;
   const STRING = /^"(?:[^"\\]|\\.)*"|^'(?:[^'\\]|\\.)*'/;
 
   function tokenize(line, lang) {
@@ -119,7 +117,7 @@
   function panelLinesHtml(p) {
     const elided = new Set((p.elided || []).map(e => (typeof e === 'number' ? e : e.at)));
     return p.lines.map((ln, i) => {
-      const num = p.numbers ? p.numbers[i] : (p.firstLine || 1) + i;
+      const num = p.numbers ? p.numbers[i] : i + 1;
       return elided.has(i)
         ? `<div class="ln elided" data-i="${i}"><span class="num">${num == null ? '' : num}</span><span class="txt">${esc(ln)}</span></div>`
         : `<div class="ln" data-i="${i}"><span class="num">${num == null ? '' : num}</span><span class="txt">${highlight(ln, p.lang || 'java')}</span></div>`;

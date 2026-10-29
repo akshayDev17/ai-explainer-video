@@ -4,10 +4,10 @@
    mined, and that the narration is the reading time (design §4.5 C6).
 
    Usage:
-     node tools/excerpt-check.mjs --work out/<name>/<NN> --repo <root> [--script out/<name>/scripts/NN-*.json]
+     node tools/excerpt-check.mjs --work out/<name>/<NN> --repo <root> --script out/<name>/scripts/NN-*.json
 
-   Reads the video's code scenes (manifest.json's `code` segments, else every
-   scenes/*.js that declares panels) and lines.json (stage 4b). Two checks:
+   Reads the video's code scenes (manifest.json's `code` segments), lines.json
+   (stage 4b) and the video's script. Two checks:
 
    DRIFT (exit 2) — every panel carries the `source` excerpt.mjs wrote, and is
      byte-identical to the file as mined: the working tree's file when its sha256
@@ -23,17 +23,18 @@
      the segment in lines.json, or [from, to]) and starts at that line's onset
      and ends between its end and the next line's onset (scene time, ±0.06 s, as
      resolve-beats measures). Only a pause segment (one whose script segment
-     carries `pause`, or, without --script, whose scene has a `pause` act) may
-     show lines outside a focus window; there are at most 3, each with a badge.
+     carries `pause`) may show lines outside a focus window; there are at most 3,
+     each with a badge.
 
-   Exit: 0 ok · 1 bad flags, no scenes or no lines.json · 2 drift · 3 a shown line
+   Exit: 0 ok · 1 bad flags, no manifest, no scenes, no lines.json or no script · 2 drift · 3 a shown line
          outside every narration-synced focus window, or a pause rule broken
    ========================================================================== */
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { MAX_PAUSES } from '../../explainer-video-from-coursework/tools/model.mjs';
 
 const fail = (code, msg) => { console.error(`[excerpt-check] ${msg}`); process.exit(code); };
 
@@ -45,9 +46,9 @@ for (let i = 0; i < argv.length; i++) {
   if (VALUED.has(argv[i])) { if (argv[i + 1] == null) fail(1, `${argv[i]} needs a value`); flags.set(argv[i], argv[++i]); }
   else fail(1, `unknown argument ${argv[i]}`);
 }
-if (!flags.has('--work') || !flags.has('--repo')) fail(1, 'usage: excerpt-check.mjs --work out/<name>/<NN> --repo <root> [--script out/<name>/scripts/NN-*.json]');
+if (!flags.has('--work') || !flags.has('--repo') || !flags.has('--script')) fail(1, 'usage: excerpt-check.mjs --work out/<name>/<NN> --repo <root> --script out/<name>/scripts/NN-*.json');
 const WORK = resolve(flags.get('--work')), REPO = resolve(flags.get('--repo'));
-const MAX_LINES = 22, MAX_PAUSES = 3, TOL = 0.06;
+const MAX_LINES = 22, TOL = 0.06;
 const MARKER = /^\s*⋯ (\d+) lines?$/;
 const sha = t => createHash('sha256').update(t).digest('hex');
 const readJson = (f, what) => { try { return JSON.parse(readFileSync(f, 'utf8')); } catch (e) { fail(1, `cannot read ${what} ${f}: ${e.message}`); } };
@@ -64,14 +65,10 @@ async function sceneConfig(file) {
   finally { global.window = prev; }
 }
 const manifestPath = join(WORK, 'manifest.json');
-let segs;   // [{key, file}]
-if (existsSync(manifestPath)) {
-  const man = readJson(manifestPath, 'the manifest');
-  const isCode = host => host === 'code' || /scene-code\.html$/.test((man.hosts || {})[host] || '');
-  segs = Object.entries(man.segments || {}).filter(([, s]) => isCode(s.host)).map(([key, s]) => ({ key, file: join(scenesDir, `${s.scene}.js`) }));
-} else {
-  segs = readdirSync(scenesDir).filter(f => f.endsWith('.js')).sort().map(f => ({ key: basename(f, '.js'), file: join(scenesDir, f) }));
-}
+if (!existsSync(manifestPath)) fail(1, `no manifest.json in ${WORK}: write it with the scenes (stage 5); its code segments are the panels checked`);
+const man = readJson(manifestPath, 'the manifest');
+const isCode = host => host === 'code' || /scene-code\.html$/.test((man.hosts || {})[host] || '');
+const segs = Object.entries(man.segments || {}).filter(([, s]) => isCode(s.host)).map(([key, s]) => ({ key, file: join(scenesDir, `${s.scene}.js`) }));
 const scenes = [];
 for (const s of segs) {
   if (!existsSync(s.file)) fail(1, `segment ${s.key}: scene ${s.file} does not exist`);
@@ -82,7 +79,7 @@ if (!scenes.length) fail(1, `no code scenes in ${WORK}`);
 const linesPath = join(WORK, 'lines.json');
 if (!existsSync(linesPath)) fail(1, `no lines.json in ${WORK}: run align.mjs first (stage 4b); focus windows are checked against the measured narration`);
 const segLines = readJson(linesPath, 'lines.json').segments || {};
-const script = flags.has('--script') ? readJson(resolve(flags.get('--script')), 'the script') : null;
+const script = readJson(resolve(flags.get('--script')), 'the script');
 
 /* ---------------- the file a panel was cut from, as mined ---------------- */
 const fileCache = new Map();
@@ -102,9 +99,7 @@ function minedFile(src) {
 
 /* ---------------- checks ---------------- */
 const drift = [], focus = [], report = [];
-const pauseSegs = new Set(script
-  ? (script.segments || []).filter(s => s.pause != null).map(s => s.key)
-  : scenes.filter(s => (s.cfg.acts || []).some(a => a.op === 'pause')).map(s => s.key));
+const pauseSegs = new Set((script.segments || []).filter(s => s.pause != null).map(s => s.key));
 
 for (const { key, cfg } of scenes) {
   const acts = cfg.acts || [];

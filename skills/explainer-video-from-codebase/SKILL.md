@@ -119,7 +119,7 @@ whole gets a pause prompt: the segment's text says "pause" out loud, it carries 
 **Code panels.** Never type code into a scene; cut every panel from the repo as mined:
 
 ```sh
-node <skill>/tools/excerpt.mjs --codemap out/<name>/codemap.json --symbol <id> [--lines 54-65,70] [--max 22]
+node <skill>/tools/excerpt.mjs --codemap out/<name>/codemap.json --symbol <id> [--lines 54-65,70]
 node <skill>/tools/excerpt.mjs --codemap out/<name>/codemap.json --symbol <id> --test <test id>
 ```
 
