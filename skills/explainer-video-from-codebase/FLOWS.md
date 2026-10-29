@@ -103,7 +103,7 @@ profiles decide only eval and test sites. Each site lists its alternatives (with
 eval-group mock is visibly an alternative), the guards, a yes / no / ? per profile, the settings read,
 the files that set them, and a classification: `config-narrowed` (every profile decides one class),
 `config-dependent (runtime input)` (a guard reads a parameter) or `config-dependent (value not in repo)`.
-`getattr(settings, "x", d)` reads setting `x`, falling back to `d` when no field declares it.
+`getattr(settings, "x", d)` reads setting `x`; when no field declares `x` its value is not in the repo, so `d` does not decide.
 
 Config is read only from git-tracked files (a local, untracked `.env` never is; a tracked `sample.env` or
 `.env.example` is) and never from an `--exclude`d path. A value is recorded only for a key a dispatch guard

@@ -11,11 +11,11 @@ const site = fn => m.config.sites.find(s => s.factory === fn);
 
 test('mining the resolver fixture succeeds', () => assert.equal(r.status, 0, r.stderr));
 
-test('B14: getattr(settings, "x", default) is a selector; its default decides when no field declares x', () => {
+test('B14: getattr(settings, "x", default) is a selector; with no field declaring x its value is not in the repo', () => {
   const s = site('svc.backends:create_backend');
-  assert.equal(s.classification, 'config-narrowed');
+  assert.equal(s.classification, 'config-dependent (value not in repo)');
   assert.deepEqual(s.settingsRead, ['backend_mode']);
-  assert.equal(s.decidedByProfile['code defaults'], 'svc.backends:LocalBackend');
+  assert.match(s.decidedByProfile['code defaults'], /^\?/);
 });
 
 test('B14: a declared settings field wins over getattr\'s default', () => {

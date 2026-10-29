@@ -17,7 +17,7 @@ class EuBackend:
 
 
 def create_backend():
-    # B14: no settings field declares backend_mode, so getattr's default decides
+    # B14: no settings field declares backend_mode, so its value is not in the repo
     settings = get_settings()
     mode = getattr(settings, "backend_mode", "local").lower()
     if mode == "remote":

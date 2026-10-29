@@ -6,8 +6,8 @@
      config-dependent       when a guard reads a function parameter (runtime input) or a value no profile settles.
    Profiles carry their file's group: production and dev sites are decided under code defaults and prod/dev files
    only; an eval or test data file decides only eval or test sites. B14: `getattr(settings, "x", default)` reads
-   setting x, falling back to the default when no settings field declares it. Values are evaluated as read; what
-   the report shows of them goes through shownValue (a secret is shown only as set). */
+   setting x; when no settings field declares x its value is not in the repo, so the default does not decide.
+   Values are evaluated as read; what the report shows of them goes through shownValue (a secret is shown only as set). */
 import { shownValue } from '../config/redact.mjs';
 
 const UNK = { unk: true };
@@ -42,13 +42,13 @@ export function classifyDispatch({ py, factories, entries, configKV, parser }) {
 
   function evaluate(text, fn, profile, refs, depth = 0) {
     const alias = py.fnAlias.get(fn) || {}, params = new Set(py.symbols.get(fn)?.params || []);
-    const settingsVal = (name, fallback) => {
+    const settingsVal = (name) => {
       refs.settings.add(name);
       if (fields.has(name)) { const f = fields.get(name);
         for (const e of envOf(f)) if (profile.values.has(e)) return coerce(f, profile.values.get(e).value);
         return parseDefault(f); }
       if (props.has(name)) return ev(exprOf(props.get(name).expr), true);
-      return fallback === undefined ? UNK : fallback;
+      return UNK;
     };
     const isSettingsObj = (n, inProp) => n && ((n.type === 'identifier' && (n.text === 'settings' || (inProp && n.text === 'self'))) ||
       (n.type === 'call' && /get_settings$/.test(n.childForFieldName('function').text)) || (n.type === 'attribute' && /^self\._?settings$/.test(n.text)));
@@ -78,7 +78,7 @@ export function classifyDispatch({ py, factories, entries, configKV, parser }) {
             const v = ev(f.childForFieldName('object'), inProp); if (isU(v) || typeof v !== 'string') return v === null ? UNK : (isU(v) ? UNK : v);
             const m = f.childForFieldName('attribute').text; return m === 'lower' ? v.toLowerCase() : m === 'upper' ? v.toUpperCase() : v.trim(); }
           if (f.text === 'getattr' && isSettingsObj(args[0], inProp) && args[1]?.type === 'string')
-            return settingsVal(ev(args[1], inProp), args[2] ? ev(args[2], inProp) : undefined);
+            return settingsVal(ev(args[1], inProp));
           if (f.text === 'bool') return truthy(ev(args[0], inProp));
           if (f.text === 'str') { const v = ev(args[0], inProp); return isU(v) ? UNK : String(v); }
           return UNK; }
