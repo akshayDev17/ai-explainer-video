@@ -15,5 +15,9 @@
     "timing.md": "788c7dba51e50373978693e1efc2d23e92904dfbba7655e03eb67d6448a02a79",
     "timing.svg": "b4435928fee427a3806cc3bfc9fb0e62979ffb38154a9546d8c2741b9deceef7",
     "timing.html": "645eb860b71753da03f9a3598f8198a6c0c8a8f64ead54b15be93ff65ed1db25"
+  },
+  "script-check, the reference coursework script": {
+    "status": 0,
+    "stdout": "\nscript.json\n───────────────────────────────\n  title        : Caching: write policies and eviction\n  form         : code\n  segments     : 3\n  words        : 97\n  narration    : 0.6 min  (at 153 wpm)\n  est. video   : 0.7 min  (×1.1 visual overhead)\n  plan target  : 0.6 min  →  116% of target\n  coverage     : 3/3 assigned sections covered\n\n  ⚠ 4 warning(s):\n     - segment 3 (evict): no visual hint — the scene stage will have to guess\n     - segment 2 (policies): acronym(s) LRU — TTS may spell them out\n     - segment 3 (evict): looks like code in the narration\n     - plan was built with maxVideoMin=2 but this check uses 25 — the plan predates the current default (re-plan to change the split, which also reshuffles video indices)\n\n  ✓ script is valid\n"
   }
 }

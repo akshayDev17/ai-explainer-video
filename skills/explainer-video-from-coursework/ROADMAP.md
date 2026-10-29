@@ -82,12 +82,12 @@ legend is placed from reserved pixels instead.
 | File | Covers | Vocabulary |
 |---|---|---|
 | `src/scene-svg.html` | the open lane — freeform SVG | author's own (`renderAt(t, svg, timeline)`) |
-| `src/scene-core.js` | primitive library — `chart`, `hubSpoke`, `loopFlow`, `timeline`, `equation`, and the `flow` idiom | primitives take author params; `flow` keeps `client`, `server`, `hub`, `box` |
-| `src/scene-code.js` | code walkthroughs, before/after refactors | code panels |
+| `src/scene-core.js` | primitive library — `chart`, `hubSpoke`, `loopFlow`, `timeline`, `equation`, `sequence`, and the `flow` idiom | primitives take author params; `flow` keeps `client`, `server`, `hub`, `box` |
+| `src/scene-code.js` | code walkthroughs, before/after refactors | code panels; for code excerpted from a repo, also real line numbers, elision lines, a focus window per sentence and a pause badge |
 
 With no `work=` parameter, `src/scene-svg.html:34` resolves `?scene=<name>` to
 `../scenes/<name>.js` — so the top-level `scenes/` is a live path for fixtures, not a
-leftover directory. It holds the five `_pt-*` configs, one per primitive.
+leftover directory. It holds the six `_pt-*` configs, one per primitive.
 
 ### Publish — chapters and captions (stage 6)
 

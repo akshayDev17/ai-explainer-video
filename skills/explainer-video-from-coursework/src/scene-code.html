@@ -62,6 +62,18 @@
   .ln .txt { color: #d6deeb; }
   .ln.focused { background: rgba(251,113,133,.10); box-shadow: -3px 0 0 rgba(251,113,133,.85); }
   .accent-ok .ln.focused { background: rgba(52,211,153,.10); box-shadow: -3px 0 0 rgba(52,211,153,.85); }
+  /* an elision marker stands for unnarrated lines of a repo excerpt */
+  .ln.elided .txt { color: #55688a; font-style: italic; letter-spacing: 1px; }
+
+  /* ---- pause badge: only on a segment whose narration asks the viewer to pause ---- */
+  .pause-badge {
+    position: absolute; left: 50%; top: 40px; transform: translateX(-50%); opacity: 0;
+    display: flex; align-items: center; gap: 14px; padding: 12px 30px; border-radius: 25px;
+    background: #2a1e07; border: 1.5px solid rgba(251,191,36,.6); color: #fbbf24;
+    font-size: 22px; font-weight: 800; letter-spacing: 1.2px; white-space: nowrap; pointer-events: none;
+  }
+  .pause-icon { display: inline-flex; gap: 5px; }
+  .pause-icon i { display: block; width: 6px; height: 20px; border-radius: 2px; background: #fbbf24; }
 
   /* ---- tokens ---- */
   .t-k { color: #c792ea; }   /* keyword  */

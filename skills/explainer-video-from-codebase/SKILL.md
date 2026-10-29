@@ -1,6 +1,6 @@
 ---
 name: explainer-video-from-codebase
-description: Under construction — will turn the major code flows of a codebase into a narrated explainer-video series. Today its first stages exist: mining a Python repo into a code map (files grouped as prod/test/eval/dev, call graph, entry points, framework links, tests as evidence, config facts), proposing one candidate flow per entry point and ranking them per group as evidence, validating the agent's series proposal (flows.json), recording the user's approval of the flow list, and planning the videos in the coursework plan's shape. Use only when the user asks to mine a codebase, rank its candidate flows, or propose and plan a code-flow series.
+description: Under construction — will turn the major code flows of a codebase into a narrated explainer-video series. Today its first stages exist: mining a Python repo into a code map (files grouped as prod/test/eval/dev, call graph, entry points, framework links, tests as evidence, config facts), proposing one candidate flow per entry point and ranking them per group as evidence, validating the agent's series proposal (flows.json), recording the user's approval of the flow list, planning the videos in the coursework plan's shape, and the on-screen code tools for a code video's scenes (verified code panels, test panels, diagram skeletons). Use only when the user asks to mine a codebase, rank its candidate flows, propose and plan a code-flow series, or cut code panels for its scenes.
 ---
 
 # explainer-video-from-codebase — under construction
@@ -9,8 +9,9 @@ The sibling of `explainer-video-from-coursework` for codebases: code proposes ca
 flows per entry point, the agent proposes the series with a reason per flow, the user
 approves the flow list, and a coursework-shaped plan feeds the same per-video stages 3–8.
 It is being built one milestone at a time; **the tools for stages 1 to 1c exist so far** (mine, propose, rank;
-apply-flows, approve-flows, flow-plan). On-screen code for code videos does not exist yet, so do not promise a
-video from this skill yet.
+apply-flows, approve-flows, flow-plan), plus the on-screen code tools stage 5 will use (excerpt, excerpt-check,
+flow-diagram). The code-video scene stage and its skill do not exist yet, so do not promise a video from this
+skill yet.
 
 ## Stage 1 — `/mine` (the part that exists)
 
@@ -105,5 +106,50 @@ banner. `--estimate` prints the plan without an approval and writes nothing.
 The plan has the coursework plan's shape: `craft-video-enrich` (apply-enrichment reads the plan's `forms`:
 overview, flow, core) and the per-video stages run on it. A script's `covers` names its video's `sections`
 (`"<file> :: <symbol> @L<start>"`).
+
+## Stages 3 and 5 for code videos — on-screen code (the tools that exist)
+
+Narration is the reading time: a code panel shows only the lines being narrated, each highlighted while its
+sentence plays, and every other line of the hop collapses into an elision marker.
+
+**Stage 3 addendum.** Narrate every line a panel will show, one hop per segment. Only a block that must be read
+whole gets a pause prompt: the segment's text says "pause" out loud, it carries `"pause": {"dwell": <s>}` with
+0 < dwell ≤ 2 and the same `pad`, and a video has at most 3. `script-check` errors on a fourth: split the video.
+
+**Code panels.** Never type code into a scene; cut every panel from the repo as mined:
+
+```sh
+node <skill>/tools/excerpt.mjs --codemap out/<name>/codemap.json --symbol <id> [--lines 54-65,70] [--max 22]
+node <skill>/tools/excerpt.mjs --codemap out/<name>/codemap.json --symbol <id> --test <test id>
+```
+
+It prints the panel fragment (`file`, `lang`, `lines`, `numbers`, `elided`, `source`) to paste into a `code`
+scene's `panels`. `--lines` picks the narrated lines (a hop's `lines` in the plan); over 22 shown lines exits 2:
+narrow them or split the hop. `--test` cuts the test's side of a "pinned by" pair (its def line, the line that
+calls the hop, its assertion lines); it exits 2 for a test that mocks the hop or only reaches it. Give each panel
+one `focus` act per sentence that names the narration line it is synced to (`"narration": <line>` or
+`[from, to]`, indices into the segment's lines in `lines.json`), starting at that line's onset; a pause segment
+also gets a `pause` act over its spoken prompt (the on-screen badge).
+
+```sh
+node <skill>/tools/excerpt-check.mjs --work out/<name>/<NN> --repo <repo> --script out/<name>/scripts/<NN>-*.json
+```
+
+Stage 5 is not done until it exits 0. Exit 2 is drift: a panel that is not byte-identical to the file as mined
+(or was typed, or hides lines without a marker); re-excerpt it. Exit 3 is a shown line outside every
+narration-synced focus window (outside the ≤ 3 pause segments), or a pause badge out of place.
+
+**Diagram skeletons.** The boxes and arrows come from the validated flows, the layout and beats from you:
+
+```sh
+node <skill>/tools/flow-diagram.mjs --flows out/<name>/flows.validated.json --as map [--flow <id>]
+node <skill>/tools/flow-diagram.mjs --flows out/<name>/flows.validated.json --flow <id> --as sequence
+node <skill>/tools/flow-diagram.mjs --flows out/<name>/flows.validated.json --flow <id> --as exercises
+```
+
+`map` is a `diagram` host config (the overview's system map); `sequence` is the params of the `svg` lane's
+`SceneCore.primitives.sequence` (clear the stage at the top of `renderAt`); `exercises` draws an eval or dev
+flow's hand-off to the production flow it drives as one box naming that flow's video ("see video 8"), never
+re-narrated.
 
 The fields of every artifact are described in [`FLOWS.md`](./FLOWS.md).

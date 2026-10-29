@@ -12,6 +12,14 @@
 
    Like the diagram renderer, renderAt(t) is a PURE FUNCTION of time.
 
+   Code excerpted from a repo (explainer-video-from-codebase's excerpt.mjs) adds,
+   all optional, defaults unchanged:
+     • numbers[]   the real line number of each line (null on an elision marker)
+     • elided[]    the indices of elision-marker lines, styled apart from code
+     • several `focus` acts per panel, one per narrated sentence
+     • a `pause` act: an on-screen badge while the narration asks the viewer to
+       pause and read a whole block
+
    Contract: window.CodeScenes.create({ root, config }) -> { renderAt(t) }
    ========================================================================== */
 (function () {
@@ -29,7 +37,14 @@
 
   /* ---------------- syntax highlighting ----------------
      A deliberately small Java/C-like tokenizer. No dependency, and it only has
-     to handle the curated snippets we author — not arbitrary source. */
+     to handle the curated snippets we author — not arbitrary source. A language
+     may override the string rule (Go raw strings, JS template literals) and mark
+     preprocessor directives (C, C++). */
+  const C_KW = ['auto','break','case','const','continue','default','do','else','enum','extern','for','goto','if','inline','register','restrict','return','sizeof','static','struct','switch','typedef','union','volatile','while','NULL','true','false'];
+  const C_TYPES = ['int','char','short','long','float','double','void','unsigned','signed','bool','size_t','ssize_t','int8_t','int16_t','int32_t','int64_t','uint8_t','uint16_t','uint32_t','uint64_t'];
+  const TS_KW = ['abstract','as','async','await','break','case','catch','class','const','continue','debugger','declare','default','delete','do','else','enum','export','extends','false','finally','for','from','function','if','implements','import','in','instanceof','interface','keyof','let','namespace','new','null','of','private','protected','public','readonly','return','static','super','switch','this','throw','true','try','type','typeof','undefined','var','void','while','yield'];
+  const TS_TYPES = ['string','number','boolean','any','unknown','never','object','bigint','symbol'];
+  const C_COMMENT = /^\/\/.*|^\/\*[\s\S]*?\*\//;
   const LANGS = {
     java: {
       keywords: new Set(['class','interface','implements','extends','public','private','protected','static','final','void','new','if','else','return','this','abstract','package','import','throws','throw','enum','super']),
@@ -41,7 +56,35 @@
       types: new Set(['int','str','float','bool','list','dict','set','tuple']),
       comment: /^#.*/,
     },
+    go: {
+      keywords: new Set(['break','case','chan','const','continue','default','defer','else','fallthrough','for','func','go','goto','if','import','interface','map','package','range','return','select','struct','switch','type','var','nil','true','false','iota']),
+      types: new Set(['string','int','int8','int16','int32','int64','uint','uint8','uint16','uint32','uint64','uintptr','float32','float64','complex64','complex128','bool','byte','rune','error','any']),
+      comment: C_COMMENT,
+      string: /^"(?:[^"\\]|\\.)*"|^'(?:[^'\\]|\\.)*'|^`[^`]*`/,
+    },
+    ts: {
+      keywords: new Set(TS_KW),
+      types: new Set(TS_TYPES),
+      comment: C_COMMENT,
+      string: /^"(?:[^"\\]|\\.)*"|^'(?:[^'\\]|\\.)*'|^`(?:[^`\\]|\\.)*`/,
+    },
+    c: {
+      keywords: new Set(C_KW),
+      types: new Set(C_TYPES),
+      comment: C_COMMENT,
+      directive: /^#\s*[a-z]+/,
+    },
+    cpp: {
+      keywords: new Set(C_KW.concat(['class','namespace','template','typename','public','private','protected','virtual','override','final','new','delete','this','nullptr','using','try','catch','throw','operator','friend','explicit','constexpr','noexcept','static_cast','dynamic_cast','reinterpret_cast','const_cast','decltype','mutable'])),
+      types: new Set(C_TYPES.concat(['std','string','vector','wchar_t','char16_t','char32_t'])),
+      comment: C_COMMENT,
+      directive: /^#\s*[a-z]+/,
+    },
   };
+  LANGS.js = LANGS.ts;
+  LANGS.typescript = LANGS.tsx = LANGS.javascript = LANGS.jsx = LANGS.ts;
+  LANGS['c++'] = LANGS.cpp;
+  const STRING = /^"(?:[^"\\]|\\.)*"|^'(?:[^'\\]|\\.)*'/;
 
   function tokenize(line, lang) {
     const L = LANGS[lang] || LANGS.java;
@@ -51,7 +94,8 @@
       const rest = line.slice(i);
       let m;
       if ((m = L.comment.exec(rest))) { out.push(['c', m[0]]); i += m[0].length; continue; }
-      if ((m = /^"(?:[^"\\]|\\.)*"|^'(?:[^'\\]|\\.)*'/.exec(rest))) { out.push(['s', m[0]]); i += m[0].length; continue; }
+      if (L.directive && (m = L.directive.exec(rest))) { out.push(['k', m[0]]); i += m[0].length; continue; }
+      if ((m = (L.string || STRING).exec(rest))) { out.push(['s', m[0]]); i += m[0].length; continue; }
       if ((m = /^[A-Za-z_$][\w$]*/.exec(rest))) {
         const w = m[0];
         const kind = L.keywords.has(w) ? 'k' : L.types.has(w) ? 't' : (/^[A-Z]/.test(w) ? 't' : (rest[w.length] === '(' ? 'f' : 'p'));
@@ -68,6 +112,34 @@
 
   function highlight(line, lang) {
     return tokenize(line, lang).map(([k, txt]) => `<span class="t-${k}">${esc(txt)}</span>`).join('');
+  }
+
+  /* One panel's lines as markup. The number column shows numbers[i] when the panel
+     carries real line numbers (blank on an elision marker), else counts from 1. */
+  function panelLinesHtml(p) {
+    const elided = new Set((p.elided || []).map(e => (typeof e === 'number' ? e : e.at)));
+    return p.lines.map((ln, i) => {
+      const num = p.numbers ? p.numbers[i] : (p.firstLine || 1) + i;
+      return elided.has(i)
+        ? `<div class="ln elided" data-i="${i}"><span class="num">${num == null ? '' : num}</span><span class="txt">${esc(ln)}</span></div>`
+        : `<div class="ln" data-i="${i}"><span class="num">${num == null ? '' : num}</span><span class="txt">${highlight(ln, p.lang || 'java')}</span></div>`;
+    }).join('');
+  }
+
+  /* The focus window in force at t, and how far its dim has faded in. A panel with
+     real line numbers (an excerpt) has one window per narrated sentence; a window
+     that starts as the previous one ends keeps the dim instead of flashing back.
+     A coursework panel (no numbers[]) keeps its one, first focus act. */
+  function focusState(acts, panel, numbered, t) {
+    const all = acts.filter(a => a.op === 'focus' && a.panel === panel);
+    const wins = numbered ? all : all.slice(0, 1);
+    if (!wins.length) return null;
+    const live = wins.filter(f => inWin(t, f.from, f.to));
+    const foc = live.length ? live[live.length - 1] : wins[0];
+    const active = live.length > 0;
+    const chained = wins.some(w => w !== foc && w.to != null && Math.abs(w.to - foc.from) < 0.05);
+    const k = active ? (chained ? 1 : fadeIn(t, foc.from, foc.from + 0.5)) : 0;
+    return { foc, active, k };
   }
 
   /* ---------------- factory ---------------- */
@@ -120,9 +192,7 @@
     (cfg.panels || []).forEach(p => {
       const el = document.createElement('div');
       el.className = `panel accent-${p.accent || 'ok'}`;
-      const lines = p.lines.map((ln, i) =>
-        `<div class="ln" data-i="${i}"><span class="num">${i + 1}</span><span class="txt">${highlight(ln, p.lang || 'java')}</span></div>`
-      ).join('');
+      const lines = panelLinesHtml(p);
       el.innerHTML =
         `<div class="card">` +
         `<div class="tab"><span class="dot"></span><span class="fname">${esc(p.file || '')}</span>` +
@@ -164,6 +234,16 @@
 
     /* --- acts, normalised --- */
     const acts = cfg.acts || [];
+
+    /* --- pause badge: built only when a `pause` act asks for it --- */
+    const pauses = acts.filter(a => a.op === 'pause');
+    let pauseEl = null;
+    if (pauses.length) {
+      pauseEl = document.createElement('div');
+      pauseEl.className = 'pause-badge';
+      pauseEl.innerHTML = '<span class="pause-icon"><i></i><i></i></span><span class="pause-text"></span>';
+      root.appendChild(pauseEl);
+    }
     const actOf = (op, panel) => acts.filter(a => a.op === op && (!panel || a.panel === panel));
 
     /**
@@ -227,7 +307,7 @@
 
         /* line reveal + focus */
         const rev = acts.find(a => a.op === 'reveal' && a.panel === id);
-        const foc = acts.find(a => a.op === 'focus' && a.panel === id);
+        const fs = focusState(acts, id, !!p.spec.numbers, t);
         const off = rev ? revealOffsets(p, rev) : null;
 
         p.lineEls.forEach((ln, i) => {
@@ -235,14 +315,12 @@
           if (rev) lineOp = fadeIn(t, rev.from + off.starts[i], rev.from + off.starts[i] + 0.30);
 
           let dim = 1;
-          if (foc) {
-            const inFocus = foc.lines.includes(i + 1);
-            const active = inWin(t, foc.from, foc.to);
-            const k = active ? fadeIn(t, foc.from, foc.from + 0.5) : 0;
-            dim = inFocus ? 1 : lerp(1, 0.28, k);
+          if (fs) {
+            const inFocus = fs.foc.lines.includes(i + 1);
+            dim = inFocus ? 1 : lerp(1, 0.28, fs.k);
           }
           ln.style.opacity = (lineOp * dim).toFixed(3);
-          ln.classList.toggle('focused', !!foc && foc.lines.includes(i + 1) && inWin(t, foc.from, foc.to));
+          ln.classList.toggle('focused', !!fs && fs.foc.lines.includes(i + 1) && fs.active);
         });
       });
 
@@ -267,6 +345,14 @@
         badge.style.opacity = '0';
       }
 
+      /* pause badge: up while the narration asks the viewer to pause and read */
+      if (pauseEl) {
+        const live = pauses.filter(a => inWin(t, a.from, a.to));
+        const a = live.length ? live[live.length - 1] : null;
+        pauseEl.style.opacity = a ? (fadeIn(t, a.from, a.from + 0.3) * fadeOut(t, a.to - 0.3, a.to)).toFixed(3) : '0';
+        if (a) pauseEl.querySelector('.pause-text').textContent = a.text || 'PAUSE · READ THE WHOLE BLOCK';
+      }
+
       /* progress */
       root.querySelector('#progFill').style.width = (W * clamp01(t / TOTAL)).toFixed(1) + 'px';
     }
@@ -275,5 +361,5 @@
     return { renderAt: render };
   }
 
-  window.CodeScenes = { create };
+  window.CodeScenes = { create, highlight, panelLinesHtml, focusState };
 })();

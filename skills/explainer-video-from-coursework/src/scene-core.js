@@ -1002,6 +1002,76 @@
       { fill: C.muted, 'font-size': 20, 'text-anchor': 'middle' }, parent);
   }
 
+  /* ---- sequence: participants with lifelines, calls revealed in order ---- */
+  /* A call sequence across a flow's components (explainer-video-from-codebase's
+     flow-diagram.mjs --as sequence writes the participants and messages). A
+     message's `kind` sets its look: a plain call is solid; a queue, HTTP or spawn
+     crossing, or a return, is dashed. A message to its own participant loops. */
+  const SEQ_COLOR = { call: 'client', queue: 'hub', http: 'ok', spawn: 'bad', return: 'muted' };
+  function primSequence(parent, params, t) {
+    const C = pal(params.palette);
+    const at = params.at || 0;
+    const parts = params.participants || [];
+    if (t < at || !parts.length) return;
+    const msgs = params.messages || [];
+    const x = params.x == null ? 160 : params.x, y = params.y == null ? 170 : params.y;
+    const w = params.w == null ? 1600 : params.w, h = params.h == null ? 800 : params.h;
+    const bh = params.boxH == null ? 74 : params.boxH;
+    const stagger = params.stagger == null ? 0.6 : params.stagger;
+    /* boxes narrow, and labels shrink, until neighbours keep a 16px gap */
+    let bw = params.boxW == null ? 230 : params.boxW;
+    if (parts.length > 1) bw = Math.min(bw, (w - bw) / (parts.length - 1) - 16);
+    const slot = parts.length > 1 ? (w - bw) / (parts.length - 1) : 0;
+    const fit = (s, size) => Math.max(14, Math.min(size, size * (bw - 20) / (textW(s, size, 700) || 1)));
+    const cx = i => (parts.length > 1 ? x + bw / 2 + i * slot : x + w / 2);
+    const idx = {};
+    parts.forEach((pt, i) => { idx[pt.id] = i; });
+    const hp = prog(t, at, params.dur == null ? 0.6 : params.dur);
+
+    parts.forEach((pt, i) => {
+      const col = C[pt.color || 'client'];
+      el('line', { x1: cx(i), y1: y + bh, x2: cx(i), y2: y + bh + (h - bh) * hp, stroke: C.hair, 'stroke-width': 2,
+        'stroke-dasharray': '6 8', opacity: hp.toFixed(3) }, parent);
+      el('rect', { x: cx(i) - bw / 2, y: y, width: bw, height: bh, rx: 14, fill: C[pt.fill || 'clientFill'],
+        stroke: col, 'stroke-width': 2.5, opacity: hp.toFixed(3) }, parent);
+      txt(cx(i), y + (pt.sub ? 34 : 45), pt.label || pt.id,
+        { fill: C.text, 'font-size': fit(pt.label || pt.id, 23).toFixed(1), 'font-weight': 700, 'text-anchor': 'middle', opacity: hp.toFixed(3) }, parent);
+      if (pt.sub) txt(cx(i), y + 60, pt.sub,
+        { fill: C.muted, 'font-size': fit(pt.sub, 17).toFixed(1), 'text-anchor': 'middle', opacity: hp.toFixed(3) }, parent);
+    });
+
+    const rowH = (h - bh - 30) / Math.max(1, msgs.length);
+    msgs.forEach((m, i) => {
+      const a = idx[m.from], b = idx[m.to];
+      if (a == null || b == null) return;
+      const mp = prog(t, m.at == null ? at + 0.5 + i * stagger : m.at, 0.5);
+      if (mp <= 0) return;
+      const kind = m.kind || 'call';
+      const col = C[m.color || SEQ_COLOR[kind] || 'client'];
+      const my = y + bh + 30 + rowH * (i + 0.5);
+      const dash = kind === 'call' ? null : '12 8';
+      const line = { fill: 'none', stroke: col, 'stroke-width': 3, 'stroke-linecap': 'round', opacity: 0.9 };
+      if (dash) line['stroke-dasharray'] = dash;
+      if (a === b) {
+        const loop = 60, dy = Math.min(rowH * 0.5, 34);
+        const u = mp;
+        el('path', Object.assign({ d: 'M ' + cx(a) + ' ' + (my - dy / 2) + ' h ' + (loop * u) +
+          (u > 0.5 ? ' v ' + dy * (u - 0.5) * 2 : '') + (u > 0.85 ? ' h ' + (-loop) : '') }, line), parent);
+        if (mp > 0.9) arrowHead(parent, cx(a) + 2, my + dy / 2, 180, col, ((mp - 0.9) / 0.1).toFixed(3));
+        if (m.label) txt(cx(a) + loop + 14, my + 7, m.label,
+          { fill: C.text, 'font-size': 20, 'font-weight': 600, opacity: mp.toFixed(3) }, parent);
+        return;
+      }
+      const x0 = cx(a), x1 = cx(b), xe = x0 + (x1 - x0) * mp;
+      el('line', Object.assign({ x1: x0, y1: my, x2: xe, y2: my }, line), parent);
+      if (mp > 0.9) arrowHead(parent, x1, my, x1 > x0 ? 0 : 180, col, ((mp - 0.9) / 0.1).toFixed(3));
+      if (m.label) txt((x0 + x1) / 2, my - 12, m.label,
+        { fill: C.text, 'font-size': 20, 'font-weight': 600, 'text-anchor': 'middle', opacity: mp.toFixed(3) }, parent);
+      if (kind !== 'call' && kind !== 'return') txt((x0 + x1) / 2, my + 26, kind,
+        { fill: col, 'font-size': 16, 'font-weight': 700, 'letter-spacing': 1, 'text-anchor': 'middle', opacity: mp.toFixed(3) }, parent);
+    });
+  }
+
   /* ---- equation: a small TeX subset ------------------------------------- */
   const MATH_MACROS = {
     alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', zeta: 'ζ', eta: 'η',
@@ -1174,6 +1244,7 @@
       loopFlow: primLoopFlow,
       timeline: primTimeline,
       equation: primEquation,
+      sequence: primSequence,
     },
   };
 })();
