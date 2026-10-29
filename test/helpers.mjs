@@ -39,6 +39,18 @@ export function proposeAndRank(repo, { mineFlags = [], proposeFlags = [], rankFl
   return result;
 }
 
+// mine, propose and rank a repo into `out` and keep it there: the flows tools read those files many times
+export function mineInto(repo, out, rankFlags = []) {
+  const run = (tool, args) => spawnSync(process.execPath, [join(SKILL, 'tools', tool), ...args], { cwd: tmpdir(), encoding: 'utf8' });
+  const steps = [run('mine.mjs', [repo, '--out', out]), run('propose.mjs', ['--codemap', join(out, 'codemap.json')]),
+    run('rank.mjs', ['--candidates', join(out, 'candidates.json'), ...rankFlags])];
+  for (const s of steps) assert.equal(s.status, 0, s.stderr);
+  return join(out, 'candidates.json');
+}
+
+// run one of the flow tools as the skill does: a child process from an unrelated cwd
+export const tool = (name, ...args) => spawnSync(process.execPath, [join(SKILL, 'tools', name), ...args], { cwd: tmpdir(), encoding: 'utf8' });
+
 // a git work tree: config is read only from tracked files. Copies `from` (a fixture) when given; `track` adds every file
 export const git = (dir, ...args) => { const r = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); };
 export function gitRepo(from) {

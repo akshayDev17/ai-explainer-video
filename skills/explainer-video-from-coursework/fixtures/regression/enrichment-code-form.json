@@ -1,0 +1,6 @@
+{
+  "videos": [
+    { "index": 1, "title": "Queues: delivery guarantees and backpressure", "form": "flow", "why": "a coursework plan declares no code-flow forms" },
+    { "index": 2, "title": "Caching: write policies and eviction", "form": "code", "why": "the read-through function is the centre of the video" }
+  ]
+}

@@ -56,7 +56,7 @@ const plan = JSON.parse(readFileSync(PLAN, 'utf8'));
 const enrichment = JSON.parse(readFileSync(ENR, 'utf8'));
 const OUT_DIR = dirname(PLAN);
 
-const FORMS = ['concept', 'diagram', 'code', 'refactor', 'catalogue'];
+const FORMS = plan.forms || ['concept', 'diagram', 'code', 'refactor', 'catalogue'];   // a code-flow plan declares its own
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)+$/;   // "load-balancing" — a dir slug, not a title
 const problems = [];
 const changes = [];

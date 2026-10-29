@@ -1,0 +1,56 @@
+{
+  "series": [
+    { "flow": "lending", "why": "prod #1: the write path, with a config-chosen store and two queue hand-offs" },
+    { "core": "core:fees", "why": "the fee rule every loan charges, pinned by its own test" },
+    { "flow": "search", "why": "prod #2: the read path, and its ranking rule is pinned by a test" },
+    { "flow": "eval-borrow", "why": "eval #1: the harness that grades borrowing over HTTP" }
+  ],
+  "skipped": [
+    { "entry": "library.api:give_back", "rank": "prod #3", "why": "returning a book only writes an audit record: one sentence in the lending video" },
+    { "entry": "library.api:remove", "rank": "prod #4", "why": "an admin delete with no logic beyond a log line" },
+    { "entry": "library.api:health", "rank": "prod #5", "why": "a liveness probe that returns a constant" },
+    { "entry": "evals.report:<main>", "rank": "eval #2", "why": "averages scores the harness already produced; named in the eval video" }
+  ],
+  "flows": [
+    { "id": "lending", "title": "Borrowing a book: from the request to the member's notice",
+      "from": "library.api:borrow",
+      "hops": [
+        { "symbol": "library.api:borrow" },
+        { "symbol": "library.service:LoanService.borrow",
+          "pinnedBy": [ { "test": "tests.test_service:test_borrow_records_the_fee", "say": "a borrow records the fee the fee rule returns" } ] },
+        { "symbol": "library.members:check_member",
+          "pinnedBy": [ { "test": "tests.test_members:test_inactive_member_is_refused", "say": "an inactive member is refused" } ] },
+        { "symbol": "library.members:MemberChecker.check" },
+        { "symbol": "library.fees:charge_fee", "uses": "core:fees" },
+        { "symbol": "library.store:make_store" },
+        { "symbol": "library.store:MemoryStore.save" },
+        { "symbol": "library.tasks:notify_member", "break": true },
+        { "symbol": "library.tasks:format_notice" }
+      ],
+      "segments": {
+        "keep": [ "library.tasks:notify_member" ],
+        "mention": [ { "root": "library.tasks:write_audit", "say": "every loan also writes an audit record through its own queue" } ]
+      },
+      "teach": [ { "dispatch": "library.store:make_store", "say": "STORE_BACKEND=sql swaps the in-memory store for SqlStore" } ] },
+    { "id": "search", "title": "Searching the catalogue and ranking the hits",
+      "from": "library.api:search",
+      "hops": [
+        { "symbol": "library.api:search" },
+        { "symbol": "library.service:search_books" },
+        { "symbol": "library.service:rank_results",
+          "pinnedBy": [ { "test": "tests.test_search:test_rank_results_puts_the_best_hit_first", "say": "the best-scoring hit comes first" } ] }
+      ] },
+    { "id": "eval-borrow", "title": "How the harness grades borrowing",
+      "from": "evals.run_eval:<main>",
+      "hops": [
+        { "symbol": "evals.run_eval:<main>" },
+        { "symbol": "evals.run_eval:check_borrow", "exercises": "lending" },
+        { "symbol": "evals.run_eval:grade" }
+      ] }
+  ],
+  "cores": [
+    { "id": "core:fees", "title": "The fee rule: free for two weeks, then a daily charge",
+      "hops": [ "library.fees:charge_fee", "library.fees:late_fee" ],
+      "pinnedBy": [ { "symbol": "library.fees:charge_fee", "test": "tests.test_service:test_late_fee_after_two_weeks", "say": "twenty days cost one hundred and fifty cents" } ] }
+  ]
+}

@@ -1,0 +1,186 @@
+{
+  "generatedFrom": "notes",
+  "model": {
+    "wpm": 153,
+    "expansion": 1.1,
+    "maxVideoMin": 2,
+    "minVideoMin": 2.5
+  },
+  "sourceStats": {
+    "markdownFiles": 2,
+    "codeFiles": 0,
+    "markdownWords": 221,
+    "narratableWords": 188
+  },
+  "totals": {
+    "videos": 2,
+    "seriesMinutes": 1.4,
+    "longestVideoMin": 0.8,
+    "capMinutes": 2,
+    "rawNarrationMinutes": 1.2
+  },
+  "excluded": [],
+  "parserDiag": [
+    {
+      "file": "01-queues/README.md",
+      "rawHeadingLines": 3,
+      "parsedHeadings": 3
+    },
+    {
+      "file": "02-caching/README.md",
+      "rawHeadingLines": 3,
+      "parsedHeadings": 3
+    }
+  ],
+  "coverage": [
+    {
+      "src": "01-queues/README.md",
+      "title": "Queues",
+      "line": 1,
+      "narratable": 45,
+      "video": 1,
+      "excluded": null,
+      "reason": null
+    },
+    {
+      "src": "01-queues/README.md",
+      "title": "Delivery guarantees",
+      "line": 5,
+      "narratable": 31,
+      "video": 1,
+      "excluded": null,
+      "reason": null
+    },
+    {
+      "src": "01-queues/README.md",
+      "title": "Backpressure",
+      "line": 9,
+      "narratable": 31,
+      "video": 1,
+      "excluded": null,
+      "reason": null
+    },
+    {
+      "src": "02-caching/README.md",
+      "title": "Caching",
+      "line": 1,
+      "narratable": 28,
+      "video": 2,
+      "excluded": null,
+      "reason": null
+    },
+    {
+      "src": "02-caching/README.md",
+      "title": "Write-through and write-back",
+      "line": 5,
+      "narratable": 36,
+      "video": 2,
+      "excluded": null,
+      "reason": null
+    },
+    {
+      "src": "02-caching/README.md",
+      "title": "Eviction",
+      "line": 18,
+      "narratable": 17,
+      "video": 2,
+      "excluded": null,
+      "reason": null
+    }
+  ],
+  "orphans": [],
+  "videos": [
+    {
+      "index": 1,
+      "title": "Queues",
+      "form": "concept",
+      "formWhy": "prose-dominant explanatory content",
+      "minutes": 0.8,
+      "seconds": 46,
+      "words": 107,
+      "sources": [
+        "01-queues/README.md"
+      ],
+      "artefacts": [],
+      "evidence": {
+        "codeRatio": 0,
+        "diagramRatio": 0,
+        "linkRatio": 0
+      },
+      "sections": [
+        "01-queues/README.md :: Queues @L1",
+        "01-queues/README.md :: Delivery guarantees @L5",
+        "01-queues/README.md :: Backpressure @L9"
+      ],
+      "sectionSpans": [
+        {
+          "id": "01-queues/README.md :: Queues @L1",
+          "src": "01-queues/README.md",
+          "title": "Queues",
+          "line": 1,
+          "endLine": 4
+        },
+        {
+          "id": "01-queues/README.md :: Delivery guarantees @L5",
+          "src": "01-queues/README.md",
+          "title": "Delivery guarantees",
+          "line": 5,
+          "endLine": 8
+        },
+        {
+          "id": "01-queues/README.md :: Backpressure @L9",
+          "src": "01-queues/README.md",
+          "title": "Backpressure",
+          "line": 9,
+          "endLine": 12
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "title": "Caching",
+      "form": "concept",
+      "formWhy": "prose-dominant explanatory content",
+      "minutes": 0.6,
+      "seconds": 35,
+      "words": 81,
+      "sources": [
+        "02-caching/README.md"
+      ],
+      "artefacts": [],
+      "evidence": {
+        "codeRatio": 0.168,
+        "diagramRatio": 0,
+        "linkRatio": 0
+      },
+      "sections": [
+        "02-caching/README.md :: Caching @L1",
+        "02-caching/README.md :: Write-through and write-back @L5",
+        "02-caching/README.md :: Eviction @L18"
+      ],
+      "sectionSpans": [
+        {
+          "id": "02-caching/README.md :: Caching @L1",
+          "src": "02-caching/README.md",
+          "title": "Caching",
+          "line": 1,
+          "endLine": 4
+        },
+        {
+          "id": "02-caching/README.md :: Write-through and write-back @L5",
+          "src": "02-caching/README.md",
+          "title": "Write-through and write-back",
+          "line": 5,
+          "endLine": 17
+        },
+        {
+          "id": "02-caching/README.md :: Eviction @L18",
+          "src": "02-caching/README.md",
+          "title": "Eviction",
+          "line": 18,
+          "endLine": 21
+        }
+      ]
+    }
+  ]
+}

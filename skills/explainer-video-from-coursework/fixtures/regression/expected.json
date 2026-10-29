@@ -1,0 +1,19 @@
+{
+  "apply-enrichment": {
+    "status": 0,
+    "plan.enriched.json": "5340f59bdd6ffd017f9ea9dfbfa79e014aaa47664e10b08883f04448dbb592ce",
+    "plan.enriched.md": "84bbb43ae8dbac457479c502af1ef686a5c9c8bcad4e11192b01b4910682b95b"
+  },
+  "apply-enrichment, a code-flow form on a coursework plan": {
+    "status": 2,
+    "plan.enriched.json": "54de58891905f4ab0eca26dd8ef1b128eb3ced77bc79581c714f41ab1c927cfa",
+    "plan.enriched.md": "59236c9749013464ceb5fa9b235dac42d5872824c48be4471ce085eb6e98a81b"
+  },
+  "timing-report": {
+    "status": 0,
+    "timing.csv": "4eb9a1ed0d8f6059e2bfc94db64bb117e3e25aad5e4cb4ff979632d24bbb0340",
+    "timing.md": "788c7dba51e50373978693e1efc2d23e92904dfbba7655e03eb67d6448a02a79",
+    "timing.svg": "b4435928fee427a3806cc3bfc9fb0e62979ffb38154a9546d8c2741b9deceef7",
+    "timing.html": "645eb860b71753da03f9a3598f8198a6c0c8a8f64ead54b15be93ff65ed1db25"
+  }
+}
