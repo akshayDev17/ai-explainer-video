@@ -1,0 +1,213 @@
+#!/usr/bin/env node
+/* =============================================================================
+   mine.mjs — parse every file of a repo, put each in a group, and write the
+   code map: symbols, typed call edges, entry points, framework rule links,
+   tests with their direct links into the code, and config facts.
+
+   Usage:
+     node tools/mine.mjs <repo> --out out/<name> [--group 'glob=group' ...]
+                         [--exclude p,...] [--lang python] [--config-root <dir>]
+
+   Writes out/<name>/codemap.json and out/<name>/codemap.md. Never writes inside
+   the repo, never uses the network, never runs repo code.
+
+   Exit: 0 ok · 1 bad path, no supported files, or bad flags · 2 self-check failed
+   (a definition the parser saw was not extracted)
+   ========================================================================== */
+import { readdirSync, readFileSync, lstatSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { join, relative, extname, resolve, sep } from 'node:path';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { loadGrammars } from './lib/tree-sitter.mjs';
+import { PATH_RULES, DEFAULT_RULE, classifyFile, parseOverrides } from './lib/groups.mjs';
+import { newPythonModel, extractPythonFile, resolverFor, resolveCalls, pythonEntries } from './lang/python.mjs';
+import { classifyDispatch } from './lang/python-config.mjs';
+import * as fastapi from './rules/fastapi.mjs';
+import * as celeryTaskiq from './rules/celery-taskiq.mjs';
+import * as clickTyper from './rules/click-typer.mjs';
+import * as registry from './rules/registry.mjs';
+import * as haystack from './rules/haystack.mjs';
+import * as pyHttp from './rules/py-http-client.mjs';
+import * as spawn from './rules/process-spawn.mjs';
+import * as pytest from './rules/pytest.mjs';
+import * as dotenv from './config/dotenv.mjs';
+import * as yamlLite from './config/yaml-lite.mjs';
+import * as tomlLite from './config/toml-lite.mjs';
+import * as json from './config/json.mjs';
+import { renderCodemap } from './codemap-md.mjs';
+
+const fail = (code, msg) => { console.error(`[mine] ${msg}`); process.exit(code); };
+
+/* ---------------- args ---------------- */
+const argv = process.argv.slice(2);
+const VALUED = new Set(['--out', '--group', '--exclude', '--lang', '--config-root']);
+const flags = new Map(); const bare = [];
+for (let i = 0; i < argv.length; i++) {
+  if (VALUED.has(argv[i])) { if (argv[i + 1] == null) fail(1, `${argv[i]} needs a value`); (flags.get(argv[i]) || flags.set(argv[i], []).get(argv[i])).push(argv[++i]); }
+  else if (argv[i].startsWith('--')) fail(1, `unknown flag ${argv[i]}`);
+  else bare.push(argv[i]);
+}
+if (bare.length !== 1 || !flags.has('--out')) fail(1, 'usage: mine.mjs <repo> --out out/<name> [--group glob=group] [--exclude p,...] [--lang python] [--config-root <dir>]');
+const ROOT = resolve(bare[0]);
+const OUT = resolve(flags.get('--out').at(-1));
+if (!existsSync(ROOT) || !lstatSync(ROOT).isDirectory()) fail(1, `not a directory: ${bare[0]}`);
+if (OUT === ROOT || OUT.startsWith(ROOT + sep)) fail(1, `refusing to write inside the repo: ${OUT}`);
+let overrides;
+try { overrides = parseOverrides((flags.get('--group') || []).flatMap(s => s.split(',')).filter(Boolean)); } catch (e) { fail(1, e.message); }
+const EXCLUDE = (flags.get('--exclude') || []).flatMap(s => s.split(',')).filter(Boolean).map(p => p.replace(/\/+$/, ''));
+const LANGS = (flags.get('--lang') || ['python']).flatMap(s => s.split(','));
+for (const l of LANGS) if (l !== 'python') fail(1, `--lang ${l}: only python is mined so far`);
+const CONFIG_ROOTS = (flags.get('--config-root') || []).map(d => resolve(d));
+for (const d of CONFIG_ROOTS) if (!existsSync(d)) fail(1, `--config-root ${d} does not exist`);
+
+/* ---------------- walk ---------------- */
+const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', 'dist', 'build']);
+const CODE_EXT = { '.py': 'python', '.ts': 'typescript', '.tsx': 'tsx', '.js': 'javascript', '.jsx': 'javascript', '.mjs': 'javascript',
+  '.cjs': 'javascript', '.go': 'go', '.c': 'c', '.h': 'c', '.cc': 'cpp', '.cpp': 'cpp', '.cxx': 'cpp', '.hpp': 'cpp', '.hh': 'cpp' };
+const READERS = [['dotenv', dotenv], ['yaml-lite', yamlLite], ['toml-lite', tomlLite], ['json', json]];
+const excluded = rel => EXCLUDE.some(p => rel === p || rel.startsWith(p + '/'));
+function walk(root, dir, out) {
+  for (const name of readdirSync(dir).sort()) {
+    if (SKIP_DIRS.has(name)) continue;
+    const p = join(dir, name), rel = relative(root, p).split(sep).join('/'), st = lstatSync(p);
+    if (st.isSymbolicLink()) continue;
+    if (st.isDirectory()) { if (!name.startsWith('.')) walk(root, p, out); continue; }
+    const reader = READERS.find(([, r]) => r.matches(rel));
+    if (reader && st.size < 512 * 1024) out.config.push({ rel, reader: reader[0] });
+    if (name.startsWith('.') || excluded(rel)) continue;
+    if (CODE_EXT[extname(name)]) out.code.push(rel);
+  }
+  return out;
+}
+const { code, config } = walk(ROOT, ROOT, { code: [], config: [] });
+const pyFiles = code.filter(f => CODE_EXT[extname(f)] === 'python');
+if (!pyFiles.length) fail(1, `no supported source files under ${ROOT} (supported: ${LANGS.join(', ')})`);
+
+/* ---------------- parse + extract ---------------- */
+const sha = s => createHash('sha256').update(s).digest('hex');
+const { Parser, grammars, versions } = await loadGrammars(['python']);
+const parser = new Parser(); parser.setLanguage(grammars.python);
+const py = newPythonModel();
+const files = [];
+const t0 = Date.now();
+const readCache = new Map();
+const readText = rel => readCache.get(rel) ?? (readCache.set(rel, readFileSync(join(ROOT, rel), 'utf8')), readCache.get(rel));
+for (const rel of code) {
+  const lang = CODE_EXT[extname(rel)];
+  const { group, rule } = classifyFile(rel, overrides, lang === 'python' ? () => readText(rel) : null);
+  const text = readText(rel);
+  const f = { path: rel, group, rule, lang, sha256: sha(text) };
+  if (lang === 'python') {
+    const tree = parser.parse(text);
+    if (tree.rootNode.hasError) f.parseError = true;
+    extractPythonFile(py, rel, tree.rootNode, group, text);
+    tree.delete();
+  } else f.unsupported = true;
+  files.push(f);
+}
+const parseMs = Date.now() - t0;
+const groupOfFile = new Map(files.map(f => [f.path, f.group]));
+
+/* ---------------- resolve: core rules, then framework packs ---------------- */
+fastapi.registerAliases(py);
+const R = resolverFor(py);
+const tests = pytest.findTests(py, R);
+const fixtures = pytest.findFixtures(py);
+const fixtureBindings = pytest.bindFixtures(py, tests, fixtures);
+resolveCalls(py, R);
+
+const prefixOf = fastapi.routePrefixes(py, R);
+const entries = [];
+for (const d of py.decorated) {
+  const e = fastapi.routeEntry(py, d, prefixOf) || celeryTaskiq.consumerEntry(py, d) || clickTyper.commandEntry(py, d, entries);
+  if (e) entries.push(e);
+}
+entries.push(...pythonEntries(py, R));
+for (const e of entries) e.group = groupOfFile.get(e.file) || 'prod';
+
+const producers = celeryTaskiq.linkProducers(py, R, entries);
+const registryKeys = registry.linkRegistry(py, producers.dispatchers, producers.consumerByKey);
+const depends = fastapi.linkDepends(py, R);
+const pipelines = haystack.linkPipelines(py, R);
+const httpCalls = pyHttp.linkHttpCalls(py, entries);
+const spawns = spawn.linkSpawns(py, entries);
+pytest.linkFixtures(py, fixtureBindings);
+const mocks = pytest.mockTargets(py, R);
+pytest.directLinks(py, tests, fixtures, mocks);
+
+/* ---------------- config facts ---------------- */
+const configFiles = [], configKV = [];
+const readConfig = (root, rel, reader, group, label) => {
+  let txt; try { txt = readFileSync(join(root, rel), 'utf8'); } catch { return; }
+  const facts = READERS.find(([n]) => n === reader)[1].readFacts(txt);
+  configFiles.push({ path: label, group, reader, facts: facts.length, sha256: sha(txt) });
+  for (const kv of facts) configKV.push({ ...kv, file: label, group });
+};
+for (const c of config) readConfig(ROOT, c.rel, c.reader, classifyFile(c.rel, overrides, null).group, c.rel);
+for (const d of CONFIG_ROOTS) for (const c of walk(d, d, { code: [], config: [] }).config) readConfig(d, c.rel, c.reader, 'prod', `${d}/${c.rel}`);
+const factories = Object.fromEntries([...new Set(py.returns.map(r => r.fn))].map(f => [f, R.factoryReturns(f)])
+  .filter(([, v]) => v.length > 1 || v.some(x => x.guards.length)));
+const guardParser = new Parser(); guardParser.setLanguage(grammars.python);
+const dispatch = classifyDispatch({ py, factories, entries, configKV, parser: guardParser });
+
+/* ---------------- self-check ---------------- */
+const KNOWN_PACKS = new Set(['fastapi', 'starlette', 'celery', 'taskiq', 'haystack', 'pytest', 'pytest_asyncio', 'unittest', 'httpx', 'requests', 'aiohttp', 'click', 'typer', 'subprocess', 'asyncio']);
+const FRAMEWORKS = ['flask', 'django', 'rq', 'dramatiq', 'huey', 'arq', 'tornado', 'sanic', 'falcon', 'bottle', 'pyramid', 'quart', 'litestar', 'aiohttp_jinja2',
+  'grpc', 'kafka', 'confluent_kafka', 'aiokafka', 'pika', 'aio_pika', 'nameko', 'airflow', 'prefect', 'dagster', 'luigi', 'langchain', 'langgraph',
+  'llama_index', 'ray', 'socketio', 'channels', 'graphene', 'strawberry', 'ariadne', 'apscheduler', 'schedule', 'fire', 'docopt'];
+const withoutPack = FRAMEWORKS.filter(f => py.externalImports.has(f) && !KNOWN_PACKS.has(f)).map(f => ({ name: f, firstSeen: py.externalImports.get(f) }));
+const defLinesRaw = pyFiles.reduce((n, f) => n + (readText(f).match(/^[ \t]*(async[ \t]+def|def|class)[ \t]+[A-Za-z_]/gm) || []).length, 0);
+const inRepoCalls = py.callStats.resolved + py.unresolved.inRepo;
+const selfCheck = {
+  defNodes: py.defNodes, defsExtracted: py.defsVisited, defLinesRaw, symbols: py.symbols.size,
+  filesWithErrors: files.filter(f => f.parseError).map(f => f.path),
+  calls: py.callStats, unresolvedByOrigin: py.unresolved,
+  inRepoMissRate: inRepoCalls ? Number((py.unresolved.inRepo / inRepoCalls).toFixed(4)) : 0,
+  ok: py.defsVisited === py.defNodes,
+};
+
+/* ---------------- write ---------------- */
+const symbols = [...py.symbols.values()].map(({ text, ...s }) => ({ ...s, sha256: sha(text) }));
+const byKey = (xs, k) => xs.reduce((a, x) => (a[x[k]] = (a[x[k]] || 0) + 1, a), {});
+const count = (xs, keys) => Object.fromEntries(keys.map(k => [k, xs.filter(x => x.group === k).length]));
+let commit = null;
+try { commit = execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch {}
+const treeHash = 'sha256:' + sha([...files.map(f => `${f.path}\0${f.sha256}`), ...configFiles.map(f => `${f.path}\0${f.sha256}`)].sort().join('\n'));
+const unsupported = files.filter(f => f.unsupported);
+const prodFns = symbols.filter(s => s.group === 'prod' && (s.kind === 'function' || s.kind === 'method'));
+const pinned = new Set(tests.flatMap(t => t.direct.map(l => l.to)));
+const G = ['prod', 'test', 'eval', 'dev'];
+const codemap = {
+  schema: 1, tool: { name: 'mine.mjs', versions }, root: ROOT, commit, treeHash,
+  languages: { python: { files: pyFiles.length, parseErrors: selfCheck.filesWithErrors.length } },
+  unsupported: { files: unsupported.length, byExt: byKey(unsupported.map(f => ({ ext: extname(f.path) })), 'ext') },
+  groups: { rules: [...PATH_RULES.map(r => r.rule), DEFAULT_RULE], overrides: overrides.map(o => `${o.glob}=${o.group}`),
+    files: count(files, G), symbols: count(symbols, G), entries: count(entries, G) },
+  files, symbols,
+  classes: [...py.classes.values()].map(k => ({ id: k.id, bases: k.bases, baseExprs: k.baseExprs, methods: Object.fromEntries(k.methods), decos: k.decos })),
+  edges: py.edges, entries,
+  tests, fixtures, fixtureBindings, mocks,
+  testSummary: { tests: tests.length, asserting: tests.filter(t => t.asserts).length, fixtures: fixtures.length, autouse: fixtures.filter(f => f.autouse).length,
+    fixtureLinks: fixtureBindings.length, mocks: mocks.length, mocksResolved: mocks.filter(m => m.target).length,
+    sessionMocks: mocks.filter(m => m.scope === 'session').length, prodFunctions: prodFns.length, prodFunctionsWithDirectLink: prodFns.filter(s => pinned.has(s.id)).length },
+  rules: { routes: entries.filter(e => e.kind === 'http').length, depends, taskiq: producers.links, registry: registryKeys, haystack: pipelines,
+    pyHttp: httpCalls, spawn: spawns, callbacks: py.edges.filter(e => e.rule === 'py.callback').length },
+  dispatchSites: py.dispatchSites, factories,
+  config: { files: configFiles, settingsFields: py.settingsFields, settingsProps: py.settingsProps, kv: configKV, profiles: dispatch.profiles, sites: dispatch.sites },
+  frameworksWithoutPack: withoutPack,
+  selfCheck,
+};
+mkdirSync(OUT, { recursive: true });
+writeFileSync(join(OUT, 'codemap.json'), JSON.stringify(codemap, null, 1) + '\n');
+writeFileSync(join(OUT, 'codemap.md'), renderCodemap(codemap));
+
+const ek = byKey(py.edges, 'kind'), nk = byKey(entries, 'kind'), ts = codemap.testSummary;
+const queueBy = byKey(py.edges.filter(e => e.rule === 'registry').map(e => ({ g: e.group })), 'g');
+console.log(`[mine] ${files.length} files (${pyFiles.length} python, ${unsupported.length} unsupported) parsed in ${parseMs} ms · ${selfCheck.filesWithErrors.length} with syntax errors · ${configFiles.length} config files`);
+console.log(`[mine] files by group ${JSON.stringify(codemap.groups.files)} · entries by group ${JSON.stringify(codemap.groups.entries)}`);
+console.log(`[mine] ${symbols.length} symbols · ${py.edges.length} edges ${JSON.stringify(ek)}`);
+console.log(`[mine] entries ${JSON.stringify(nk)} · Depends ${depends.length} · registry producers ${JSON.stringify(queueBy)} · haystack ${pipelines.length} · http ${httpCalls.filter(h => h.handler).length}/${httpCalls.length} · spawn ${spawns.length} · callbacks ${codemap.rules.callbacks}`);
+console.log(`[mine] tests ${ts.tests} (asserting ${ts.asserting}) · fixtures ${ts.fixtures} (autouse ${ts.autouse}) · fixture links ${ts.fixtureLinks} · mocks ${ts.mocks} (resolved ${ts.mocksResolved}, session-wide ${ts.sessionMocks}) · prod functions with a direct test link ${ts.prodFunctionsWithDirectLink}/${ts.prodFunctions}`);
+console.log(`[mine] config: ${dispatch.sites.length} factory dispatch sites · profiles ${dispatch.profiles.map(p => `${p.name} (${p.group})`).join(', ')}`);
+console.log(`[mine] self-check ${selfCheck.ok ? 'ok' : 'FAILED'}: ${selfCheck.defsExtracted}/${selfCheck.defNodes} definitions extracted · in-repo miss rate ${(selfCheck.inRepoMissRate * 100).toFixed(1)}% · wrote ${relative(process.cwd(), OUT) || '.'}/codemap.{json,md}`);
+if (!selfCheck.ok) process.exit(2);
