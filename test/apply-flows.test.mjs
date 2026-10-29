@@ -12,13 +12,35 @@ const GOOD = JSON.parse(readFileSync(join(FIXTURES, 'flows', 'flows.json'), 'utf
 const TMP = scratch();
 after(() => cleanup(TMP));
 const CANDIDATES = mineInto(REPO, join(TMP, 'out'));
-const NARROW = mineInto(REPO, join(TMP, 'narrow'), ['--explain-top', '1', '--explain-top-eval', '1']);   // only #1 of each group is high-ranked by K
+
+// more rows than the floor: twelve routes and seven eval harnesses, each with code of its own
+const MANY = join(TMP, 'many');
+mkdirSync(join(MANY, 'app'), { recursive: true }); mkdirSync(join(MANY, 'evals'));
+writeFileSync(join(MANY, 'app', '__init__.py'), '');
+writeFileSync(join(MANY, 'app', 'api.py'), 'from fastapi import APIRouter\n\nrouter = APIRouter()\n' + Array.from({ length: 12 }, (_, i) =>
+  `\n\n@router.get("/r${i}")\ndef route${i}():\n    return work${i}()\n\n\ndef work${i}():\n    return ${i}\n`).join(''));
+for (let i = 0; i < 7; i++) writeFileSync(join(MANY, 'evals', `harness${i}.py`), `def grade():\n    return ${i}\n\n\nif __name__ == "__main__":\n    grade()\n`);
+const NARROW = mineInto(MANY, join(TMP, 'many-narrow'), ['--explain-top', '1', '--explain-top-eval', '1']);   // K below the floor
+const WIDE = mineInto(MANY, join(TMP, 'many-wide'), ['--explain-top', '12', '--explain-top-eval', '7']);      // K above it
+const RANKED = JSON.parse(readFileSync(join(TMP, 'many-narrow', 'ranking.json'), 'utf8')).ranked;
+const row = (grp, rank) => RANKED[grp][rank - 1].entry;
+const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
+// a series of the given prod rows, everything else excluded by glob (which never explains a high-ranked row)
+const many = (rows = [1]) => ({
+  series: rows.map(x => ({ flow: `route-${x}`, why: `production row number ${x} of the ranking` })),
+  flows: rows.map(x => ({ id: `route-${x}`, title: `Route number ${x}`, from: row('prod', x), hops: [row('prod', x)] })),
+  skipped: [],
+  triage: { excluded: [{ match: 'app.api:*', why: 'thin routes returning a constant' }, { match: 'evals.*', why: 'toy harnesses grading a constant' }] },
+});
+const skip = (f, grp, ranks) => { for (const x of ranks) f.skipped.push({ entry: row(grp, x), why: `a ${grp} row skipped for this check` }); };
+const unexplained = r => [...r.stderr.matchAll(/- (prod|eval) #(\d+) \S+: is a high-ranked row/g)].map(x => `${x[1]} #${x[2]}`);
+const rows = (grp, ranks) => ranks.map(x => `${grp} #${x}`);
 
 let n = 0;
-// write a (mutated) copy of the good proposal in its own dir and validate it
-function apply(mutate = () => {}, candidates = CANDIDATES) {
+// write a (mutated) copy of a proposal (the good one by default) in its own dir and validate it
+function apply(mutate = () => {}, candidates = CANDIDATES, base = GOOD) {
   const dir = join(TMP, `case${n++}`); mkdirSync(dir);
-  const flows = structuredClone(GOOD); mutate(flows);
+  const flows = structuredClone(base); mutate(flows);
   writeFileSync(join(dir, 'flows.json'), JSON.stringify(flows, null, 1));
   const r = tool('apply-flows.mjs', '--candidates', candidates, '--flows', join(dir, 'flows.json'));
   const read = f => existsSync(join(dir, f)) ? readFileSync(join(dir, f), 'utf8') : null;
@@ -100,14 +122,13 @@ test('a cited test that mocks its hop fails (C3′)', () => {
 });
 
 test('an untriaged eval row fails (C1), and eval rows are never implicit', () => {
-  // with only eval #1 high-ranked, report is an ordinary row: it still needs a decision
-  const r = apply(f => { f.skipped = f.skipped.filter(s => s.entry !== 'evals.report:<main>'); for (const s of f.skipped) delete s.rank; }, NARROW);
-  fails(r, /entry evals\.report:<main>: \(eval #2\) is untriaged: .* \(eval rows are never triaged implicitly\)/);
-  assert.doesNotMatch(r.stderr, /high-ranked row/);
-  const excluded = apply(f => { f.skipped = f.skipped.filter(s => s.entry !== 'evals.report:<main>'); for (const s of f.skipped) delete s.rank;
-    f.triage = { excluded: [{ match: 'evals.report:*', why: 'averages scores the harness already produced' }] }; }, NARROW);
+  // eval #6 is below the floor of 5, an ordinary row: it still needs a decision
+  const r = apply(f => { skip(f, 'prod', range(2, 10)); skip(f, 'eval', range(1, 5)); f.triage.excluded.pop(); }, NARROW, many());
+  fails(r, new RegExp(`entry ${row('eval', 6).replace(/[.*]/g, '\\$&')}: \\(eval #6\\) is untriaged: .* \\(eval rows are never triaged implicitly\\)`));
+  assert.deepEqual(unexplained(r), []);
+  const excluded = apply(f => { skip(f, 'prod', range(2, 10)); skip(f, 'eval', range(1, 5)); }, NARROW, many());
   assert.equal(excluded.status, 0, excluded.stderr);
-  assert.equal(excluded.v.triage.entries.find(t => t.id === 'evals.report:<main>').status, 'excluded');
+  assert.deepEqual([6, 7].map(x => excluded.v.triage.entries.find(t => t.id === row('eval', x)).status), ['excluded', 'excluded']);
 });
 
 test('a production flow with a test hop fails', () => {
@@ -122,17 +143,30 @@ test('a glob never explains a high-ranked row', () => {
   fails(apply(f => { f.skipped[2].entry = 'library.api:*'; }), /skipped\[2\]: "library\.api:\*" is a glob/);
 });
 
-test('every row above the lowest-ranked included row is high-ranked', () => {
-  // with K = 1 the skipped rows 3-5 are ordinary and a glob may exclude them...
-  const strip = f => { f.skipped = f.skipped.filter(s => s.entry.startsWith('evals')); for (const s of f.skipped) delete s.rank;
-    f.triage = { excluded: [{ match: 'library.api:*', why: 'thin routes with no logic of their own' }] }; };
-  const ok = apply(strip, NARROW);
+test('a ranking made with a smaller K never lowers the floor of 10 production and 5 eval rows', () => {
+  const r = apply(() => {}, NARROW, many());
+  fails(r, /is a high-ranked row \(rank <= 10\) and is unexplained/);
+  assert.deepEqual(unexplained(r), [...rows('prod', range(2, 10)), ...rows('eval', range(1, 5))]);
+  assert.match(r.md, /high-ranked: the top 10 production and top 5 eval rows/);
+  const ok = apply(f => { skip(f, 'prod', range(2, 10)); skip(f, 'eval', range(1, 5)); }, NARROW, many());
   assert.equal(ok.status, 0, ok.stderr);
-  assert.match(ok.stdout, /prod: 2 high-ranked · 2 in series/);
-  // ...until the series includes #5: then #3 and #4 sit above it and each needs its own reason
-  const r = apply(f => { strip(f); f.flows.push({ id: 'probe', title: 'The liveness probe', from: 'library.api:health', hops: ['library.api:health'] }); f.series.push({ flow: 'probe', why: 'what the load balancer polls every second' }); }, NARROW);
-  fails(r, /prod #3 library\.api:give_back: is a high-ranked row \(rank <= 1 or at or above #5, the lowest-ranked row the series includes\)/);
-  assert.match(r.stderr, /prod #4 library\.api:remove/);
+  assert.deepEqual([ok.v.params.explainTop, ok.v.params.explainTopEval], [10, 5]);
+  assert.match(ok.stdout, /prod: 10 high-ranked · 1 in series · 0 variant · 9 skipped · 0 unexplained/);
+  assert.match(ok.stdout, /eval: 5 high-ranked · 0 in series · 0 variant · 5 skipped · 0 unexplained/);
+});
+
+test('a ranking made with a larger K raises the high-ranked set', () => {
+  const r = apply(f => { skip(f, 'prod', range(2, 10)); skip(f, 'eval', range(1, 5)); }, WIDE, many());
+  fails(r, /is a high-ranked row \(rank <= 12\) and is unexplained/);
+  assert.deepEqual(unexplained(r), [...rows('prod', [11, 12]), ...rows('eval', [6, 7])]);
+  assert.match(r.md, /high-ranked: the top 12 production and top 7 eval rows/);
+});
+
+test('every row above the lowest-ranked included row is high-ranked', () => {
+  // below the floor, #11 is ordinary and a glob may exclude it, until the series includes #12
+  const r = apply(f => { skip(f, 'prod', range(2, 10)); skip(f, 'eval', range(1, 5)); }, NARROW, many([1, 12]));
+  fails(r, /prod #11 \S+: is a high-ranked row \(rank <= 10 or at or above #12, the lowest-ranked row the series includes\)/);
+  assert.deepEqual(unexplained(r), ['prod #11']);
 });
 
 test('an untriaged segment fails (C2); a mention needs a say', () => {
@@ -174,6 +208,17 @@ test('an eval flow names the production flow it drives instead of re-narrating i
   fails(apply(f => { flow(f, 'eval-borrow').hops.splice(2, 0, { symbol: 'library.api:borrow' }); }), /eval-borrow hop 3: library\.api:borrow is production code/);
   fails(apply(f => { flow(f, 'eval-borrow').hops[1].exercises = 'search'; }), /check_borrow exercises search, but it calls none of that flow's code/);
   fails(apply(f => { flow(f, 'lending').hops[1].exercises = 'search'; }), /"exercises" marks the hop of an eval or dev flow/);
+});
+
+test('an unknown field on a flow, core or citation fails, and a flow\'s group is its entry\'s', () => {
+  fails(apply(f => { const l = flow(f, 'lending'); l.teech = l.teach; delete l.teach; }), /flow lending: unknown field "teech"/);
+  fails(apply(f => { f.cores[0].pinnedby = f.cores[0].pinnedBy; delete f.cores[0].pinnedBy; }), /core core:fees: unknown field "pinnedby"/);
+  fails(apply(f => { f.cores[0].from = 'library.api:borrow'; }), /core core:fees: unknown field "from"/);
+  fails(apply(f => { const x = flow(f, 'search'); delete x.id; x.segment = {}; }), /flows\[1\]: unknown field "segment"/);
+  fails(apply(f => { flow(f, 'search').hops[2].pinnedBy[0].symbol = 'library.service:rank_results'; }), /flow search hop 3 pinnedBy\[0\]: unknown field "symbol"/);
+  fails(apply(f => { flow(f, 'lending').group = 'eval'; }), /flow lending: says group "eval" but its entry library\.api:borrow is in the prod group/);
+  const same = apply(f => { flow(f, 'lending').group = 'prod'; });
+  assert.equal(same.status, 0, same.stderr);
 });
 
 test('existence, shape and series checks', () => {

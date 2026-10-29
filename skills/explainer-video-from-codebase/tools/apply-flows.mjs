@@ -11,8 +11,9 @@
      - every flow, core, hop, segment, variant, skip, promotion, teach target
        and cited test exists;
      - every series item has a reason, and so does every high-ranked row the
-       series does not include (C1′: rank <= the ranking's --explain-top per group, or at or above
-       the lowest-ranked row the series includes); a glob never explains one;
+       series does not include (C1′: rank <= 10 prod / 5 eval, or the ranking's larger
+       --explain-top / --explain-top-eval, or at or above the lowest-ranked row the series includes);
+       a glob never explains one;
      - every non-test entry is triaged (C1); eval rows are never implicit;
      - every segment of a kept candidate is kept, mentioned or excluded (C2);
      - every hop is connected to the hops before it (C3) and is a dispatch
@@ -112,8 +113,11 @@ keys('flows.json', f, ['codemap', 'candidates', 'trace', 'series', 'skipped', 'p
 const flows = list('flows', f.flows).filter((x, i) => isObj(x) || problem(`flows[${i}]`, 'must be an object'));
 const cores = list('cores', f.cores).filter((x, i) => isObj(x) || problem(`cores[${i}]`, 'must be an object'));
 const items = new Map();   // id -> { kind, def }
+const ITEM_FIELDS = { flow: ['id', 'title', 'from', 'group', 'hops', 'segments', 'variants', 'teach', 'links'], core: ['id', 'title', 'hops', 'pinnedBy', 'variants', 'teach', 'links'] };
 for (const [kind, defs] of [['flow', flows], ['core', cores]]) defs.forEach((d, i) => {
-  if (typeof d.id !== 'string' || !d.id.trim()) return problem(`${kind}s[${i}]`, 'needs an id');
+  const hasId = typeof d.id === 'string' && d.id.trim();
+  keys(hasId ? `${kind} ${d.id}` : `${kind}s[${i}]`, d, ITEM_FIELDS[kind]);
+  if (!hasId) return problem(`${kind}s[${i}]`, 'needs an id');
   if (items.has(d.id)) return problem(`${kind} ${d.id}`, 'id is used twice');
   items.set(d.id, { kind, def: d });
 });
@@ -154,7 +158,11 @@ const realEntry = (where, id) => {
   if (!r.candidates[id]) { problem(where, `${id} has no candidate`); return false; }
   return true;
 };
-for (const [id, it] of items) if (it.kind === 'flow' && realEntry(`flow ${id} from`, it.def.from)) decide(`flow ${id}`, it.def.from, 'flow', { flow: id });
+for (const [id, it] of items) if (it.kind === 'flow' && realEntry(`flow ${id} from`, it.def.from)) {
+  decide(`flow ${id}`, it.def.from, 'flow', { flow: id });
+  const g = entry.get(it.def.from).group;
+  if (it.def.group != null && it.def.group !== g) problem(`flow ${id}`, `says group "${it.def.group}" but its entry ${it.def.from} is in the ${g} group`);
+}
 const variantsOf = new Map();
 for (const [id, it] of items) variantsOf.set(id, list(`${it.kind} ${id} variants`, it.def.variants).flatMap((v, i) => {
   const where = `${it.kind} ${id} variants[${i}]`;
@@ -211,9 +219,10 @@ const outOfRepo = list('outOfRepo', f.outOfRepo).flatMap((x, i) => {
 /* ---------------- hops: existence, groups, lines, citations ---------------- */
 const flowFroms = new Map([...items].filter(([, it]) => it.kind === 'flow' && entry.has(it.def.from)).map(([id, it]) => [it.def.from, id]));
 const itemGroup = (id, it) => it.kind === 'flow' ? entry.get(it.def.from)?.group : null;
-const citation = (where, hopSym, c) => {
+const CITATION_FIELDS = ['test', 'say', 'lines', 'strength'];
+const citation = (where, hopSym, c, fields = CITATION_FIELDS) => {
   if (!isObj(c)) { problem(where, 'a citation is {test, say, lines?, strength?}'); return null; }
-  keys(where, c, ['test', 'say', 'lines', 'strength', 'symbol']);
+  keys(where, c, fields);
   needReason(`${where} ${c.test}`, c.say, 'say');
   const t = testById.get(c.test);
   if (!t) { problem(where, `test ${c.test} is not in the code map`); return null; }
@@ -252,7 +261,7 @@ const hopsOf = new Map([...items].map(([id, it]) => [id, readHops(it, id)]));
 for (const [id, it] of items) if (it.kind === 'core') list(`core ${id} pinnedBy`, it.def.pinnedBy).forEach((c, j) => {
   const where = `core ${id} pinnedBy[${j}]`, hop = isObj(c) && hopsOf.get(id).find(h => h.symbol === c.symbol);
   if (!hop) return problem(where, `${isObj(c) ? c.symbol : c} is not a hop of this core`);
-  const x = citation(where, c.symbol, c); if (x) hop.pinnedBy.push(x);
+  const x = citation(where, c.symbol, c, ['symbol', ...CITATION_FIELDS]); if (x) hop.pinnedBy.push(x);
 });
 
 /* ---------------- connectivity (C3) and dispatch consistency ---------------- */
@@ -452,7 +461,7 @@ const triage = nonTest.map(e => {
 for (const t of triage) if (!t.status) problem(`entry ${t.id}`, `(${t.group}${t.rank ? ` #${t.rank}` : ''}) is untriaged: make it a flow, a variant, skip it with a reason, or exclude it with a reason${t.group === 'eval' ? ' (eval rows are never triaged implicitly)' : t.promoted ? ' (it is promoted)' : ''}`);
 for (const x of excluded) if (!x.matched.length) problem(`triage.excluded ${x.match}`, 'matches no entry or segment');
 
-const K_OF = { prod: k.params.explainTop, eval: k.params.explainTopEval, dev: 0 };
+const K_OF = { prod: Math.max(10, k.params.explainTop), eval: Math.max(5, k.params.explainTopEval), dev: 0 };
 const highRanked = Object.fromEntries(Object.entries(k.ranked).map(([grp, rows]) => {
   const included = rows.filter(x => flowFroms.has(x.entry)).map(x => x.rank);
   const lowest = included.length ? Math.max(...included) : 0;
@@ -486,7 +495,7 @@ const validated = {
   schema: 1, tool: { name: 'apply-flows.mjs' }, ok: problems.length === 0, root: m.root, commit: m.commit, treeHash: m.treeHash,
   inputs: { flows: { file: basename(FLOWS), sha256: sha(F.text) }, candidates: { file: relative(OUT, CANDIDATES), sha256: sha(C.text) },
     codemap: { file: relative(OUT, join(IN, 'codemap.json')), sha256: sha(M.text) }, ranking: { file: relative(OUT, join(IN, 'ranking.json')), sha256: sha(K.text) } },
-  params: { explainTop: k.params.explainTop, explainTopEval: k.params.explainTopEval, maxPath: MAX_PATH },
+  params: { explainTop: K_OF.prod, explainTopEval: K_OF.eval, maxPath: MAX_PATH },
   series: series.map(s => { const it = items.get(s.id); return { kind: s.kind, id: s.id, title: it.def.title, why: s.why, rank: it.kind === 'flow' ? rankText(it.def.from) : null }; }),
   flows: [...items].filter(([, it]) => it.kind === 'flow').map(([id, it]) => itemOut(id, it)),
   cores: [...items].filter(([, it]) => it.kind === 'core').map(([id, it]) => itemOut(id, it)),

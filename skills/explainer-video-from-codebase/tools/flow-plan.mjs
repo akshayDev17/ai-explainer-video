@@ -78,6 +78,7 @@ const plan = {
   outOfRepo: v.outOfRepo, tests: v.tests, videos: p.videos,
 };
 
+const cite = t => `${t.strength === 'reachable' ? 'reachable from' : 'pinned by'} \`${t.test.split(':').pop()}\` (${t.file}:${t.assertLines.join(',')}): ${t.say}${t.strength === 'reachable' ? ' (reachable only: never "pinned" or "tested")' : ''}`;
 const L = [];
 L.push(`# ${(v.root || '').split('/').pop()} — code-flow video plan`, '');
 L.push(plan.approval ? `Approved by **${plan.approval.by}** at ${plan.approval.at}: "${plan.approval.note}" (flows.validated.json sha256 ${plan.approval.flowsHash.slice(0, 12)}…)`
@@ -91,7 +92,7 @@ for (const x of p.videos) L.push(`| ${x.index} | ${x.title} | \`${x.form}\` | ${
 L.push('', '## Sections per video', '', 'A script covers each of its video\'s sections by name in `covers`.', '');
 for (const x of p.videos) {
   L.push(`### ${x.index}. ${x.title}`, '', `${x.form} · ${x.formWhy}`, '');
-  for (const s of x.sectionSpans) L.push(`- \`${s.id}\`${s.pinnedBy?.length ? ` — pinned by ${s.pinnedBy.map(t => `\`${t.test.split(':').pop()}\` (${t.file}:${t.assertLines.join(',')}): ${t.say}`).join('; ')}` : ''}`);
+  for (const s of x.sectionSpans) L.push(`- \`${s.id}\`${s.pinnedBy?.length ? ` — ${s.pinnedBy.map(cite).join('; ')}` : ''}`);
   for (const t of x.teach || []) L.push(`- teach \`${t.dispatch || t.guard}\`: ${t.say}`);
   L.push('');
 }

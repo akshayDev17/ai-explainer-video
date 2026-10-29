@@ -121,6 +121,16 @@ test('sections name each hop as "<file> :: <symbol> @L<start>", with its cited t
     'search :: Searching the catalogue and ranking the hits', 'eval-borrow :: How the harness grades borrowing']);
 });
 
+test('plan.md calls only a direct citation "pinned by"; a reachable-only one is reachable from a test', () => {
+  const d = validated(f => { f.flows[0].hops[2].pinnedBy = [{ test: 'tests.test_service:test_borrow_records_the_fee', say: 'members are checked on every borrow', strength: 'reachable' }]; });
+  assert.equal(approve(d).status, 0);
+  assert.equal(plan(d).status, 0);
+  const md = readFileSync(join(d, 'plan.md'), 'utf8').split('\n'), line = name => md.find(l => l.includes(`:: ${name} @L`));
+  assert.match(line('check_member'), /— reachable from `test_borrow_records_the_fee` \(tests\/test_service\.py:[\d,]+\): members are checked on every borrow \(reachable only: never "pinned" or "tested"\)$/);
+  assert.doesNotMatch(line('check_member'), /pinned by/);
+  assert.match(line('LoanService.borrow'), /— pinned by `test_borrow_records_the_fee` \(tests\/test_service\.py:[\d,]+\): a borrow records the fee/);
+});
+
 test('coverage (C4): every kept hop is assigned to exactly one video', () => {
   const hops = [...json(V(dir)).flows, ...json(V(dir)).cores].reduce((a, x) => a + x.hops.length, 0);
   assert.equal(p.coverage.length, hops);

@@ -229,17 +229,17 @@ whose evidence starts with `file:line` or `file:a-b` that exists in the repo.
 | Check | Rule |
 |---|---|
 | reasons | every series item, skip, variant, promotion, exclusion, mention and citation carries a real reason |
-| C1′ high-ranked rows | in each group, a row ranked at most `explainTop` (prod) / `explainTopEval` (eval) / 0 (dev), or at or above the lowest-ranked row the series includes, is a series flow's `from`, a variant or a skip, each with a reason; an exclusion glob does not count |
+| C1′ high-ranked rows | in each group, a row ranked at most 10 (prod) / 5 (eval) / 0 (dev), or the ranking's `explainTop` / `explainTopEval` when larger (a smaller one never lowers the floor), or at or above the lowest-ranked row the series includes, is a series flow's `from`, a variant or a skip, each with a reason; an exclusion glob does not count |
 | C1 entry triage | every non-test entry is a flow's `from`, a continuation of one, a variant, skipped, excluded, or a dev row (filtered unless promoted; a dev continuation is filtered with its parent). Eval rows are never implicit |
 | C2 segment triage | every segment of a kept candidate (a series flow's `from`) is kept, mentioned with a `say`, or excluded (in `segments.exclude` or by a glob) |
 | C3 hop fidelity | each hop is within 4 calls of the previous hop, or of the nearest earlier hop that reaches it (back up the narrated stack): a path in the flow's candidate walk (or a variant's; for a core, every series flow's), returning up the tree then calling down, never down then up; or a directed path over recorded edges of any kind, never into test code; or a declared link. A hop that is a variant's entry starts that variant's chain |
 | dispatch | a hop on a config alternative that no profile selects is refused unless an `outOfRepo` claim's `selects` names its site (then printed as selected only by an unverified claim); a hop reached through a CHA or dispatch edge must be in a walk tree, where the receiver resolved it |
 | C3′ test fidelity | a cited test has a direct link to the hop and does not mock it; a test that only reaches the hop may be cited only with `"strength": "reachable"` |
 | groups | no hop is test-group code; an eval or dev flow's hops are not production code, and its `exercises` hop must call, cross into or declare a link into that flow's code |
-| shape | unique ids, real titles (not slugs, ellipses or "Part N"), `uses` names a core with no cycle, a `lines` range inside its span, `teach` names a recorded point |
+| shape | no unknown field, unique ids, real titles (not slugs, ellipses or "Part N"), a flow's `group`, when given, is its entry's, `uses` names a core with no cycle, a `lines` range inside its span, `teach` names a recorded point |
 
 `flows.validated.json` (schema 1, `ok: true`) holds everything `flow-plan` needs: `inputs` (the flows, candidates,
-code map and ranking files with their sha256), `params` (`explainTop`, `explainTopEval`, `maxPath`), `series[]`
+code map and ranking files with their sha256), `params` (`explainTop`, `explainTopEval`: the effective K, never below 10 and 5; `maxPath`), `series[]`
 (`kind`, `id`, `title`, `why`, `rank`), `flows[]` and `cores[]` with every hop resolved (`symbol`, `name`, `file`,
 `start`, `end`, `sha256`, `lines`, `connection` (`how`: entry, start, variant, candidate, edges or link; `path`; `steps[{from, to, kind, rule, evidence, down}]`),
 `crossing`, `break`, `uses`, `exercises`, `selectedBy`,
