@@ -1,6 +1,7 @@
-// The shared coursework tools take two one-line generalizations for code plans (design §5.5): apply-enrichment reads
-// `plan.forms` and timing-report groups by `video.group`. A coursework plan sets neither, so its outputs must stay
-// byte-identical. The goldens were recorded with the tools as they were before the change (UPDATE_GOLDENS=1).
+// The shared coursework tools take additive generalizations for code plans (design §5.5): apply-enrichment reads
+// `plan.forms`, timing-report groups by `video.group`, and script-check gains a pause rule active only when a segment
+// carries `pause`. A coursework plan and script set none of them, so their outputs must stay byte-identical. Each
+// golden was recorded with the tool as it was before its change (UPDATE_GOLDENS=1).
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -28,11 +29,13 @@ const hashes = (dir, names) => Object.fromEntries(names.map(f => [f, existsSync(
 const enrich = (enrichment) => runIn({ 'plan.json': join(FX, 'plan.json'), 'enrichment.json': join(FX, enrichment) }, 'apply-enrichment.mjs', ['--plan', 'plan.json', '--enrichment', 'enrichment.json']);
 const ok = enrich('enrichment.json');
 const codeForm = enrich('enrichment-code-form.json');
+const scriptCheck = runIn({ 'plan.enriched.json': join(ok.dir, 'plan.enriched.json'), 'script.json': join(FX, 'script.json') }, 'script-check.mjs', ['--script', 'script.json', '--plan', 'plan.enriched.json']);
 const timing = runIn({ 'plan.enriched.json': join(ok.dir, 'plan.enriched.json'), 'timing.jsonl': join(FX, 'timing.jsonl') }, 'timing-report.mjs', ['--out', '.']);
 const observed = {
   'apply-enrichment': { status: ok.status, ...hashes(ok.dir, ['plan.enriched.json', 'plan.enriched.md']) },
   'apply-enrichment, a code-flow form on a coursework plan': { status: codeForm.status, ...hashes(codeForm.dir, ['plan.enriched.json', 'plan.enriched.md']) },
   'timing-report': { status: timing.status, ...hashes(timing.dir, ['timing.csv', 'timing.md', 'timing.svg', 'timing.html']) },
+  'script-check, the reference coursework script': { status: scriptCheck.status, stdout: scriptCheck.stdout },
 };
 if (process.env.UPDATE_GOLDENS) writeFileSync(GOLDEN, JSON.stringify(observed, null, 2) + '\n');
 
@@ -50,4 +53,9 @@ test('coursework timing-report outputs are byte-identical, grouped by module', (
   assert.equal(timing.status, 0);
   assert.match(readFileSync(join(timing.dir, 'timing.html'), 'utf8'), /Queues/);
   assert.deepEqual(observed['timing-report'], JSON.parse(readFileSync(GOLDEN, 'utf8'))['timing-report']);
+});
+
+test('script-check on the reference coursework script prints byte-identical output', () => {
+  assert.equal(scriptCheck.status, 0);
+  assert.deepEqual(observed['script-check, the reference coursework script'], JSON.parse(readFileSync(GOLDEN, 'utf8'))['script-check, the reference coursework script']);
 });

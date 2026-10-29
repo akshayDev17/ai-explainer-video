@@ -401,7 +401,8 @@ alignment to the narration — never as raw seconds.
   `scene-core.js` also exports standalone primitives for this lane, each a pure
   `(t, params) → SVG`: `chart` (pie / bar), `hubSpoke`, `loopFlow`, `timeline`,
   `equation` (a small TeX subset — runs, `^{}` / `_{}`, `\frac`, `\sqrt`, Greek and
-  relation macros). Compose them where a beat matches one; drop to raw SVG where it
+  relation macros), `sequence` (participants with lifelines, calls revealed in order;
+  a queue, HTTP or spawn crossing dashed). Compose them where a beat matches one; drop to raw SVG where it
   doesn't. **Primitives are a floor, not a ceiling.**
 
 ### Two chrome defaults worth knowing

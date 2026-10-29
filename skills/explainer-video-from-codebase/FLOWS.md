@@ -5,7 +5,8 @@ by `tools/mine.mjs`, with its readable twin `codemap.md`; `candidates.json`, wri
 `tools/propose.mjs`; and `ranking.json` and `ranking.md`, written from that by `tools/rank.mjs` (each schema 1).
 Then the stage 1b–1c artifacts: `flows.json`, the agent's series proposal; `flows.validated.json` and `flows.md`,
 written by `tools/apply-flows.mjs`; `flows.approved.json`, written by `tools/approve-flows.mjs`; and `plan.json`
-and `plan.md`, written by `tools/flow-plan.mjs`.
+and `plan.md`, written by `tools/flow-plan.mjs`. Then the on-screen code for a video's scenes: code panels from
+`tools/excerpt.mjs`, verified by `tools/excerpt-check.mjs`, and diagram skeletons from `tools/flow-diagram.mjs`.
 
 `mine`, `propose` and `rank` are pure functions of their input and the tool versions: they never write
 inside the repo, never use the network and never run repo code. Two runs over the same input produce
@@ -242,7 +243,7 @@ whose evidence starts with `file:line` or `file:a-b` that exists in the repo.
 code map and ranking files with their sha256), `params` (`explainTop`, `explainTopEval`: the effective K, never below 10 and 5; `maxPath`), `series[]`
 (`kind`, `id`, `title`, `why`, `rank`), `flows[]` and `cores[]` with every hop resolved (`symbol`, `name`, `file`,
 `start`, `end`, `sha256`, `lines`, `connection` (`how`: entry, start, variant, candidate, edges or link; `path`; `steps[{from, to, kind, rule, evidence, down}]`),
-`crossing`, `break`, `uses`, `exercises`, `selectedBy`,
+`crossing`, `break`, `uses`, `exercises`, `drive` (an `exercises` hop's `{kind, to, evidence}`: the walk's crossing into that flow's code, else a declared link, else a direct call, `kind: "call"`), `selectedBy`,
 `pinnedBy[{test, file, line, end, asserts, assertLines, lines, say, strength, via, observed}]`), segments with their
 decision, variants with their rank, `teach[{dispatch, guard, say, hop, alternatives}]` (the hop that holds the
 point, else its nearest narrated ancestor), `links`; `skipped`, `promote`, `excluded` (with what each rule matched);
@@ -295,3 +296,60 @@ minutes  = words / 153 × 1.10
 ```
 
 A crossing is a hop reached through a queue, HTTP or spawn edge, or an eval hop that `exercises` a production flow.
+
+## Code panels (`excerpt.mjs`)
+
+A panel fragment for a `code` scene, printed to stdout, cut from the file as mined (the file's sha256 must still be
+the code map's, and a symbol's span its own; else exit 2: re-mine):
+
+| Field | What it holds |
+|---|---|
+| `file`, `lang` | the file's path (the panel's tab) and its language |
+| `lines[]` | the shown lines, byte for byte, and the elision markers between them |
+| `numbers[]` | each line's real line number; `null` on an elision marker |
+| `elided[]` | `{at, from, to}`: the marker at index `at` stands for lines `from`–`to` |
+| `source` | `{file, symbol \| test + pins + via, start, end, sha256, fileSha256, commit}`: the span shown, its sha256, the file's sha256 when mined and the mined commit; what `excerpt-check` verifies |
+
+`--lines` ("54-65,70", inside the span) picks the narrated lines; each unshown run inside the span becomes one
+marker, `⋯ N lines`, at the run's outer indent (a run of blank lines is shown instead). Without it the whole span is
+shown. More than 22 shown lines exits 2. With `--test <id>` the span is the test's: its def line, the line
+where it calls `--symbol` (when that call is in its own body; a fixture or helper calls from elsewhere, recorded in
+`via`) and its assertion lines. The test must have a direct link to the symbol and must not mock it (C3′), else
+exit 2.
+
+Scene-code reads `numbers[]` for the number column and styles the `elided[]` lines apart. A panel with
+`numbers[]` takes one `focus` act per sentence (`{op: "focus", panel, lines: [1-based panel lines], from, to,
+narration}`), and a window that starts as the previous one ends keeps the dim; a coursework panel keeps its single
+focus act. A `{op: "pause", from, to, text?}` act shows the pause badge.
+
+## `excerpt-check.mjs` (C6)
+
+`--work out/<name>/<NN> --repo <root> --script …` reads the video's code scenes (the manifest's `code` segments),
+`lines.json` and the video's script (exit 1 without any of them):
+
+- **drift, exit 2**: every panel has an excerpt `source`; the file it names is the mined one (the working tree's
+  file when its sha256 matches, else `git show <commit>:<file>`); the span's sha256 matches; each numbered line
+  equals that line of the file, in order, inside the span, with no line hidden except behind a marker that names
+  exactly its gap; at most 22 shown lines.
+- **focus, exit 3**: every shown non-blank line is in a focus act whose `narration` names lines of the segment in
+  `lines.json` and whose window starts at the first line's onset and ends between the last line's end and the next
+  line's onset (scene time = line time + `lead`, ±0.06 s). A pause segment (its script segment carries `pause`; it must be a code scene with panels) is exempt, must carry a `pause` act, and a video has at most 3;
+  a `pause` act on any other segment is an error.
+
+A pause segment's script carries `"pause": {"dwell": <s>}` with 0 < dwell ≤ 2, said out loud ("pause" in its
+text), with `pad` equal to the dwell; `script-check` adds the dwell to its estimate and errors on a `pad` that
+differs from the dwell and on a fourth pause segment.
+
+## Diagram skeletons (`flow-diagram.mjs`)
+
+`--flows out/<name>/flows.validated.json --as map|sequence|exercises [--flow <id>]` prints JSON; exit 1 on bad
+flags, an unknown flow, or `exercises` on a flow with no `exercises` hop.
+
+| `--as` | Output |
+|---|---|
+| `map` | `{host: "diagram", items, config: {layout, nodes, edges}, crossings}`: one `box` per module the hops run through (every series item, or `--flow`'s), members = its hops, an arrow per call between modules (queue amber, HTTP green, spawn red); `crossings` lists every queue, HTTP and spawn hand-off and every eval hop's drive into production, with evidence |
+| `sequence` | `{host: "svg", primitive: "sequence", params: {participants, messages}}` for `SceneCore.primitives.sequence`: the caller (an HTTP entry's route, a queue key, a command), then each module in order; one message per hop from the module that calls it (`kind` call / http / queue / spawn; `via` counts the unnarrated calls between) |
+| `exercises` | `{host: "diagram", exercises, config}` for an eval or dev flow: its hops as the harness lane, each production flow it drives as one box with `see video N`, and its `drive` between (`kind`, `to`, `evidence`) |
+
+The video number comes from `plan.json` beside the validated flows when it was planned from that exact file
+(`videoFrom: "plan.json"`), else from the planner at the default cap (`videoFrom: "estimate …"`).

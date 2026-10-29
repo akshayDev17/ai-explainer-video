@@ -82,12 +82,12 @@ legend is placed from reserved pixels instead.
 | File | Covers | Vocabulary |
 |---|---|---|
 | `src/scene-svg.html` | the open lane — freeform SVG | author's own (`renderAt(t, svg, timeline)`) |
-| `src/scene-core.js` | primitive library — `chart`, `hubSpoke`, `loopFlow`, `timeline`, `equation`, and the `flow` idiom | primitives take author params; `flow` keeps `client`, `server`, `hub`, `box` |
-| `src/scene-code.js` | code walkthroughs, before/after refactors | code panels |
+| `src/scene-core.js` | primitive library — `chart`, `hubSpoke`, `loopFlow`, `timeline`, `equation`, `sequence`, and the `flow` idiom | primitives take author params; `flow` keeps `client`, `server`, `hub`, `box` |
+| `src/scene-code.js` | code walkthroughs, before/after refactors | code panels; for code excerpted from a repo, also real line numbers, elision lines, a focus window per sentence and a pause badge |
 
 With no `work=` parameter, `src/scene-svg.html:34` resolves `?scene=<name>` to
 `../scenes/<name>.js` — so the top-level `scenes/` is a live path for fixtures, not a
-leftover directory. It holds the five `_pt-*` configs, one per primitive.
+leftover directory. It holds the six `_pt-*` configs, one per primitive.
 
 ### Publish — chapters and captions (stage 6)
 
@@ -470,7 +470,7 @@ timeline), and/or keep parts by default. *Medium.*
   so a scene with no beats prints no beat line at all, rather than "none declared". You
   cannot tell "no beats" from "beats declared and fine" without noticing the absent line.
 
-Adoption on a real segment is also unverified: the five surviving `_pt-*` fixtures declare
+Adoption on a real segment is also unverified: the six `_pt-*` fixtures declare
 no beats, and the 83 harness configs no longer exist.
 
 ---

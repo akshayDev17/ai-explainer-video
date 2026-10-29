@@ -9,6 +9,10 @@
      2. SPEAKABILITY no markdown, no URLs, no code syntax — this is read aloud
      3. BUDGET      estimated narration + video duration vs the plan's target
      4. COVERAGE    every source section the plan assigned must be narrated
+     5. PAUSES      code videos only, inert unless a segment carries `pause`:
+                    a pause prompt is spoken ("pause" in its text), dwells
+                    0 < dwell <= 2 s realised as an equal `pad`, and a video has
+                    at most 3; a fourth is an error that forces a split
 
    Duration is ESTIMATED here, never trusted: the real number comes from measuring
    the generated audio downstream.
@@ -20,7 +24,7 @@
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { WPM as DEFAULT_WPM, EXPANSION as DEFAULT_EXPANSION } from './model.mjs';
+import { WPM as DEFAULT_WPM, EXPANSION as DEFAULT_EXPANSION, MAX_PAUSES } from './model.mjs';
 
 const argv = process.argv.slice(2);
 const flag = (n, d) => {
@@ -83,10 +87,32 @@ const seen = new Set();
   if (words(t) > 130) warnings.push(`${at}: ${words(t)} words in one breath — consider splitting`);
 });
 
+/* ---------------- 5. pause prompts (active only when a segment carries `pause`) ----------------
+   Narration is the reading time: a code panel shows only the lines being narrated. A
+   pause prompt is the rare exception, for a block that must be read whole: the
+   narration says so out loud, a badge shows it, and the segment dwells at most 2 s
+   longer (realised as its `pad`). More than MAX_PAUSES means the video asks the
+   viewer to read silently too often: split it. */
+const pauses = (script.segments || []).filter(s => s.pause != null);
+let pauseDwell = 0;
+if (pauses.length) {
+  pauses.forEach(s => {
+    const at = `segment ${script.segments.indexOf(s) + 1} (${s.key})`;
+    const dwell = s.pause && typeof s.pause === 'object' ? s.pause.dwell : undefined;
+    if (!/\bpause\b/i.test(String(s.text || ''))) errors.push(`${at}: a pause segment's narration must say "pause" — the spoken prompt is what tells the viewer to stop and read`);
+    if (typeof dwell !== 'number' || !(dwell > 0 && dwell <= 2)) errors.push(`${at}: pause.dwell must be a number of seconds, 0 < dwell <= 2 (got ${JSON.stringify(dwell)})`);
+    else {
+      pauseDwell += dwell;
+      if (Number(s.pad) !== dwell) errors.push(`${at}: pause.dwell ${dwell}s is realised as the segment's pad, which is ${JSON.stringify(s.pad)} — set "pad": ${dwell}`);
+    }
+  });
+  if (pauses.length > MAX_PAUSES) errors.push(`${pauses.length} pause prompts (max ${MAX_PAUSES}) — a video that asks for that much silent reading must be split`);
+}
+
 /* ---------------- 3. budget ---------------- */
 const totalWords = (script.segments || []).reduce((a, s) => a + words(s.text), 0);
 const estNarr = narrationMin(totalWords);
-const estVideo = videoMin(totalWords);
+const estVideo = videoMin(totalWords) + pauseDwell / 60;
 const target = script.planTargetMinutes;
 
 if (estVideo > MAX_MIN) errors.push(`estimated ${estVideo.toFixed(1)} min exceeds the ${MAX_MIN} min cap`);
@@ -132,6 +158,7 @@ console.log(`  segments     : ${(script.segments || []).length}`);
 console.log(`  words        : ${totalWords}`);
 console.log(`  narration    : ${estNarr.toFixed(1)} min  (at ${WPM} wpm)`);
 console.log(`  est. video   : ${estVideo.toFixed(1)} min  (×${EXPANSION} visual overhead)`);
+if (pauses.length) console.log(`  pauses       : ${pauses.length} prompt(s), ${pauseDwell.toFixed(1)}s of dwell (in est. video)`);
 if (target) console.log(`  plan target  : ${target} min  →  ${((estVideo / target) * 100).toFixed(0)}% of target`);
 if (coverageLine) console.log(`  coverage     : ${coverageLine}`);
 if (warnings.length) {

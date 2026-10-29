@@ -1,0 +1,28 @@
+{
+  "videoIndex": 2,
+  "title": "Caching: write policies and eviction",
+  "form": "code",
+  "planTargetMinutes": 0.6,
+  "segments": [
+    {
+      "key": "intro",
+      "style": "warm, unhurried",
+      "visual": "the read-through function on screen, its cache lookup highlighted",
+      "covers": ["02-caching/README.md :: Caching @L1"],
+      "text": "A cache keeps the answers you asked for recently, so the next reader skips the slow trip to the database. Here is the read-through function at the centre of this video."
+    },
+    {
+      "key": "policies",
+      "style": "explanatory",
+      "visual": "two panels split apart: write-through on the left, write-back on the right",
+      "covers": ["02-caching/README.md :: Write-through and write-back @L5"],
+      "text": "Write-through updates the cache and the store together, so a reader never sees stale data. Write-back updates only the cache and flushes later, which is faster, and loses writes when the node dies before the flush. The LRU list decides what goes first."
+    },
+    {
+      "key": "evict",
+      "style": "brisk",
+      "covers": ["02-caching/README.md :: Eviction @L18"],
+      "text": "When the cache is full, eviction picks a victim: the least recently used entry (the one nobody has read for longest) leaves first."
+    }
+  ]
+}
