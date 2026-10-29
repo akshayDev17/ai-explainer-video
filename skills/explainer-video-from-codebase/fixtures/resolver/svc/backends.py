@@ -17,7 +17,7 @@ class EuBackend:
 
 
 def create_backend():
-    # B14: no settings field declares backend_mode, so its value is not in the repo
+    # B14: no settings field declares backend_mode, so getattr's default decides
     settings = get_settings()
     mode = getattr(settings, "backend_mode", "local").lower()
     if mode == "remote":
@@ -26,8 +26,16 @@ def create_backend():
 
 
 def create_regional_backend():
-    # B14: region is declared (default "us"), but only deploy/prod.env decides a getattr read
+    # B14: region is declared (default "us"), so the field decides, not getattr's default
     settings = get_settings()
     if getattr(settings, "region", "eu") == "eu":
+        return EuBackend()
+    return LocalBackend()
+
+
+def create_regional_backend_by_attribute():
+    # the same setting read as an attribute
+    settings = get_settings()
+    if settings.region == "eu":
         return EuBackend()
     return LocalBackend()

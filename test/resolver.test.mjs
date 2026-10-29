@@ -11,19 +11,21 @@ const site = fn => m.config.sites.find(s => s.factory === fn);
 
 test('mining the resolver fixture succeeds', () => assert.equal(r.status, 0, r.stderr));
 
-test('B14: getattr(settings, "x", default) is a selector; with no field declaring x its value is not in the repo', () => {
+test('B14: getattr(settings, "x", default) is a selector; its default decides when no field declares x', () => {
   const s = site('svc.backends:create_backend');
-  assert.equal(s.classification, 'config-dependent (value not in repo)');
+  assert.equal(s.classification, 'config-narrowed');
   assert.deepEqual(s.settingsRead, ['backend_mode']);
-  assert.match(s.decidedByProfile['code defaults'], /^\?/);
+  assert.equal(s.decidedByProfile['code defaults'], 'svc.backends:LocalBackend');
 });
 
-test('B14: a getattr read of a declared field is decided by an in-repo config file, not by a code default', () => {
-  const s = site('svc.backends:create_regional_backend');
-  assert.deepEqual(s.settingsRead, ['region']);
-  assert.match(s.decidedByProfile['code defaults'], /^\?/);
-  assert.equal(s.decidedByProfile['deploy/prod.env'], 'svc.backends:EuBackend');
-  assert.equal(s.classification, 'config-dependent (value not in repo)');
+test('B14: a getattr read of a declared field is decided like the attribute read: profile value, else field default', () => {
+  const viaGetattr = site('svc.backends:create_regional_backend');
+  const viaAttribute = site('svc.backends:create_regional_backend_by_attribute');
+  assert.deepEqual(viaGetattr.settingsRead, ['region']);
+  assert.equal(viaGetattr.decidedByProfile['code defaults'], 'svc.backends:LocalBackend');
+  assert.equal(viaGetattr.decidedByProfile['deploy/prod.env'], 'svc.backends:EuBackend');
+  assert.equal(viaGetattr.classification, 'config-narrowed');
+  assert.deepEqual([viaAttribute.classification, viaAttribute.decidedByProfile], [viaGetattr.classification, viaGetattr.decidedByProfile]);
 });
 
 test('B17: a coroutine handed to a callee that awaits it links callee -> coroutine, tagged with who passed it', () => {
