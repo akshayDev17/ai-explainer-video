@@ -125,7 +125,8 @@ const groupOfFile = new Map(files.map(f => [f.path, f.group]));
 
 /* ---------------- resolve: core rules, then framework packs ---------------- */
 fastapi.registerAliases(py);
-const R = resolverFor(py, declaredDependencies(deps.map(rel => ({ rel, text: readText(rel) }))));
+const declared = declaredDependencies(deps.map(rel => ({ rel, text: readText(rel) })));
+const R = resolverFor(py, declared.names);
 const tests = pytest.findTests(py, R);
 const fixtures = pytest.findFixtures(py);
 const fixtureBindings = pytest.bindFixtures(py, tests, fixtures);
@@ -190,7 +191,7 @@ const likeRepoCalls = likeRepoDirs.reduce((n, x) => n + x.calls, 0);
 const definedSymbols = py.symbols.size - new Set(py.mains).size;
 const selfCheck = {
   defNodes: py.defNodes, defsExtracted: py.defsVisited, defScopes: py.defScopes, defLinesRaw, symbols: py.symbols.size,
-  filesWithErrors: files.filter(f => f.parseError).map(f => f.path),
+  filesWithErrors: files.filter(f => f.parseError).map(f => f.path), dependencyFilesNotParsed: declared.unparsed,
   calls: py.callStats, unresolvedByOrigin: py.unresolved,
   inRepoMissRate: inRepoCalls ? Number((py.unresolved.inRepo / inRepoCalls).toFixed(4)) : 0,
   packageRoots: R.packageRoots,

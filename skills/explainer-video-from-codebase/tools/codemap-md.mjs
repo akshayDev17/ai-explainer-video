@@ -27,7 +27,8 @@ export function renderCodemap(m) {
       sc.crossRootImports.map(x => `\`${x.name}\` → \`${x.root}/\` ${x.calls}`).join(', ')] : []),
     ...(sc.externalLikeRepoDirs.calls ? [`- **${sc.externalLikeRepoDirs.calls} calls (${(sc.externalLikeRepoDirs.rate * 100).toFixed(1)}%) go to imports resolved as external although an in-repo directory with no \`__init__.py\` has their name**: ` +
       sc.externalLikeRepoDirs.names.map(x => `\`${x.name}\` ${x.calls} (${x.dirs.map(d => `\`${d}/\``).join(', ')})`).join(', ') + ' — if these are in-repo namespace packages, these calls are not linked'] : []),
-    `- files with syntax errors: ${sc.filesWithErrors.length ? sc.filesWithErrors.map(f => `\`${f}\``).join(', ') : 'none'}`, '');
+    `- files with syntax errors: ${sc.filesWithErrors.length ? sc.filesWithErrors.map(f => `\`${f}\``).join(', ') : 'none'}`,
+    ...(sc.dependencyFilesNotParsed.length ? [`- **dependency files that are not valid TOML, their names read line by line**: ${sc.dependencyFilesNotParsed.map(f => `\`${f}\``).join(', ')}`] : []), '');
 
   out.push('## Groups', '', 'Rules, first match wins (a `--group` override wins over all of them):', '', ...m.groups.rules.map((r, i) => `${i + 1}. ${r}`), '',
     m.groups.overrides.length ? `Overrides: ${m.groups.overrides.map(o => `\`${o}\``).join(', ')}` : 'Overrides: none', '',

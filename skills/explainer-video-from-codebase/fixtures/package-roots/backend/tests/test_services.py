@@ -11,3 +11,9 @@ def test_handle(send_mock):
 
 def test_send():
     assert send("z") == "z"
+
+
+@patch("app.api.routes.h")
+def test_route(h_mock):
+    from app.main import route
+    assert route() is not None

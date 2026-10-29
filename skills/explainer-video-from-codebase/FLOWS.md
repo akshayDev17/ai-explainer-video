@@ -37,8 +37,10 @@ plus the file, so with `backend/app/__init__.py` (and no `backend/__init__.py`) 
 When several roots claim a name, the one holding the importing file wins; otherwise the name stays external. A
 claim under a root that does not hold the importing file resolves across roots, unless the repo declares the
 top-level name as a dependency (requirements*.txt, pyproject.toml `[project]` / Poetry dependencies, setup.cfg
-`install_requires` / `extras_require`, Pipfile; case, `-` and `_` normalised): `integrations/stripe/` never
-captures a declared `stripe`. A top-level name of the standard library never
+`install_requires` / `extras_require`, Pipfile; case, `-` and `_` normalised; a pyproject.toml or Pipfile that is
+not valid TOML is read line by line instead and listed in `selfCheck.dependencyFilesNotParsed`): `integrations/stripe/` never
+captures a declared `stripe`, and a declared name several roots claim is a library import, never reported as
+ambiguous. A top-level name of the standard library never
 resolves to an in-repo loose module, namespace directory or nested package (`app/logging/` never captures
 `import logging`); only a repo-root package `logging/__init__.py` shadows it. `selfCheck.packageRoots` lists the
 package roots below the repo root. A call made at module level has `from: pkg.module:<module>`.
@@ -118,7 +120,8 @@ JWT, a provider token, a long random string) is written as `set (redacted)` ever
 `ok` is false — and `mine` exits 2 — when the parser saw a definition the extractor did not record
 (`defsExtracted` < `defNodes`), or when two definitions in different scopes collapsed into one symbol
 (fewer non-`main` symbols than `defScopes`, the distinct qualified names the parser saw; a definition repeated in
-both branches of an `if` / `try` is one). Also reported: files with syntax errors, resolved calls, unresolved calls
+both branches of an `if` / `try` is one). Also reported: files with syntax errors, dependency files that are not
+valid TOML (`dependencyFilesNotParsed`, above), resolved calls, unresolved calls
 by where their head name comes from (`inRepo`, `external`, `builtin`, `local`), and the in-repo miss rate:
 calls whose head is an in-repo name but whose target could not be resolved. `packageRoots` lists the package roots
 below the repo root (above); `crossRootImports` the calls resolved through a root that does not hold the importing

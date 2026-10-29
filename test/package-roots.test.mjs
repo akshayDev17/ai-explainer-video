@@ -5,7 +5,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { FIXTURES, mine, edgesFrom, short } from './helpers.mjs';
+import { cpSync, writeFileSync } from 'node:fs';
+import { FIXTURES, mine, edgesFrom, short, scratch, cleanup } from './helpers.mjs';
 
 const r = mine(join(FIXTURES, 'package-roots'));
 const m = r.codemap;
@@ -21,8 +22,9 @@ test('backend/app imported as app.* resolves, from inside the package and from t
   assert.deepEqual(m.tests.find(t => short(t.id) === 'test_go').direct.map(d => d.to), ['worker.src.jobs.run:go']);
 });
 
-test('a module in a namespace subpackage of a package resolves by either import form', () => {
+test('a module in a namespace subpackage of a package resolves by either import form, and as a patch target', () => {
   assert.deepEqual(edgesFrom(m, 'backend.app.main:route').map(e => e.to), ['backend.app.api.routes:h', 'backend.app.api.routes:h']);
+  assert.deepEqual(m.mocks.find(x => x.raw === 'app.api.routes.h')?.target, 'backend.app.api.routes:h');
 });
 
 test('a call through a package root that does not hold the importing file is reported with its count', () => {
@@ -32,7 +34,7 @@ test('a call through a package root that does not hold the importing file is rep
 });
 
 test('a patch target is looked up through the package roots too', () => {
-  assert.deepEqual(m.mocks.map(x => [x.raw, x.target]), [['app.services.send', 'backend.app.services:send']]);
+  assert.deepEqual(m.mocks.map(x => [x.raw, x.target]).sort(), [['app.api.routes.h', 'backend.app.api.routes:h'], ['app.services.send', 'backend.app.services:send']]);
   assert.deepEqual(m.tests.find(t => short(t.id) === 'test_handle').direct.map(d => d.to), ['backend.app.main:handle']);
   assert.equal(m.selfCheck.externalLikeRepoDirs.calls, 0);
 });
@@ -79,11 +81,33 @@ test('a name two package roots claim: each importer reaches the claim under its 
 test('a package under another root never captures a declared dependency (integrations/stripe, clients/httpx); an undeclared one resolves and is reported', () => {
   const d = mine(join(FIXTURES, 'package-roots-declared'));
   assert.equal(d.status, 0, d.stderr);
-  assert.deepEqual(d.codemap.selfCheck.packageRoots, ['clients', 'integrations', 'plugins']);
+  assert.deepEqual(d.codemap.selfCheck.packageRoots, ['clients', 'integrations', 'plugins', 'vendor']);
   assert.deepEqual(edgesFrom(d.codemap, 'app.billing:charge'), [], '`Stripe` in requirements.txt declares `import stripe`');
-  assert.deepEqual(edgesFrom(d.codemap, 'app.fetch:fetch'), [], '`httpx` in pyproject [project] dependencies');
+  assert.deepEqual(edgesFrom(d.codemap, 'app.fetch:fetch'), [], '`httpx` in pyproject [project] dependencies, after an extras entry `uvicorn[standard]`');
   assert.deepEqual(edgesFrom(d.codemap, 'app.notify:ping').map(e => e.to), ['plugins.acme:ping']);
   assert.deepEqual(d.codemap.selfCheck.crossRootImports, [{ name: 'acme', root: 'plugins', calls: 1 }]);
+  assert.deepEqual(d.codemap.selfCheck.ambiguousImports, [], 'integrations/stripe and vendor/stripe both claim the declared `stripe`: a library import, not a lost call');
+  assert.doesNotMatch(d.md, /calls are not linked/);
+});
+
+test('a pyproject.toml that is not valid TOML still declares its dependencies and is named in the self-check', () => {
+  const dir = scratch(), repo = join(dir, 'repo');
+  cpSync(join(FIXTURES, 'package-roots-declared'), repo, { recursive: true });
+  writeFileSync(join(repo, 'pyproject.toml'), '[project]\nname = "shop"\nname = "shop"\ndependencies = [\n  "uvicorn[standard]>=0.2",\n  "httpx>=0.27",\n]\n');
+  const d = mine(repo);
+  cleanup(dir);
+  assert.equal(d.status, 0, d.stderr);
+  assert.deepEqual(edgesFrom(d.codemap, 'app.fetch:fetch'), [], '`httpx` is still declared, so clients/httpx does not capture it');
+  assert.deepEqual(d.codemap.selfCheck.dependencyFilesNotParsed, ['pyproject.toml']);
+  assert.match(d.md, /dependency files that are not valid TOML, their names read line by line\*\*: `pyproject\.toml`/);
+  assert.deepEqual(mine(join(FIXTURES, 'package-roots-declared')).codemap.selfCheck.dependencyFilesNotParsed, []);
+});
+
+test('a call reached through a re-export in another root\'s package __init__.py is reported as cross-root', () => {
+  const x = mine(join(FIXTURES, 'package-roots-reexport'));
+  assert.equal(x.status, 0, x.stderr);
+  assert.deepEqual(edgesFrom(x.codemap, 'app.notify:notify').map(e => e.to), ['plugins.acme.core:ping']);
+  assert.deepEqual(x.codemap.selfCheck.crossRootImports, [{ name: 'acme', root: 'plugins', calls: 1 }]);
 });
 
 test('calls into a namespace package (no __init__.py) named like an in-repo dir are reported, with their rate', () => {
