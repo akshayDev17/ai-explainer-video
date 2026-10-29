@@ -470,7 +470,7 @@ timeline), and/or keep parts by default. *Medium.*
   so a scene with no beats prints no beat line at all, rather than "none declared". You
   cannot tell "no beats" from "beats declared and fine" without noticing the absent line.
 
-Adoption on a real segment is also unverified: the five surviving `_pt-*` fixtures declare
+Adoption on a real segment is also unverified: the six `_pt-*` fixtures declare
 no beats, and the 83 harness configs no longer exist.
 
 ---
