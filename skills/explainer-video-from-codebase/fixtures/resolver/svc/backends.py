@@ -26,7 +26,7 @@ def create_backend():
 
 
 def create_regional_backend():
-    # a declared field wins over getattr's default: region defaults to "us"
+    # B14: region is declared (default "us"), but only deploy/prod.env decides a getattr read
     settings = get_settings()
     if getattr(settings, "region", "eu") == "eu":
         return EuBackend()

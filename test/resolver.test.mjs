@@ -18,8 +18,12 @@ test('B14: getattr(settings, "x", default) is a selector; with no field declarin
   assert.match(s.decidedByProfile['code defaults'], /^\?/);
 });
 
-test('B14: a declared settings field wins over getattr\'s default', () => {
-  assert.equal(site('svc.backends:create_regional_backend').decidedByProfile['code defaults'], 'svc.backends:LocalBackend');
+test('B14: a getattr read of a declared field is decided by an in-repo config file, not by a code default', () => {
+  const s = site('svc.backends:create_regional_backend');
+  assert.deepEqual(s.settingsRead, ['region']);
+  assert.match(s.decidedByProfile['code defaults'], /^\?/);
+  assert.equal(s.decidedByProfile['deploy/prod.env'], 'svc.backends:EuBackend');
+  assert.equal(s.classification, 'config-dependent (value not in repo)');
 });
 
 test('B17: a coroutine handed to a callee that awaits it links callee -> coroutine, tagged with who passed it', () => {
