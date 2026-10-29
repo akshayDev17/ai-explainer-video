@@ -43,6 +43,11 @@ test('B18: self.x = arg or Default() types the attribute by the default', () => 
   assert.equal(e?.kind, 'static');
 });
 
+test('a method called on a new instance or a factory\'s return links to that class\'s method', () => {
+  const es = edgesFrom(m, 'svc.strategies:run_once').filter(x => x.to === 'svc.strategies:Executor.run');
+  assert.deepEqual(es.map(x => [x.kind, x.narrowedBy ?? null]).sort(), [['static', 'svc.strategies:create_executor'], ['static', null]].sort());
+});
+
 test('B19: a receiver set by a self-method factory dispatches to that method\'s returns', () => {
   const es = edgesFrom(m, 'svc.strategies:Manager.ensure').map(x => `${short(x.to)} ${x.kind}`).sort();
   assert.deepEqual(es, ['FastStrategy.ensure dispatch', 'SlowStrategy.ensure dispatch']);

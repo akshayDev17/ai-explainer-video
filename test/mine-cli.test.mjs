@@ -3,7 +3,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readdirSync, statSync, symlinkSync, existsSync } from 'node:fs';
 import { join, relative, dirname } from 'node:path';
 import { ROOT, SKILL, FIXTURES, mine, scratch, cleanup, gitRepo, git } from './helpers.mjs';
 import { loadGrammars } from '../skills/explainer-video-from-codebase/tools/lib/tree-sitter.mjs';
@@ -37,6 +37,17 @@ test('exit 1: refuses to write inside the repo', () => {
   const r = run(RESOLVER, '--out', join(RESOLVER, 'out'));
   assert.equal(r.status, 1);
   assert.match(r.stderr, /refusing to write inside the repo/);
+});
+
+test('exit 1: refuses an --out that reaches the repo through a symlink', () => {
+  const link = out();
+  symlinkSync(RESOLVER, link);
+  const r = run(RESOLVER, '--out', join(link, 'out'));
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /refusing to write inside the repo/);
+  assert.equal(existsSync(join(RESOLVER, 'out')), false);
+  const viaRepoLink = run(link, '--out', join(RESOLVER, 'out'));
+  assert.equal(viaRepoLink.status, 1);
 });
 
 test('exit 1: a bad --group or an unmined --lang', () => {

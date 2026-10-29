@@ -286,6 +286,8 @@ export function extractPythonFile(py, rel, root, group, text) {
         if (ctx.fn && args) for (const a of args.namedChildren) { const v = a.type === 'keyword_argument' ? a.childForFieldName('value') : a; if (v?.type === 'identifier') use(ctx.fn, 'passed', v.text, node); }
         py.rawCalls.push({ from: ctx.fn || `${module}:<module>`, module, file: rel, expr: fnNode.text, line: node.startPosition.row + 1,
           obj: fnNode.type === 'attribute' ? fnNode.childForFieldName('object').text : null,
+          // `A().m()` / `make().m()`: the receiver is the value of the call it is attached to
+          objCall: fnNode.type === 'attribute' && fnNode.childForFieldName('object').type === 'call' ? fnNode.childForFieldName('object').childForFieldName('function').text : null,
           attr: fnNode.type === 'attribute' ? fnNode.childForFieldName('attribute').text : null,
           imports: ctx.imports, locals: ctx.locals, types: ctx.types, cls: ctx.cls, guards: ctx.guards, onFailure: ctx.onFailure || null,
           top: !ctx.fn, args: args ? args.namedChildren.map(argOf) : [] });
@@ -516,6 +518,9 @@ export function resolveCalls(py, R) {
     if ((c.obj === 'self' || c.obj === 'cls') && c.cls) { clsId = c.cls; recv = { mode: 'self' }; }
     else if (c.types && c.types.has(c.obj)) {
       const rc = R.receiverOf(c.types.get(c.obj), c);
+      if (rc) { recv = rc; clsId = rc.cls[0]; }
+    } else if (c.objCall) {
+      const rc = R.receiverOf({ t: 'call', expr: c.objCall }, c);
       if (rc) { recv = rc; clsId = rc.cls[0]; }
     } else if (/^self\.\w+$/.test(c.obj) && c.cls) {
       const ar = R.attrReceiver(c.cls, c.obj.slice(5));

@@ -16,8 +16,8 @@
    Exit: 0 ok · 1 bad path, no supported files, or bad flags · 2 self-check failed
    (a definition the parser saw was not extracted, or two collapsed into one symbol)
    ========================================================================== */
-import { readdirSync, readFileSync, lstatSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { join, relative, extname, resolve, sep } from 'node:path';
+import { readdirSync, readFileSync, lstatSync, writeFileSync, mkdirSync, existsSync, realpathSync } from 'node:fs';
+import { join, relative, extname, resolve, sep, dirname, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { loadGrammars } from './lib/tree-sitter.mjs';
@@ -56,7 +56,10 @@ if (bare.length !== 1 || !flags.has('--out')) fail(1, 'usage: mine.mjs <repo> --
 const ROOT = resolve(bare[0]);
 const OUT = resolve(flags.get('--out').at(-1));
 if (!existsSync(ROOT) || !lstatSync(ROOT).isDirectory()) fail(1, `not a directory: ${bare[0]}`);
-if (OUT === ROOT || OUT.startsWith(ROOT + sep)) fail(1, `refusing to write inside the repo: ${OUT}`);
+// compare real paths so a symlink on either side cannot route --out into the repo
+const realOut = p => existsSync(p) ? realpathSync(p) : join(realOut(dirname(p)), basename(p));
+const REAL_ROOT = realpathSync(ROOT), REAL_OUT = realOut(OUT);
+if (REAL_OUT === REAL_ROOT || REAL_OUT.startsWith(REAL_ROOT + sep)) fail(1, `refusing to write inside the repo: ${OUT}`);
 let overrides;
 try { overrides = parseOverrides((flags.get('--group') || []).flatMap(s => s.split(',')).filter(Boolean)); } catch (e) { fail(1, e.message); }
 const EXCLUDE = (flags.get('--exclude') || []).flatMap(s => s.split(',')).filter(Boolean).map(p => p.replace(/\/+$/, ''));

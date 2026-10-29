@@ -16,6 +16,11 @@ class Runner:
         return self.executor.run()
 
 
+def run_once():
+    # a method called straight on a new instance, or on a factory's return
+    return Executor().run() + create_executor().run()
+
+
 class FastStrategy:
     def ensure(self):
         return "fast"
