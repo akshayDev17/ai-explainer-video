@@ -23,7 +23,7 @@ node <skill>/tools/mine.mjs <repo> --out out/<name> [--group 'glob=prod|test|eva
 
 It writes `out/<name>/codemap.json` and `out/<name>/codemap.md`. Exit 0 is done; exit 1 is
 a bad path or flag, or a repo with no Python; exit 2 is a failed self-check (a definition
-the parser saw was not extracted) — report it, do not edit the output. Show the user
+the parser saw was not extracted, or two collapsed into one symbol) — report it, do not edit the output. Show the user
 `codemap.md` in full: every group with the rule that placed each file, every entry, every
 rule link with its evidence, the mocks every test runs under, config profiles, and any
 entry that landed in the test group (suggest the `--group` override it prints).
