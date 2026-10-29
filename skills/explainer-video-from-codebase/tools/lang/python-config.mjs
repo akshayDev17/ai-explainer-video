@@ -6,7 +6,9 @@
      config-dependent       when a guard reads a function parameter (runtime input) or a value no profile settles.
    Profiles carry their file's group: production and dev sites are decided under code defaults and prod/dev files
    only; an eval or test data file decides only eval or test sites. B14: `getattr(settings, "x", default)` reads
-   setting x, falling back to the default when no settings field declares it. */
+   setting x, falling back to the default when no settings field declares it. Values are evaluated as read; what
+   the report shows of them goes through shownValue (a secret is shown only as set). */
+import { shownValue } from '../config/redact.mjs';
 
 const UNK = { unk: true };
 const isU = v => v && v.unk;
@@ -127,8 +129,8 @@ export function classifyDispatch({ py, factories, entries, configKV, parser }) {
     const merged = []; for (const a of alts) if (!merged.some(x => x.cls === a.cls && x.guards.join('&') === a.guards.join('&'))) merged.push(a);
     const settingsRead = [...new Set(merged.flatMap(a => a.settings))];
     const params = [...new Set(merged.flatMap(a => a.params))];
-    const inRepoValues = settingsRead.filter(x => fields.has(x)).map(x => ({ setting: x, env: envOf(fields.get(x))[0], default: fields.get(x).default,
-      files: ps.slice(1).filter(p => envOf(fields.get(x)).some(e => p.values.has(e))).map(p => { const kv = envOf(fields.get(x)).map(e => p.values.get(e)).find(Boolean); return `${p.name}:${kv.line}=${kv.value}`; }) }));
+    const inRepoValues = settingsRead.filter(x => fields.has(x)).map(x => ({ setting: x, env: envOf(fields.get(x))[0], default: shownValue(envOf(fields.get(x)).join(' '), fields.get(x).default),
+      files: ps.slice(1).filter(p => envOf(fields.get(x)).some(e => p.values.has(e))).map(p => { const kv = envOf(fields.get(x)).map(e => p.values.get(e)).find(Boolean); return `${p.name}:${kv.line}=${shownValue(kv.key, kv.value)}`; }) }));
     const decided = ps.map((p, i) => { const yes = merged.filter(a => a.sel[i] === 'yes'); const maybe = merged.filter(a => a.sel[i] === '?');
       return yes.length === 1 && !maybe.length ? yes[0].cls : maybe.length ? `? (${[...yes, ...maybe].map(a => a.cls.split(/[:.]/).pop()).join('|')})` : 'none'; });
     const classification = params.length ? 'config-dependent (runtime input)' : decided.every(d => !d.startsWith('?')) ? 'config-narrowed' : 'config-dependent (value not in repo)';
@@ -136,5 +138,5 @@ export function classifyDispatch({ py, factories, entries, configKV, parser }) {
       alternatives: merged.map(a => ({ cls: a.cls, group: a.group, line: a.line, guards: a.guards, sel: Object.fromEntries(ps.map((p, i) => [p.name, a.sel[i]])) })),
       settingsRead, params, inRepoValues, decidedByProfile: Object.fromEntries(ps.map((p, i) => [p.name, decided[i]])) });
   }
-  return { profiles: profiles.map(p => ({ name: p.name, group: p.group, keys: [...p.values.keys()] })), sites: report };
+  return { profiles: profiles.map(p => ({ name: p.name, group: p.group, keys: [...p.values.keys()] })), sites: report, guardKeys: relevantEnv };
 }

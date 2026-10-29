@@ -22,12 +22,15 @@ byte-identical output (timings go to stdout only).
 | `tests[]`, `fixtures[]`, `fixtureBindings[]`, `mocks[]`, `testSummary` | below |
 | `rules` | per-pack records: Depends links, queue producers, registry tables (with dropped constructors), Haystack pipelines, HTTP client calls (linked or not), spawns, callback count |
 | `dispatchSites[]`, `factories` | every narrowed or CHA dispatch point; every function that can return two or more classes, with branch guards |
-| `config` | config files (`group`, `reader`, fact count), settings fields and properties, every fact (`key`, `value`, `file:line`), profiles and classified dispatch sites (below) |
+| `config` | git-tracked config files (`group`, `reader`, fact count) and the number of `untracked` ones not read, settings fields and properties, every fact (`key`, `file:line`, and `value` only for a key a dispatch guard reads), profiles and classified dispatch sites (below) |
 | `frameworksWithoutPack[]` | known frameworks the repo imports that no rule pack covers: their wiring is not linked |
 | `selfCheck` | below |
 
-Symbol ids: `pkg.module:func`, `pkg.module:Class.method`, `…:outer.<locals>.inner`, `pkg.module:<main>`
-for an `if __name__ == "__main__":` block. A call made at module level has `from: pkg.module:<module>`.
+Symbol ids: `pkg.module:func`, `pkg.module:Class.method`, `pkg.module:Outer.Inner` for a nested class,
+`…:outer.<locals>.inner` for a function or class defined in a function, `pkg.module:<main>`
+for an `if __name__ == "__main__":` block. Modules are named from the repo root (`backend/app/x.py` is
+`backend.app.x`); an absolute import is resolved from the repo root, then from each Python source root that
+applies to the importing module (`selfCheck.sourceRoots`), so `from app.x import f` inside `backend/` finds it. A call made at module level has `from: pkg.module:<module>`.
 A library target is `ext:<dotted.name>`.
 
 ## Groups
@@ -43,7 +46,8 @@ training-loop markers → eval. `--group 'glob=group'` always wins.
 
 ## Entries
 
-`kind` ∈ `http` (`method`, `path` with every router prefix), `queue-consumer` / `scheduled` (`key`),
+`kind` ∈ `http` (`method`, `path` with every `include_router` prefix up the chain and the router's own; only a
+decorator whose receiver is an `APIRouter` or `FastAPI` app makes one), `queue-consumer` / `scheduled` (`key`),
 `cli`, `main`, `registered-callback` (`via`, e.g. `FastAPI(lifespan=…)`). Each carries `group`, `file`,
 `line` and the `rule` that made it. An entry in the test group is not a flow; `codemap.md` suggests the
 override that moves it.
@@ -90,9 +94,21 @@ the files that set them, and a classification: `config-narrowed` (every profile 
 `config-dependent (runtime input)` (a guard reads a parameter) or `config-dependent (value not in repo)`.
 `getattr(settings, "x", d)` reads setting `x`, falling back to `d` when no field declares it.
 
+Config is read only from git-tracked files (a local, untracked `.env` never is; a tracked `sample.env` or
+`.env.example` is) and never from an `--exclude`d path. A value is recorded only for a key a dispatch guard
+reads; any other fact records its key and file only. A secret-looking key (containing KEY, TOKEN, SECRET,
+PASSWORD, CREDENTIAL, PRIVATE, AUTH, …) or a credential-shaped value (a URL with a password, a private key, a
+JWT, a provider token, a long random string) is written as `set (redacted)` everywhere in `codemap.json` and
+`codemap.md`, settings defaults included; dispatch is still decided on the value as read.
+
 ## Self-check
 
 `ok` is false — and `mine` exits 2 — when the parser saw a definition the extractor did not record
-(`defsExtracted` < `defNodes`). Also reported: files with syntax errors, resolved calls, unresolved calls
+(`defsExtracted` < `defNodes`), or when two definitions in different scopes collapsed into one symbol
+(fewer non-`main` symbols than `defScopes`, the distinct scope + name pairs the parser saw). Also reported: files with syntax errors, resolved calls, unresolved calls
 by where their head name comes from (`inRepo`, `external`, `builtin`, `local`), and the in-repo miss rate:
-calls whose head is an in-repo name but whose target could not be resolved.
+calls whose head is an in-repo name but whose target could not be resolved. `sourceRoots` lists the Python
+source roots found (a pyproject.toml / setup.cfg directory and the package dirs it names; the parent of an
+in-repo package imported by absolute name from inside it). `externalLikeRepoDirs` counts calls into imports
+that resolved as external although an in-repo directory has their name, with their `rate` among in-repo calls:
+a high rate means a source root was missed and those calls are not linked.

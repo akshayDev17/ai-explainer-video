@@ -4,8 +4,11 @@
      uvicorn mod:app            -> the entries defined in the app's module (its lifespan)
      taskiq worker mod:broker   -> every queue consumer          celery -A mod worker -> every queue consumer
      taskiq scheduler mod:x     -> every scheduled task          celery -A mod beat   -> every scheduled task
-     python -m pkg              -> pkg's `__main__` entry */
-import { addEdge } from '../lang/python.mjs';
+     python -m pkg              -> pkg's `__main__` entry
+   The app module is looked up as the spawned process would find it from the spawning file: its directory, then each
+   parent, then the Python source roots, then the repo root. */
+import { dirname } from 'node:path';
+import { addEdge, rootsFor } from '../lang/python.mjs';
 
 const SUBPROCESS = /^(Popen|run|call|check_call|check_output)$/;
 // `subprocess.run(…)`, `asyncio.create_subprocess_exec(…)`, or the bare name imported from either module
@@ -21,19 +24,23 @@ function argvOf(py, c) {
 export function linkSpawns(py, entries) {
   const spawns = [];
   const appModule = spec => spec && spec.includes(':') ? spec.split(':')[0] : spec;
+  const near = (c, name) => { const dirs = dirname(c.file) === '.' ? [] : dirname(c.file).split('/');
+    return [...dirs.map((_, i) => [...dirs.slice(0, dirs.length - i), name].join('.')), ...rootsFor(py, c.module).map(r => `${r}.${name}`), name]; };
   for (const c of py.rawCalls) {
     if (!isSpawn(c)) continue;
     const argv = argvOf(py, c);
     if (!argv) continue;
     const at = w => argv.indexOf(w);
     let targets = [], what = null;
-    if (at('uvicorn') !== -1) { const mod = appModule(argv[at('uvicorn') + 1]); what = `uvicorn ${argv[at('uvicorn') + 1]}`;
-      targets = entries.filter(e => e.file && py.modules.get(mod)?.file === e.file); }
+    if (at('uvicorn') !== -1) { const spec = appModule(argv[at('uvicorn') + 1]); what = `uvicorn ${argv[at('uvicorn') + 1]}`;
+      const mod = spec && near(c, spec).find(m => py.modules.has(m));
+      targets = mod ? entries.filter(e => e.file && py.modules.get(mod).file === e.file) : []; }
     else if (at('taskiq') !== -1 && argv[at('taskiq') + 1] === 'worker') { what = `taskiq worker ${argv[at('taskiq') + 2]}`; targets = entries.filter(e => e.kind === 'queue-consumer'); }
     else if (at('taskiq') !== -1 && argv[at('taskiq') + 1] === 'scheduler') { what = `taskiq scheduler ${argv[at('taskiq') + 2]}`; targets = entries.filter(e => e.kind === 'scheduled'); }
     else if (at('celery') !== -1) { const beat = argv.includes('beat'); what = `celery ${beat ? 'beat' : 'worker'}`; targets = entries.filter(e => e.kind === (beat ? 'scheduled' : 'queue-consumer')); }
-    else if (at('-m') !== -1 && argv[at('-m') + 1]) { const mod = argv[at('-m') + 1]; what = `python -m ${mod}`;
-      targets = entries.filter(e => e.kind === 'main' && (e.id === `${mod}.__main__:<main>` || e.id === `${mod}:<main>`)); }
+    else if (at('-m') !== -1 && argv[at('-m') + 1]) { what = `python -m ${argv[at('-m') + 1]}`;
+      const mod = near(c, argv[at('-m') + 1]).find(m => py.modules.has(`${m}.__main__`) || py.modules.has(m));
+      targets = mod ? entries.filter(e => e.kind === 'main' && (e.id === `${mod}.__main__:<main>` || e.id === `${mod}:<main>`)) : []; }
     if (!what) continue;
     spawns.push({ from: c.from, file: c.file, line: c.line, argv: what, targets: targets.map(e => e.id) });
     for (const e of targets) addEdge(py, c.from, e.id, 'spawn', c.line, { rule: 'process-spawn', evidence: `${c.file}:${c.line} spawns ${what}` });

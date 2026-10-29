@@ -60,3 +60,15 @@ test('super().m() resolves to the next class in the MRO', () => {
   const e = edgesFrom(m, 'svc.strategies:Child.save').find(x => x.to === 'svc.strategies:Base.save');
   assert.equal(e.super, true);
 });
+
+test('nested and function-local classes get scoped ids: two models\' `class Config` never collide', () => {
+  const n = mine(join(FIXTURES, 'nested-classes'));
+  assert.equal(n.status, 0, n.stderr);
+  const sym = id => n.codemap.symbols.find(x => x.id === id);
+  assert.deepEqual(['pkg.m:Config', 'pkg.m:User.Config', 'pkg.m:Item.Config', 'pkg.m:build.<locals>.Impl'].map(id => [id, sym(id)?.start]),
+    [['pkg.m:Config', 1], ['pkg.m:User.Config', 6], ['pkg.m:Item.Config', 14], ['pkg.m:build.<locals>.Impl', 22]]);
+  assert.deepEqual([sym('pkg.m:Item.Config.describe').kind, sym('pkg.m:Item.Config.describe').cls], ['method', 'pkg.m:Item.Config']);
+  assert.ok(edgesFrom(n.codemap, 'pkg.m:default_config').some(e => e.to === 'pkg.m:Config' && e.kind === 'ctor'), 'Config() is the top-level class');
+  assert.ok(edgesFrom(n.codemap, 'pkg.m:build').some(e => e.to === 'pkg.m:build.<locals>.Impl.run'), 'a function-local class resolves inside its function');
+  assert.equal(n.codemap.selfCheck.symbols, n.codemap.selfCheck.defScopes);
+});

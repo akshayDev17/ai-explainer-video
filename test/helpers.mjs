@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +21,16 @@ export function mine(repo, ...flags) {
   const md = existsSync(join(out, 'codemap.md')) ? readFileSync(join(out, 'codemap.md'), 'utf8') : null;
   cleanup(dirname(out));
   return { status: r.status, stdout: r.stdout, stderr: r.stderr, codemap, md };
+}
+
+// a git work tree: config is read only from tracked files. Copies `from` (a fixture) when given; `track` adds every file
+export const git = (dir, ...args) => { const r = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); };
+export function gitRepo(from) {
+  const dir = join(scratch(), 'repo');
+  if (from) cpSync(from, dir, { recursive: true }); else mkdirSync(dir);
+  git(dir, 'init', '-q');
+  git(dir, 'add', '-A');
+  return dir;
 }
 
 export const short = id => id.split(':').pop();

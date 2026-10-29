@@ -57,8 +57,8 @@ export function linkFixtures(py, bindings) {
 }
 
 export function mockTargets(py, R) {
-  const resolveDotted = raw => { const parts = raw.split('.');
-    for (let i = parts.length - 1; i >= 1; i--) { const mod = parts.slice(0, i).join('.'); if (!py.modules.has(mod)) continue;
+  const resolveDotted = (raw, from) => { const parts = raw.split('.');
+    for (let i = parts.length - 1; i >= 1; i--) { const mod = R.findModule(parts.slice(0, i).join('.'), from); if (!py.modules.has(mod)) continue;
       const rest = parts.slice(i), sc = { imports: py.modules.get(mod).imports, module: mod };
       const r = R.resolveName(rest[0], sc);
       if (rest.length === 1) return r?.id || null;
@@ -69,11 +69,11 @@ export function mockTargets(py, R) {
   const scoped = m => { const file = fileOf(m.fn); return isConftest(file) && SESSION_HOOK.test(m.fn) ? { ...m, scope: 'session', conftest: file } : m; };
   const mocks = [];
   for (const d of py.decorated) if (/(^|\.)patch$/.test(d.expr) && d.strArgs[0] && /\./.test(d.strArgs[0]))
-    mocks.push({ fn: d.id, raw: d.strArgs[0], target: resolveDotted(d.strArgs[0]), line: d.line, how: '@patch' });
+    mocks.push({ fn: d.id, raw: d.strArgs[0], target: resolveDotted(d.strArgs[0], d.module), line: d.line, how: '@patch' });
   for (const c of py.rawCalls) {
     const a0 = c.args[0], s0 = a0?.type === 'string' ? a0.s : null, s1 = c.args[1]?.type === 'string' ? c.args[1].s : null;
     if ((/(^|\.)patch$/.test(c.expr) || /(^|\.)monkeypatch\.setattr$/.test(c.expr)) && s0 && /\./.test(s0))
-      mocks.push(scoped({ fn: c.from, raw: s0, target: resolveDotted(s0), line: c.line, how: c.expr.split('.').pop() }));
+      mocks.push(scoped({ fn: c.from, raw: s0, target: resolveDotted(s0, c.module), line: c.line, how: c.expr.split('.').pop() }));
     else if ((/(^|\.)patch\.object$/.test(c.expr) || /(^|\.)monkeypatch\.setattr$/.test(c.expr)) && a0 && s1) {
       let k = null; const r = R.resolveExpr(a0.text, c); if (r?.id && py.classes.has(r.id)) k = r.id;
       else if (c.types?.has(a0.text)) { const rc = R.receiverOf(c.types.get(a0.text), c); if (rc) k = rc.cls[0]; }

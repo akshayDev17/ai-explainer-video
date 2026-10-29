@@ -18,8 +18,11 @@ export function renderCodemap(m) {
     `- ${m.symbols.length} symbols · ${m.edges.length} edges · ${m.entries.length} entries · ${ts.tests} tests`, '');
 
   out.push('## Self-check', '',
-    `- **${sc.ok ? 'ok' : 'FAILED'}**: ${sc.defsExtracted} of ${sc.defNodes} parsed definitions extracted (${sc.defLinesRaw} \`def\`/\`class\` lines by regex)`,
+    `- **${sc.ok ? 'ok' : 'FAILED'}**: ${sc.defsExtracted} of ${sc.defNodes} parsed definitions extracted (${sc.defLinesRaw} \`def\`/\`class\` lines by regex) · ${sc.defScopes} distinct definitions, ${sc.symbols} symbols`,
     `- calls: ${sc.calls.resolved} resolved · unresolved by origin ${JSON.stringify(sc.unresolvedByOrigin)} · in-repo miss rate ${(sc.inRepoMissRate * 100).toFixed(1)}%`,
+    `- Python source roots besides the repo root: ${sc.sourceRoots.length ? sc.sourceRoots.map(r => `\`${r}/\``).join(', ') : 'none'}`,
+    ...(sc.externalLikeRepoDirs.calls ? [`- **${sc.externalLikeRepoDirs.calls} calls (${(sc.externalLikeRepoDirs.rate * 100).toFixed(1)}%) go to imports resolved as external although an in-repo directory has their name**: ` +
+      sc.externalLikeRepoDirs.names.map(x => `\`${x.name}\` ${x.calls} (${x.dirs.map(d => `\`${d}/\``).join(', ')})`).join(', ') + ' — if these are in-repo, their module was not found (a missed source root, or an excluded file) and these calls are not linked'] : []),
     `- files with syntax errors: ${sc.filesWithErrors.length ? sc.filesWithErrors.map(f => `\`${f}\``).join(', ') : 'none'}`, '');
 
   out.push('## Groups', '', 'Rules, first match wins (a `--group` override wins over all of them):', '', ...m.groups.rules.map((r, i) => `${i + 1}. ${r}`), '',
@@ -72,7 +75,8 @@ export function renderCodemap(m) {
   const perFile = new Map(); for (const t of m.tests) { const x = perFile.get(t.file) || perFile.set(t.file, { n: 0, direct: 0 }).get(t.file); x.n++; x.direct += t.direct.length; }
   out.push('### Tests per file', '', table(['file', 'tests', 'direct links'], [...perFile].map(([f, x]) => [`\`${f}\``, x.n, x.direct])), '');
 
-  out.push('## Config', '', `${m.config.settingsFields.length} settings fields · ${m.config.settingsProps.length} settings properties · ${m.config.kv.length} config facts in ${m.config.files.length} files`, '',
+  out.push('## Config', '', `${m.config.settingsFields.length} settings fields · ${m.config.settingsProps.length} settings properties · ${m.config.kv.length} config facts in ${m.config.files.length} git-tracked files · ${m.config.untracked} untracked config files not read`, '',
+    'A value is kept only for a key a dispatch guard reads; a secret-looking key or value is shown as `set (redacted)`.', '',
     table(['config file', 'group', 'reader', 'facts'], m.config.files.map(f => [`\`${f.path}\``, f.group, f.reader, f.facts])), '',
     '### Profiles', '', table(['profile', 'group', 'keys a guard reads'], m.config.profiles.map(p => [p.name, p.group, p.keys.join(', ')])), '',
     '### Config-selected dispatch', '');

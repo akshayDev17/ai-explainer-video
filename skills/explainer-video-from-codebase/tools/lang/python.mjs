@@ -15,11 +15,13 @@ export function newPythonModel() {
     symbols: new Map(), classes: new Map(), modules: new Map(),
     rawCalls: [], decorated: [], dictPairs: [], returns: [], mains: [], annotParams: [], paramDefaults: [], moduleAssigns: [],
     fnAssigns: new Map(), fnAlias: new Map(), fnLists: new Map(), settingsFields: [], settingsProps: [], externalImports: new Map(),
+    absImports: new Map(),    // top-level name of an absolute import -> the modules importing it
+    sourceRoots: [],          // { prefix, scope }: dotted dirs an absolute import is also resolved against (sourceRoots())
     uses: new Map(),          // fn -> { called, awaited, passed }: name -> first line (how a callee runs what it was handed)
     typeAliases: new Map(),   // alias symbol -> { type, provider, module, imports }: filled by rule packs before resolveCalls
     edges: [], dispatchSites: [], callStats: { resolved: 0, unresolvedName: 0, unresolvedAttr: 0 },
-    unresolved: { inRepo: 0, external: 0, builtin: 0, local: 0 },
-    defNodes: 0, defsVisited: 0,
+    unresolved: { inRepo: 0, external: 0, builtin: 0, local: 0 }, externalCalls: new Map(),
+    defNodes: 0, defsVisited: 0, defScopes: 0,
   };
 }
 
@@ -49,31 +51,37 @@ export function extractPythonFile(py, rel, root, group, text) {
   py.modules.set(module, M);
   const lines = text.split('\n');
   const spanText = (a, b) => lines.slice(a - 1, b).join('\n');
-  py.defNodes += root.descendantsOfType(['function_definition', 'class_definition']).length;
+  const defNodes = root.descendantsOfType(['function_definition', 'class_definition']);
+  py.defNodes += defNodes.length;
+  const scopeOf = n => { for (let p = n.parent; p; p = p.parent) if (p.type === 'function_definition' || p.type === 'class_definition') return p.startIndex; return -1; };
+  py.defScopes += new Set(defNodes.map(n => `${scopeOf(n)}/${n.childForFieldName('name').text}`)).size;
   const absImport = (relNode) => {
     const dots = (relNode.text.match(/^\.+/) || [''])[0].length;
     const rest = relNode.text.slice(dots);
     const base = pkg.split('.').slice(0, Math.max(0, pkg.split('.').length - (dots - 1)));
     return [...base, ...(rest ? [rest] : [])].filter(Boolean).join('.');
   };
-  const noteExternal = (name, rel_) => { const top = name.split('.')[0]; if (!py.externalImports.has(top)) py.externalImports.set(top, rel_); };
+  const noteExternal = (name, rel_) => { const top = name.split('.')[0]; if (!py.externalImports.has(top)) py.externalImports.set(top, rel_);
+    (py.absImports.get(top) || py.absImports.set(top, new Set()).get(top)).add(module); };
   function addImports(node, table) {
     if (node.type === 'import_statement') {
       for (const c of node.namedChildren) {
-        if (c.type === 'dotted_name') { table.set(c.text.split('.')[0], { module: c.text.split('.')[0] }); noteExternal(c.text, rel); }
-        if (c.type === 'aliased_import') { table.set(c.childForFieldName('alias').text, { module: c.childForFieldName('name').text }); noteExternal(c.childForFieldName('name').text, rel); }
+        if (c.type === 'dotted_name') { table.set(c.text.split('.')[0], { module: c.text.split('.')[0], in: module }); noteExternal(c.text, rel); }
+        if (c.type === 'aliased_import') { table.set(c.childForFieldName('alias').text, { module: c.childForFieldName('name').text, in: module }); noteExternal(c.childForFieldName('name').text, rel); }
       }
     } else if (node.type === 'import_from_statement') {
       const mn = node.childForFieldName('module_name');
       const from = mn.type === 'relative_import' ? absImport(mn) : mn.text;
       if (mn.type !== 'relative_import') noteExternal(from, rel);
       for (const c of node.childrenForFieldName('name')) {
-        if (c.type === 'dotted_name') table.set(c.text, { from, name: c.text });
-        if (c.type === 'aliased_import') table.set(c.childForFieldName('alias').text, { from, name: c.childForFieldName('name').text });
+        if (c.type === 'dotted_name') table.set(c.text, { from, name: c.text, in: module });
+        if (c.type === 'aliased_import') table.set(c.childForFieldName('alias').text, { from, name: c.childForFieldName('name').text, in: module });
       }
     }
   }
   const scope = ctx => ({ module, imports: ctx.imports, locals: ctx.locals, cls: ctx.cls });
+  // a definition's id names its scope: `m:f`, `m:Class.f`, `m:Outer.Inner`, `m:f.<locals>.g`
+  const scopedId = (ctx, name) => ctx.inClass ? `${ctx.cls}.${name}` : ctx.fn ? `${ctx.fn}.<locals>.${name}` : `${module}:${name}`;
   const use = (fn, how, name, node) => { const u = py.uses.get(fn) || py.uses.set(fn, { called: new Map(), awaited: new Map(), passed: new Map() }).get(fn);
     if (!u[how].has(name)) u[how].set(name, node.startPosition.row + 1); };
   // `name = <call>` (also inside conditionals and `x or Default()`) for factory-return and receiver analysis
@@ -113,7 +121,7 @@ export function extractPythonFile(py, rel, root, group, text) {
           const call = e.type === 'call' ? e : null;
           const expr = (call ? call.childForFieldName('function') : e).text;
           const args = call ? call.childForFieldName('arguments').namedChildren : [];
-          py.decorated.push({ id, expr, line: d.startPosition.row + 1, text: e.text,
+          py.decorated.push({ id, expr, line: d.startPosition.row + 1, text: e.text, module, fn: ctx.fn, imports: ctx.imports, locals: ctx.locals, types: ctx.types,
             strArgs: args.map(str).filter(s => s != null),
             kwNames: args.filter(a => a.type === 'keyword_argument').map(a => a.childForFieldName('name').text),
             kwArgs: Object.fromEntries(args.filter(a => a.type === 'keyword_argument')
@@ -124,7 +132,7 @@ export function extractPythonFile(py, rel, root, group, text) {
       case 'class_definition': {
         py.defsVisited++;
         const name = node.childForFieldName('name').text;
-        const id = `${module}:${name}`;
+        const id = scopedId(ctx, name);
         const sup = node.childForFieldName('superclasses');
         const baseOf = c => c.type === 'subscript' ? c.childForFieldName('value') : c;   // Base[T]
         const baseExprs = sup ? sup.namedChildren.map(baseOf).filter(c => c.type === 'identifier' || c.type === 'attribute').map(c => c.text) : [];
@@ -132,7 +140,7 @@ export function extractPythonFile(py, rel, root, group, text) {
         py.classes.set(id, { id, module, name, baseExprs, methods: new Map(), imports: ctx.imports, attrTypes: new Map(),
           decos: ctx.decos || [], file: rel, line: start });
         py.symbols.set(id, { id, group, kind: 'class', file: rel, start, end, name, module, text: spanText(start, end) });
-        if (!ctx.fn) M.defs.set(name, id);
+        if (!ctx.inClass) (ctx.fn ? ctx.locals : M.defs).set(name, id);
         const isSettings = baseExprs.some(b => /BaseSettings$/.test(b));
         for (const c of node.childForFieldName('body').namedChildren) {
           if (isSettings && c.type === 'expression_statement' && c.namedChildren[0]?.type === 'assignment') {
@@ -154,23 +162,23 @@ export function extractPythonFile(py, rel, root, group, text) {
             const ret = fn.childForFieldName('body').namedChildren.find(s => s.type === 'return_statement');
             if (ret) py.settingsProps.push({ cls: id, name: fn.childForFieldName('name').text, expr: ret.namedChildren[0]?.text, file: rel, line: fn.startPosition.row + 1 });
           }
-          visit(c, { ...ctx, cls: id, decos: null });
+          visit(c, { ...ctx, cls: id, inClass: true, decos: null });
         }
         return id;
       }
       case 'function_definition': {
         py.defsVisited++;
         const name = node.childForFieldName('name').text;
-        const id = ctx.fn ? `${ctx.fn}.<locals>.${name}` : ctx.cls ? `${ctx.cls}.${name}` : `${module}:${name}`;
+        const id = scopedId(ctx, name);
         const start = node.startPosition.row + 1, end = node.endPosition.row + 1;
         const params = node.childForFieldName('parameters').namedChildren.map(p => (p.type === 'identifier' ? p : p.type === 'typed_parameter' ? p.namedChildren[0] : p.childForFieldName('name'))?.text).filter(Boolean);
-        const sym = { id, group, kind: ctx.cls && !ctx.fn ? 'method' : 'function', file: rel, start, end, name, module,
-          cls: ctx.fn ? null : ctx.cls, decos: ctx.decos || [], params, text: spanText(start, end),
+        const sym = { id, group, kind: ctx.inClass ? 'method' : 'function', file: rel, start, end, name, module,
+          cls: ctx.inClass ? ctx.cls : null, decos: ctx.decos || [], params, text: spanText(start, end),
           ...(node.children.some(c => c.type === 'async') ? { async: true } : {}) };
         py.symbols.set(id, sym);
-        if (ctx.cls && !ctx.fn) py.classes.get(ctx.cls).methods.set(name, id);
-        else if (!ctx.cls && !ctx.fn) M.defs.set(name, id);
-        if (ctx.fn) ctx.locals.set(name, id);
+        if (ctx.inClass) py.classes.get(ctx.cls).methods.set(name, id);
+        else if (ctx.fn) ctx.locals.set(name, id);
+        else M.defs.set(name, id);
         if (group === 'test') {   // assertion lines: what a test promises (the pytest pack decides which functions are tests)
           const body = node.childForFieldName('body');
           const asserts = [...body.descendantsOfType('assert_statement'), ...body.descendantsOfType('call').filter(c => /(^|\.)(assert\w*|raises)$/.test(c.childForFieldName('function').text))];
@@ -179,7 +187,7 @@ export function extractPythonFile(py, rel, root, group, text) {
         }
         const isFixture = (ctx.decos || []).some(d => /(^|\.)fixture(\(|$)/.test(d));
         const inner = { ...ctx, fn: id, imports: new Map(ctx.imports), locals: new Map(ctx.locals || []), types: new Map(), ptypes: new Map(),
-          cls: ctx.cls, guards: [], decos: null, fixture: isFixture, onFailure: null };
+          cls: ctx.cls, inClass: false, guards: [], decos: null, fixture: isFixture, onFailure: null };
         for (const p of node.childForFieldName('parameters').namedChildren) {
           const pname = p.type === 'typed_parameter' ? p.namedChildren[0] : p.childForFieldName('name');
           const ptype = p.childForFieldName('type');
@@ -246,7 +254,7 @@ export function extractPythonFile(py, rel, root, group, text) {
           const start = node.startPosition.row + 1, end = node.endPosition.row + 1;
           py.symbols.set(id, { id, group, kind: 'main', file: rel, start, end, name: '<main>', module, text: spanText(start, end) });
           py.mains.push(id);
-          visit(node.childForFieldName('consequence'), { ...ctx, fn: id, imports: new Map(ctx.imports), locals: new Map(), types: new Map(), ptypes: new Map(), guards: [] });
+          visit(node.childForFieldName('consequence'), { ...ctx, fn: id, inClass: false, imports: new Map(ctx.imports), locals: new Map(), types: new Map(), ptypes: new Map(), guards: [] });
           return;
         }
         visit(cond, ctx);
@@ -283,20 +291,58 @@ export function extractPythonFile(py, rel, root, group, text) {
     }
     for (const c of node.namedChildren) visit(c, ctx);
   }
-  visit(root, { imports: M.imports, fn: null, cls: null, locals: new Map(), types: new Map(), guards: [], onFailure: null });
+  visit(root, { imports: M.imports, fn: null, cls: null, inClass: false, locals: new Map(), types: new Map(), guards: [], onFailure: null });
 }
+
+/* ---------------- source roots ---------------- */
+
+const packagesOf = py => {   // every in-repo package: a directory holding modules, or an __init__.py
+  const out = new Set();
+  for (const [k, M] of py.modules) { const parts = k.split('.'); for (let i = 1; i < parts.length; i++) out.add(parts.slice(0, i).join('.'));
+    if (M.file.endsWith('__init__.py')) out.add(k); }
+  return out;
+};
+const dotted = dir => dir.split('/').filter(x => x && x !== '.').join('.');
+
+/* A Python source root is a directory an absolute import is resolved against besides the repo root, so a
+   backend/ that imports itself as `app.*` resolves into backend/app. Two sources: the directory of a
+   pyproject.toml or setup.cfg and the package dirs it names (`where`, `from`, `package-dir`, `pythonpath`), applying to
+   modules under that directory; and the parent of an in-repo package that an absolute import from inside
+   that parent names while the repo root holds no such package. Longest prefix first. */
+export function sourceRoots(py, projects) {
+  const pkgs = packagesOf(py), roots = new Map();
+  const add = (prefix, scope) => { if (prefix && pkgs.has(prefix) && !roots.has(prefix)) roots.set(prefix, { prefix, scope }); };
+  for (const { rel, text } of projects) {
+    const dir = dotted(rel.split('/').slice(0, -1).join('/'));
+    for (const m of text.matchAll(/\b(?:where|from|package[-_]dir|pythonpath)\s*=\s*([^\n]*)/g))
+      for (const [v] of m[1].matchAll(/[A-Za-z_][\w./-]*/g)) if (!/^(include|from|where|true|false)$/.test(v)) add([dir, dotted(v)].filter(Boolean).join('.'), dir);
+    add(dir, dir);
+  }
+  for (const [top, importers] of py.absImports) {
+    if (pkgs.has(top) || py.modules.has(top)) continue;
+    for (const p of pkgs) if (p.endsWith('.' + top)) { const root = p.slice(0, -top.length - 1);
+      if ([...importers].some(m => m.startsWith(root + '.'))) add(root, root); }
+  }
+  return [...roots.values()].sort((a, b) => b.prefix.length - a.prefix.length || (a.prefix < b.prefix ? -1 : 1));
+}
+// the source roots that apply to a module: those whose scope holds it
+export const rootsFor = (py, module) => py.sourceRoots.filter(r => !r.scope || module === r.scope || module.startsWith(r.scope + '.')).map(r => r.prefix);
 
 /* ---------------- resolution ---------------- */
 
 export function resolverFor(py) {
   const { modules, classes, symbols } = py;
+  const pkgs = packagesOf(py);
+  const inRepo = m => modules.has(m) || pkgs.has(m);
+  // an absolute module name as the importing module sees it: the repo root, then each source root that applies
+  const findModule = (name, from) => inRepo(name) ? name : rootsFor(py, from || '').map(r => `${r}.${name}`).find(inRepo) || name;
   function resolveImport(t, depth = 0) {
     if (!t || depth > 4) return null;
-    if (t.module) return modules.has(t.module) ? { module: t.module } : { ext: t.module };
-    const m = modules.get(t.from);
+    if (t.module) { const mod = findModule(t.module, t.in); return inRepo(mod) ? { module: mod } : { ext: t.module }; }
+    const from = findModule(t.from, t.in), m = modules.get(from);
     if (m) { if (m.defs.has(t.name)) return { id: m.defs.get(t.name) }; if (m.imports.has(t.name)) return resolveImport(m.imports.get(t.name), depth + 1); }
-    const sub = `${t.from}.${t.name}`;
-    return modules.has(sub) ? { module: sub } : (m ? null : { ext: `${t.from}.${t.name}` });
+    const sub = `${from}.${t.name}`;
+    return inRepo(sub) ? { module: sub } : (inRepo(from) ? null : { ext: `${t.from}.${t.name}` });
   }
   function resolveName(name, c) {
     if (c.locals && c.locals.has(name)) return { id: c.locals.get(name) };
@@ -381,7 +427,7 @@ export function resolverFor(py) {
     }
     return null;
   }
-  return { resolveImport, resolveName, resolveExpr, mro, lookup, overrides, subclasses, factoryReturns, receiverOf, attrReceiver };
+  return { findModule, resolveImport, resolveName, resolveExpr, mro, lookup, overrides, subclasses, factoryReturns, receiverOf, attrReceiver };
 }
 
 const CFG_GUARD = /settings\.|getattr\(\s*settings\b|is_prod|is_dev|env_mode/;
@@ -407,7 +453,7 @@ export function resolveCalls(py, R) {
   const noteMiss = (c, head) => {   // classify an unresolved call by where its head name comes from
     const r = R.resolveName(head, c);
     if (r && (r.id || r.module)) py.unresolved.inRepo++;
-    else if (r && r.ext) py.unresolved.external++;
+    else if (r && r.ext) { py.unresolved.external++; const top = r.ext.split('.')[0]; py.externalCalls.set(top, (py.externalCalls.get(top) || 0) + 1); }
     else if (BUILTINS.has(head)) py.unresolved.builtin++;
     else py.unresolved.local++;
   };

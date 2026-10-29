@@ -1,6 +1,8 @@
 /* Rule pack: FastAPI / Starlette.
-   - routes: `@<router>.get/post/…(path)` -> an `http` entry, its path rebuilt from `include_router(prefix=)` +
-     `APIRouter(prefix=)` + the decorator path;
+   - routes: `@<router>.get/post/…(path)` where <router> is an APIRouter or FastAPI app (a module-level variable,
+     imported or not, or a function's local or parameter, built by `APIRouter()` / `FastAPI()` or a factory returning
+     one) -> an `http` entry. Its path is every `include_router(r, prefix=)` up the include chain (at module level
+     or inside an app factory) + `APIRouter(prefix=)` + the decorator path;
    - DI: `p: T = Depends(provider)` and `Alias = Annotated[T, Depends(provider)]` -> handler links to provider;
      a parameter typed by such an alias is narrowed to whatever the provider returns. */
 import { addEdge } from '../lang/python.mjs';
@@ -23,25 +25,55 @@ export function registerAliases(py) {
   }
 }
 
+const ROUTER = /(^|\.)(APIRouter|FastAPI)$/;
+
+// a router's prefix as mounted: each include_router prefix up the chain, then its own APIRouter(prefix=)
 export function routePrefixes(py, R) {
-  const routerPrefix = new Map(), includePrefix = new Map();
-  for (const a of py.moduleAssigns) if (a.fn && /APIRouter$/.test(a.fn)) {
+  const makesRouter = (expr, sc) => { if (!expr) return false; if (ROUTER.test(expr)) return true; const r = R.resolveExpr(expr, sc);
+    return !!(r?.ext && ROUTER.test(r.ext)) || !!(r?.id && R.factoryReturns(r.id).some(x => x.ext && ROUTER.test(x.ext))); };
+  const routers = new Map();   // `module:name` (or `fn#name` for a local) -> own prefix
+  for (const a of py.moduleAssigns) if (a.fn && makesRouter(a.fn, a)) {
     const kw = a.args.find(x => x.kw === 'prefix');
-    routerPrefix.set(a.module, kw ? kw.s : '');
+    routers.set(`${a.module}:${a.name}`, kw?.s || '');
   }
-  for (const c of py.rawCalls) if (c.top && /\.include_router$/.test(c.expr) && c.args.length) {
-    const kw = c.args.find(x => x.kw === 'prefix');
-    const r = R.resolveName(c.args[0].text.split('.')[0], { imports: py.modules.get(c.module).imports, module: c.module });
-    if (r && r.module) includePrefix.set(r.module, kw ? kw.s : '');
+  const moduleRouter = (name, sc, depth = 0) => {   // a module-level router named in scope, followed through imports
+    if (sc.locals?.has(name)) return null;
+    if (routers.has(`${sc.module}:${name}`)) return `${sc.module}:${name}`;
+    const t = sc.imports.get(name);
+    if (!t?.from || depth > 4) return null;
+    const mod = R.findModule(t.from, t.in), M = py.modules.get(mod);
+    return M ? moduleRouter(t.name, { imports: M.imports, module: mod }, depth + 1) : null;
+  };
+  const routerOf = (expr, sc, fn) => {   // `router`, `items.router`, an imported router, or a local / parameter
+    const parts = expr.split('.');
+    if (parts.length === 1) {
+      const spec = sc.types?.get(expr);
+      if (fn && spec?.expr && makesRouter(spec.expr, sc)) return `${fn}#${expr}`;
+      return moduleRouter(expr, sc);
+    }
+    const r = R.resolveName(parts[0], sc);
+    if (!r?.module) return null;
+    const id = `${[r.module, ...parts.slice(1, -1)].join('.')}:${parts.at(-1)}`;
+    return routers.has(id) ? id : null;
+  };
+  const includes = new Map();   // router -> { parent, prefix }, the first include_router of it
+  for (const c of py.rawCalls) if (c.attr === 'include_router' && c.args[0] && c.args[0].type !== 'keyword_argument') {
+    const parent = routerOf(c.obj, c, c.top ? null : c.from), child = routerOf(c.args[0].text, c, c.top ? null : c.from);
+    if (parent && child && !includes.has(child)) includes.set(child, { parent, prefix: c.args.find(x => x.kw === 'prefix')?.s || '' });
   }
-  return module => (includePrefix.get(module) || '') + (routerPrefix.get(module) || '');
+  const mounted = (id, seen = new Set()) => { if (seen.has(id)) return ''; seen.add(id);
+    const inc = includes.get(id); return (inc ? mounted(inc.parent, seen) + inc.prefix : '') + (routers.get(id) || ''); };
+  // a decorator's route prefix, or null when its receiver is not a router (`@mock.patch(…)` is no route)
+  return d => { const id = routerOf(d.expr.slice(0, d.expr.lastIndexOf('.')), d, d.fn); return id ? mounted(id) : null; };
 }
 
 const HTTP = /\.(get|post|put|patch|delete|api_route|websocket)$/;
 export function routeEntry(py, d, prefixOf) {
   if (!HTTP.test(d.expr)) return null;
+  const prefix = prefixOf(d);
+  if (prefix == null) return null;
   const s = py.symbols.get(d.id);
-  return { kind: 'http', id: d.id, method: d.expr.split('.').pop().toUpperCase(), path: prefixOf(s.module) + (d.strArgs[0] || ''),
+  return { kind: 'http', id: d.id, method: d.expr.split('.').pop().toUpperCase(), path: prefix + (d.strArgs[0] || ''),
     line: d.line, file: s.file, rule: 'fastapi.route' };
 }
 

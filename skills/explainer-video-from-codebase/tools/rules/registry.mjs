@@ -14,7 +14,7 @@ export function linkRegistry(py, dispatchers, consumerByKey) {
     for (let d = 0; d < depth; d++) { const nx = []; for (const x of frontier) for (const y of fwd.get(x) || []) { if (targets.has(y)) return true; if (!seen.has(y)) { seen.add(y); nx.push(y); } } frontier = nx; } return false; };
   const ancestors = (f, depth) => { const out = new Set([f]); let fr = [f];
     for (let d = 0; d < depth; d++) { const nx = []; for (const x of fr) for (const y of rev.get(x) || []) if (!out.has(y)) { out.add(y); nx.push(y); } fr = nx; } return out; };
-  const classByName = new Map([...py.classes.values()].map(k => [k.name, k.id]));
+  const classByName = new Map([...py.classes.values()].filter(k => k.id === `${k.module}:${k.name}`).map(k => [k.name, k.id]));
   const groupOf = id => py.symbols.get(id)?.group || py.modules.get(id.split(':')[0])?.group || 'prod';
   const keys = [];
   for (const p of py.dictPairs) {

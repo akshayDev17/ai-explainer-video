@@ -4,8 +4,8 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
-import { ROOT, SKILL, FIXTURES, mine, scratch, cleanup } from './helpers.mjs';
+import { join, relative, dirname } from 'node:path';
+import { ROOT, SKILL, FIXTURES, mine, scratch, cleanup, gitRepo, git } from './helpers.mjs';
 import { loadGrammars } from '../skills/explainer-video-from-codebase/tools/lib/tree-sitter.mjs';
 
 const MINE = join(SKILL, 'tools', 'mine.mjs');
@@ -56,20 +56,23 @@ test('the repo is never written to, and two runs produce identical code maps', (
 test('--exclude skips a path; --config-root adds config facts from outside the repo', () => {
   const ex = mine(join(FIXTURES, 'rules', 'pytest'), '--exclude', 'tests');
   assert.equal(ex.codemap.files.some(f => f.path.startsWith('tests/')), false);
-  const cfg = out();
+  const cfg = gitRepo();
   mkdirSync(join(cfg, 'deploy'), { recursive: true });
   writeFileSync(join(cfg, 'deploy', 'values.yaml'), 'env:\n  - name: REMOTE_EMBEDDER\n    value: "true"\n');
+  git(cfg, 'add', '-A');
   const r = mine(join(FIXTURES, 'rules', 'haystack'), '--config-root', cfg);
+  cleanup(dirname(cfg));
   const site = r.codemap.config.sites[0];
   assert.equal(site.decidedByProfile[`${cfg}/deploy/values.yaml`], 'pipe.components:RemoteEmbedder', 'a Helm env list sets REMOTE_EMBEDDER');
 });
 
 test('the self-check passes on every fixture and reports unresolved calls by origin', () => {
-  for (const dir of ['resolver', 'polyglot', 'rules/fastapi', 'rules/pytest']) {
+  for (const dir of ['resolver', 'polyglot', 'rules/fastapi', 'rules/pytest', 'nested-classes', 'source-roots']) {
     const { status, codemap } = mine(join(FIXTURES, dir));
     assert.equal(status, 0, dir);
     assert.equal(codemap.selfCheck.ok, true, dir);
     assert.equal(codemap.selfCheck.defsExtracted, codemap.selfCheck.defNodes, dir);
+    assert.equal(codemap.symbols.filter(s => s.kind !== 'main').length, codemap.selfCheck.defScopes, `${dir}: one symbol per distinct definition`);
     assert.deepEqual(Object.keys(codemap.selfCheck.unresolvedByOrigin).sort(), ['builtin', 'external', 'inRepo', 'local']);
   }
 });

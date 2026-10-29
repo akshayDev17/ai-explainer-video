@@ -18,6 +18,22 @@ test('fastapi: routes carry include_router + APIRouter prefixes; Depends links a
   assert.equal(read.narrowedBy, 'app.deps:get_store');
 });
 
+test('fastapi: a route needs a router receiver, so `@mock.patch(...)` on a test is no route', () => {
+  const m = pack('fastapi-layouts');
+  assert.equal(m.entries.filter(e => e.group === 'test').length, 0);
+  assert.equal(m.entries.some(e => e.id === 'tests.test_users:test_get_user'), false);
+});
+
+test('fastapi: prefixes compose along nested include_router calls, an imported alias and an app factory', () => {
+  const m = pack('fastapi-layouts');
+  assert.deepEqual(m.entries.filter(e => e.kind === 'http').map(e => `${e.method} ${e.path} ${short(e.id)}`).sort(), [
+    'GET /api/v1/users/{user_id} get_user',
+    'GET /health create_app.<locals>.health',
+    'POST /shop/items create_item',
+  ]);
+  assert.ok(m.edges.some(e => e.rule === 'py.http-client' && e.from === 'tests.test_users:test_over_http' && e.to === 'app.routers.users:get_user'));
+});
+
 test('celery-taskiq: literal keys, .kiq/.delay and send_task link to consumers; unknown keys do not', () => {
   const m = pack('celery-taskiq');
   assertGolden('celery-taskiq', ruleView(m));
@@ -70,3 +86,12 @@ test('process-spawn: uvicorn, taskiq worker/scheduler and python -m start their 
 });
 
 test('pytest: golden fixture links', () => assertGolden('pytest', ruleView(pack('pytest'))));
+
+test('process-spawn: `uvicorn server:app` and `python -m tool` resolve from the spawning file\'s directory first', () => {
+  const m = pack('process-spawn-nested');
+  const spawns = m.edges.filter(e => e.kind === 'spawn').map(e => `${e.from} -> ${e.to}`).sort();
+  assert.deepEqual(spawns, [
+    'evals.indexing.run:start_server -> evals.indexing.server:lifespan',
+    'evals.indexing.run:start_tool -> evals.tool.__main__:<main>',
+  ]);
+});

@@ -28,5 +28,10 @@ the parser saw was not extracted) — report it, do not edit the output. Show th
 rule link with its evidence, the mocks every test runs under, config profiles, and any
 entry that landed in the test group (suggest the `--group` override it prints).
 
+Config facts come only from git-tracked files; a value is kept only for a key a dispatch
+guard reads, and a secret-looking key or value is shown as `set (redacted)`. If the
+self-check reports calls into imports named like in-repo directories, say so: those
+calls are not linked.
+
 Only Python is mined; other languages are grouped and listed as "not mined yet".
 The code map's fields are described in [`FLOWS.md`](./FLOWS.md).

@@ -9,10 +9,12 @@
                          [--exclude p,...] [--lang python] [--config-root <dir>]
 
    Writes out/<name>/codemap.json and out/<name>/codemap.md. Never writes inside
-   the repo, never uses the network, never runs repo code.
+   the repo, never uses the network, never runs repo code. Config is read only from
+   git-tracked files; a value is kept only for a key a dispatch guard reads, and a
+   secret-looking one is shown only as set.
 
    Exit: 0 ok · 1 bad path, no supported files, or bad flags · 2 self-check failed
-   (a definition the parser saw was not extracted)
+   (a definition the parser saw was not extracted, or two collapsed into one symbol)
    ========================================================================== */
 import { readdirSync, readFileSync, lstatSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join, relative, extname, resolve, sep } from 'node:path';
@@ -20,7 +22,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { loadGrammars } from './lib/tree-sitter.mjs';
 import { PATH_RULES, DEFAULT_RULE, classifyFile, parseOverrides } from './lib/groups.mjs';
-import { newPythonModel, extractPythonFile, resolverFor, resolveCalls, pythonEntries } from './lang/python.mjs';
+import { newPythonModel, extractPythonFile, sourceRoots, resolverFor, resolveCalls, pythonEntries } from './lang/python.mjs';
 import { classifyDispatch } from './lang/python-config.mjs';
 import * as fastapi from './rules/fastapi.mjs';
 import * as celeryTaskiq from './rules/celery-taskiq.mjs';
@@ -34,6 +36,7 @@ import * as dotenv from './config/dotenv.mjs';
 import * as yamlLite from './config/yaml-lite.mjs';
 import * as tomlLite from './config/toml-lite.mjs';
 import * as json from './config/json.mjs';
+import { shownValue } from './config/redact.mjs';
 import { renderCodemap } from './codemap-md.mjs';
 
 const fail = (code, msg) => { console.error(`[mine] ${msg}`); process.exit(code); };
@@ -65,21 +68,29 @@ const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__
 const CODE_EXT = { '.py': 'python', '.ts': 'typescript', '.tsx': 'tsx', '.js': 'javascript', '.jsx': 'javascript', '.mjs': 'javascript',
   '.cjs': 'javascript', '.go': 'go', '.c': 'c', '.h': 'c', '.cc': 'cpp', '.cpp': 'cpp', '.cxx': 'cpp', '.hpp': 'cpp', '.hh': 'cpp' };
 const READERS = [['dotenv', dotenv], ['yaml-lite', yamlLite], ['toml-lite', tomlLite], ['json', json]];
+const PROJECT_FILES = /^(pyproject\.toml|setup\.cfg)$/;
 const excluded = rel => EXCLUDE.some(p => rel === p || rel.startsWith(p + '/'));
-function walk(root, dir, out) {
+function walk(root, dir, out, skip) {
   for (const name of readdirSync(dir).sort()) {
     if (SKIP_DIRS.has(name)) continue;
     const p = join(dir, name), rel = relative(root, p).split(sep).join('/'), st = lstatSync(p);
-    if (st.isSymbolicLink()) continue;
-    if (st.isDirectory()) { if (!name.startsWith('.')) walk(root, p, out); continue; }
+    if (st.isSymbolicLink() || skip(rel)) continue;
+    if (st.isDirectory()) { if (!name.startsWith('.')) walk(root, p, out, skip); continue; }
+    if (PROJECT_FILES.test(name)) out.projects.push(rel);
     const reader = READERS.find(([, r]) => r.matches(rel));
     if (reader && st.size < 512 * 1024) out.config.push({ rel, reader: reader[0] });
-    if (name.startsWith('.') || excluded(rel)) continue;
+    if (name.startsWith('.')) continue;
     if (CODE_EXT[extname(name)]) out.code.push(rel);
   }
   return out;
 }
-const { code, config } = walk(ROOT, ROOT, { code: [], config: [] });
+const newWalk = () => ({ code: [], config: [], projects: [] });
+// git-tracked files under a directory (relative to it); none when it is not in a git work tree
+const trackedFiles = root => {
+  try { return new Set(execFileSync('git', ['-c', 'core.fsmonitor=false', '-C', root, 'ls-files', '-z'], { stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 28 })
+    .toString().split('\0').filter(Boolean)); } catch { return new Set(); }
+};
+const { code, config, projects } = walk(ROOT, ROOT, newWalk(), excluded);
 const pyFiles = code.filter(f => CODE_EXT[extname(f)] === 'python');
 if (!pyFiles.length) fail(1, `no supported source files under ${ROOT} (supported: ${LANGS.join(', ')})`);
 
@@ -107,6 +118,7 @@ for (const rel of code) {
 }
 const parseMs = Date.now() - t0;
 const groupOfFile = new Map(files.map(f => [f.path, f.group]));
+py.sourceRoots = sourceRoots(py, projects.map(rel => ({ rel, text: readText(rel) })));
 
 /* ---------------- resolve: core rules, then framework packs ---------------- */
 fastapi.registerAliases(py);
@@ -137,14 +149,17 @@ pytest.directLinks(py, tests, fixtures, mocks);
 
 /* ---------------- config facts ---------------- */
 const configFiles = [], configKV = [];
+let untrackedConfig = 0;
 const readConfig = (root, rel, reader, group, label) => {
   let txt; try { txt = readFileSync(join(root, rel), 'utf8'); } catch { return; }
   const facts = READERS.find(([n]) => n === reader)[1].readFacts(txt);
   configFiles.push({ path: label, group, reader, facts: facts.length, sha256: sha(txt) });
   for (const kv of facts) configKV.push({ ...kv, file: label, group });
 };
-for (const c of config) readConfig(ROOT, c.rel, c.reader, classifyFile(c.rel, overrides, null).group, c.rel);
-for (const d of CONFIG_ROOTS) for (const c of walk(d, d, { code: [], config: [] }).config) readConfig(d, c.rel, c.reader, 'prod', `${d}/${c.rel}`);
+const readTracked = (root, cs, groupOf, labelOf) => { const tracked = trackedFiles(root);
+  for (const c of cs) if (tracked.has(c.rel)) readConfig(root, c.rel, c.reader, groupOf(c.rel), labelOf(c.rel)); else untrackedConfig++; };
+readTracked(ROOT, config, rel => classifyFile(rel, overrides, null).group, rel => rel);
+for (const d of CONFIG_ROOTS) readTracked(d, walk(d, d, newWalk(), () => false).config, () => 'prod', rel => `${d}/${rel}`);
 const factories = Object.fromEntries([...new Set(py.returns.map(r => r.fn))].map(f => [f, R.factoryReturns(f)])
   .filter(([, v]) => v.length > 1 || v.some(x => x.guards.length)));
 const guardParser = new Parser(); guardParser.setLanguage(grammars.python);
@@ -158,12 +173,21 @@ const FRAMEWORKS = ['flask', 'django', 'rq', 'dramatiq', 'huey', 'arq', 'tornado
 const withoutPack = FRAMEWORKS.filter(f => py.externalImports.has(f) && !KNOWN_PACKS.has(f)).map(f => ({ name: f, firstSeen: py.externalImports.get(f) }));
 const defLinesRaw = pyFiles.reduce((n, f) => n + (readText(f).match(/^[ \t]*(async[ \t]+def|def|class)[ \t]+[A-Za-z_]/gm) || []).length, 0);
 const inRepoCalls = py.callStats.resolved + py.unresolved.inRepo;
+// calls into an import the resolver called external although an in-repo directory has its name: a missed source root
+const pyDirs = new Map();
+for (const f of pyFiles) f.split('/').slice(0, -1).forEach((d, i, a) => (pyDirs.get(d) || pyDirs.set(d, new Set()).get(d)).add(a.slice(0, i + 1).join('/')));
+const likeRepoDirs = [...py.externalCalls].filter(([top]) => pyDirs.has(top)).sort()
+  .map(([name, calls]) => ({ name, calls, dirs: [...pyDirs.get(name)].sort() }));
+const likeRepoCalls = likeRepoDirs.reduce((n, x) => n + x.calls, 0);
+const definedSymbols = py.symbols.size - new Set(py.mains).size;
 const selfCheck = {
-  defNodes: py.defNodes, defsExtracted: py.defsVisited, defLinesRaw, symbols: py.symbols.size,
+  defNodes: py.defNodes, defsExtracted: py.defsVisited, defScopes: py.defScopes, defLinesRaw, symbols: py.symbols.size,
   filesWithErrors: files.filter(f => f.parseError).map(f => f.path),
   calls: py.callStats, unresolvedByOrigin: py.unresolved,
   inRepoMissRate: inRepoCalls ? Number((py.unresolved.inRepo / inRepoCalls).toFixed(4)) : 0,
-  ok: py.defsVisited === py.defNodes,
+  sourceRoots: py.sourceRoots.map(r => r.prefix.split('.').join('/')),
+  externalLikeRepoDirs: { calls: likeRepoCalls, rate: likeRepoCalls ? Number((likeRepoCalls / (inRepoCalls + likeRepoCalls)).toFixed(4)) : 0, names: likeRepoDirs },
+  ok: py.defsVisited === py.defNodes && definedSymbols >= py.defScopes,
 };
 
 /* ---------------- write ---------------- */
@@ -193,7 +217,10 @@ const codemap = {
   rules: { routes: entries.filter(e => e.kind === 'http').length, depends, taskiq: producers.links, registry: registryKeys, haystack: pipelines,
     pyHttp: httpCalls, spawn: spawns, callbacks: py.edges.filter(e => e.rule === 'py.callback').length },
   dispatchSites: py.dispatchSites, factories,
-  config: { files: configFiles, settingsFields: py.settingsFields, settingsProps: py.settingsProps, kv: configKV, profiles: dispatch.profiles, sites: dispatch.sites },
+  config: { files: configFiles, untracked: untrackedConfig,
+    settingsFields: py.settingsFields.map(f => ({ ...f, default: shownValue(f.alias || f.name, f.default) })), settingsProps: py.settingsProps,
+    kv: configKV.map(({ value, ...kv }) => dispatch.guardKeys.has(kv.key.toUpperCase()) ? { ...kv, value: shownValue(kv.key, value) } : kv),
+    profiles: dispatch.profiles, sites: dispatch.sites },
   frameworksWithoutPack: withoutPack,
   selfCheck,
 };
@@ -209,5 +236,5 @@ console.log(`[mine] ${symbols.length} symbols · ${py.edges.length} edges ${JSON
 console.log(`[mine] entries ${JSON.stringify(nk)} · Depends ${depends.length} · registry producers ${JSON.stringify(queueBy)} · haystack ${pipelines.length} · http ${httpCalls.filter(h => h.handler).length}/${httpCalls.length} · spawn ${spawns.length} · callbacks ${codemap.rules.callbacks}`);
 console.log(`[mine] tests ${ts.tests} (asserting ${ts.asserting}) · fixtures ${ts.fixtures} (autouse ${ts.autouse}) · fixture links ${ts.fixtureLinks} · mocks ${ts.mocks} (resolved ${ts.mocksResolved}, session-wide ${ts.sessionMocks}) · prod functions with a direct test link ${ts.prodFunctionsWithDirectLink}/${ts.prodFunctions}`);
 console.log(`[mine] config: ${dispatch.sites.length} factory dispatch sites · profiles ${dispatch.profiles.map(p => `${p.name} (${p.group})`).join(', ')}`);
-console.log(`[mine] self-check ${selfCheck.ok ? 'ok' : 'FAILED'}: ${selfCheck.defsExtracted}/${selfCheck.defNodes} definitions extracted · in-repo miss rate ${(selfCheck.inRepoMissRate * 100).toFixed(1)}% · wrote ${relative(process.cwd(), OUT) || '.'}/codemap.{json,md}`);
+console.log(`[mine] self-check ${selfCheck.ok ? 'ok' : 'FAILED'}: ${selfCheck.defsExtracted}/${selfCheck.defNodes} definitions extracted · ${definedSymbols} distinct symbols for ${selfCheck.defScopes} distinct definitions · source roots ${selfCheck.sourceRoots.join(', ') || 'none'} · external calls named like repo dirs ${likeRepoCalls} · in-repo miss rate ${(selfCheck.inRepoMissRate * 100).toFixed(1)}% · wrote ${relative(process.cwd(), OUT) || '.'}/codemap.{json,md}`);
 if (!selfCheck.ok) process.exit(2);
