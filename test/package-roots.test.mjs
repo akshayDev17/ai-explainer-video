@@ -5,7 +5,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { FIXTURES, mine, edgesFrom, short } from './helpers.mjs';
+import { cpSync, writeFileSync } from 'node:fs';
+import { FIXTURES, mine, edgesFrom, short, scratch, cleanup } from './helpers.mjs';
 
 const r = mine(join(FIXTURES, 'package-roots'));
 const m = r.codemap;
@@ -87,6 +88,19 @@ test('a package under another root never captures a declared dependency (integra
   assert.deepEqual(d.codemap.selfCheck.crossRootImports, [{ name: 'acme', root: 'plugins', calls: 1 }]);
   assert.deepEqual(d.codemap.selfCheck.ambiguousImports, [], 'integrations/stripe and vendor/stripe both claim the declared `stripe`: a library import, not a lost call');
   assert.doesNotMatch(d.md, /calls are not linked/);
+});
+
+test('a pyproject.toml that is not valid TOML still declares its dependencies and is named in the self-check', () => {
+  const dir = scratch(), repo = join(dir, 'repo');
+  cpSync(join(FIXTURES, 'package-roots-declared'), repo, { recursive: true });
+  writeFileSync(join(repo, 'pyproject.toml'), '[project]\nname = "shop"\nname = "shop"\ndependencies = [\n  "uvicorn[standard]>=0.2",\n  "httpx>=0.27",\n]\n');
+  const d = mine(repo);
+  cleanup(dir);
+  assert.equal(d.status, 0, d.stderr);
+  assert.deepEqual(edgesFrom(d.codemap, 'app.fetch:fetch'), [], '`httpx` is still declared, so clients/httpx does not capture it');
+  assert.deepEqual(d.codemap.selfCheck.dependencyFilesNotParsed, ['pyproject.toml']);
+  assert.match(d.md, /dependency files that are not valid TOML, their names read line by line\*\*: `pyproject\.toml`/);
+  assert.deepEqual(mine(join(FIXTURES, 'package-roots-declared')).codemap.selfCheck.dependencyFilesNotParsed, []);
 });
 
 test('a call reached through a re-export in another root\'s package __init__.py is reported as cross-root', () => {

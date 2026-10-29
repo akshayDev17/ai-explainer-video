@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { declaredDependencies } from '../skills/explainer-video-from-codebase/tools/lang/python-deps.mjs';
 import { parseToml } from '../skills/explainer-video-from-codebase/tools/lib/toml.mjs';
 
-const declared = (rel, text) => [...declaredDependencies([{ rel, text }])].sort();
+const declared = (rel, text) => [...declaredDependencies([{ rel, text }]).names].sort();
 const plain = v => JSON.parse(JSON.stringify(v));
 
 test('an extras specifier ahead of other entries does not end a multi-line dependencies array', () => {
@@ -53,8 +53,13 @@ test('Pipfile packages and dev-packages', () => {
     ['flask', 'flask_login', 'pytest']);
 });
 
-test('a malformed TOML document declares nothing and does not throw', () => {
-  assert.deepEqual(declared('pyproject.toml', '[project]\ndependencies = [\n "httpx",\n'), []);
+test('a TOML document the reader rejects is read line by line and reported, a `]` inside a string ending no array', () => {
+  const text = '[project]\nname = "x"\nname = "dup"\ndependencies = [\n "uvicorn[standard]>=0.2",\n \'httpx\', # ]\n "stripe",\n]\n\n[tool.ruff]\nselect = ["E"]\n';
+  const r = declaredDependencies([{ rel: 'svc/pyproject.toml', text }, { rel: 'requirements.txt', text: 'flask\n' }]);
+  assert.deepEqual([...r.names].sort(), ['flask', 'httpx', 'stripe', 'uvicorn']);
+  assert.deepEqual(r.unparsed, ['svc/pyproject.toml']);
+  assert.deepEqual(declaredDependencies([{ rel: 'Pipfile', text: '[packages]\nflask = "*"\nflask = "*"\n' }]), { names: new Set(['flask']), unparsed: ['Pipfile'] });
+  assert.deepEqual(declaredDependencies([{ rel: 'pyproject.toml', text: '[project]\ndependencies = ["httpx"]\n' }]).unparsed, []);
 });
 
 test('the TOML reader: dotted keys, arrays of tables, escapes, and errors', () => {

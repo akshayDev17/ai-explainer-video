@@ -37,7 +37,8 @@ plus the file, so with `backend/app/__init__.py` (and no `backend/__init__.py`) 
 When several roots claim a name, the one holding the importing file wins; otherwise the name stays external. A
 claim under a root that does not hold the importing file resolves across roots, unless the repo declares the
 top-level name as a dependency (requirements*.txt, pyproject.toml `[project]` / Poetry dependencies, setup.cfg
-`install_requires` / `extras_require`, Pipfile; case, `-` and `_` normalised): `integrations/stripe/` never
+`install_requires` / `extras_require`, Pipfile; case, `-` and `_` normalised; a pyproject.toml or Pipfile that is
+not valid TOML is read line by line instead and listed in `selfCheck.dependencyFilesNotParsed`): `integrations/stripe/` never
 captures a declared `stripe`, and a declared name several roots claim is a library import, never reported as
 ambiguous. A top-level name of the standard library never
 resolves to an in-repo loose module, namespace directory or nested package (`app/logging/` never captures
