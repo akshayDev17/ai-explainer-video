@@ -233,7 +233,8 @@ legend-click to toggle a stage, zoom/pan/download from the modebar. `timing.svg`
 no-JS fallback; `timing.csv`/`timing.md` carry the full per-video, per-attempt detail.
 
 **Grouping is automatic.** The plan already groups videos by module — the first path
-segment of a video's first source — so an 85-video series is really 17 modules. When the
+segment of a video's first source, or its `group` when the plan sets one (a code-flow plan groups
+by flow) — so an 85-video series is really 17 modules. When the
 ledger spans more than one module, the chart shows **one aggregate bar per module** and a
 click breaks that module down by video; a single-module series renders every video
 instead, since grouping it would be a pointless extra click. `--flat` forces the
@@ -791,7 +792,8 @@ node tools/stamp.mjs end --out out/<name> --video <NN> --stage 8
 }
 ```
 
-`form` ∈ `concept`, `diagram`, `code`, `refactor`, `catalogue`. `skip` and
+`form` ∈ `concept`, `diagram`, `code`, `refactor`, `catalogue`, unless the plan lists its own
+`forms` (a code-flow plan does: `overview`, `flow`, `core`). `skip` and
 `mergeInto` are mutually exclusive; `mergeInto` must target a live video (no
 chains). A missing `why` on either is a validation error.
 

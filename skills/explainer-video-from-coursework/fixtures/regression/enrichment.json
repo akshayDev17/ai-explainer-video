@@ -1,0 +1,7 @@
+{
+  "seriesNote": "two short modules from a systems course",
+  "videos": [
+    { "index": 1, "title": "Queues: delivery guarantees and backpressure", "form": "concept", "why": "prose about trade-offs, no code" },
+    { "index": 2, "title": "Caching: write policies and eviction", "form": "code", "why": "the read-through function is the centre of the video" }
+  ]
+}

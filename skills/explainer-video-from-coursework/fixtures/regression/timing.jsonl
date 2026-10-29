@@ -1,0 +1,5 @@
+{"video":"1","stage":"3","attempt":1,"seconds":41.2,"ended_at":"2026-10-20T10:00:00.000Z","note":null}
+{"video":"1","stage":"4","attempt":1,"seconds":12.5,"ended_at":"2026-10-20T10:01:00.000Z","note":null}
+{"video":"1","stage":"4","attempt":2,"seconds":10.1,"ended_at":"2026-10-20T10:02:00.000Z","note":"retry after a TTS timeout"}
+{"video":"2","stage":"3","attempt":1,"seconds":38.0,"ended_at":"2026-10-20T11:00:00.000Z","note":null}
+{"video":"2","stage":"5","attempt":1,"seconds":95.3,"ended_at":"2026-10-20T11:05:00.000Z","note":null}

@@ -3,6 +3,9 @@
 This file grows with the skill. Today it describes the stage 1 artifacts: `codemap.json`, written
 by `tools/mine.mjs`, with its readable twin `codemap.md`; `candidates.json`, written from it by
 `tools/propose.mjs`; and `ranking.json` and `ranking.md`, written from that by `tools/rank.mjs` (each schema 1).
+Then the stage 1b–1c artifacts: `flows.json`, the agent's series proposal; `flows.validated.json` and `flows.md`,
+written by `tools/apply-flows.mjs`; `flows.approved.json`, written by `tools/approve-flows.mjs`; and `plan.json`
+and `plan.md`, written by `tools/flow-plan.mjs`.
 
 `mine`, `propose` and `rank` are pure functions of their input and the tool versions: they never write
 inside the repo, never use the network and never run repo code. Two runs over the same input produce
@@ -193,3 +196,102 @@ tables.
 filtered by default (promotable in `flows.json`), the shared table, the continuations, the merged order, and for the
 top prod and eval rows their segment table, dispatch points with the config that selects them, and config-guarded
 branches.
+
+## `flows.json` (written by the agent)
+
+The series proposal. Every reason (`why`, `say`, `claim`) is at least three words and not a placeholder (`tbd`,
+`todo`, `…`). An unknown field is a problem, so a typo never passes silently.
+
+| Field | What it holds |
+|---|---|
+| `series[]` | `{flow \| core, why}` in video order: every flow and core defined below, once each |
+| `skipped[]` | `{entry, rank?, why}`: one entry each, never a glob; `rank` ("prod #6"), when given, must match the ranking |
+| `promote[]` | `{entry, why}`: a dev-group row brought into consideration; it then needs a decision like any other row |
+| `flows[]` | `{id, title, from, group?, hops, segments?, variants?, teach?, links?}`: `from` is an entry with a candidate; `group`, when given, is the entry's |
+| `cores[]` | `{id, title, hops, pinnedBy?, variants?, teach?, links?}`: shared code with no entry of its own; `pinnedBy` here is `{symbol, test, say, lines?, strength?}` |
+| `triage.excluded[]` | `{match, why}`: a glob (`*`, `?`) over entry ids and segment roots; it must match something |
+| `outOfRepo[]` | `{claim, evidence, selects?}`: context outside the repo, checked for shape only and printed as **unverified**; `selects` names the config sites the claim decides |
+| `codemap`, `candidates`, `trace` | accepted for the reader; the inputs are always the files beside `--candidates` |
+
+A hop is a symbol id or `{symbol, lines?, pinnedBy?, exercises?, uses?, break?}`: `lines` ("54-65,70") narrows the
+narrated lines inside the symbol's span; `pinnedBy[]` is `{test, say, lines?, strength?}`; `exercises` names the
+production flow an eval or dev hop drives; `uses` names the core a hop hands over to; `break` starts a new video.
+A flow's first hop is its `from`. `segments` is `{keep: [root], mention: [{root, say}], exclude: [{root, why}]}`.
+A variant is `{entry, why}`. `teach[]` is `{dispatch, say}` (a config site, a factory or a recorded dispatch site)
+or `{guard, say}` (`<symbol>@<line>` of a call under a config read). A declared link is `{from, to, kind, evidence}`
+whose evidence starts with `file:line` or `file:a-b` that exists in the repo.
+
+## `flows.validated.json` and `flows.md` (`apply-flows.mjs`)
+
+`apply-flows` exits 2 on any problem, writes `flows.md` with every problem, and removes a stale
+`flows.validated.json`, so nothing can approve or plan an invalid list. The checks:
+
+| Check | Rule |
+|---|---|
+| reasons | every series item, skip, variant, promotion, exclusion, mention and citation carries a real reason |
+| C1′ high-ranked rows | in each group, a row ranked at most 10 (prod) / 5 (eval) / 0 (dev), or the ranking's `explainTop` / `explainTopEval` when larger (a smaller one never lowers the floor), or at or above the lowest-ranked row the series includes, is a series flow's `from`, a variant or a skip, each with a reason; an exclusion glob does not count |
+| C1 entry triage | every non-test entry is a flow's `from`, a continuation of one, a variant, skipped, excluded, or a dev row (filtered unless promoted; a dev continuation is filtered with its parent). Eval rows are never implicit |
+| C2 segment triage | every segment of a kept candidate (a series flow's `from`) is kept, mentioned with a `say`, or excluded (in `segments.exclude` or by a glob) |
+| C3 hop fidelity | each hop is within 4 calls of the previous hop, or of the nearest earlier hop that reaches it (back up the narrated stack): a path in the flow's candidate walk (or a variant's; for a core, every series flow's), returning up the tree then calling down, never down then up; or a directed path over recorded edges of any kind, never into test code; or a declared link. A hop that is a variant's entry starts that variant's chain |
+| dispatch | a hop on a config alternative that no profile selects is refused unless an `outOfRepo` claim's `selects` names its site (then printed as selected only by an unverified claim); a hop reached through a CHA or dispatch edge must be in a walk tree, where the receiver resolved it |
+| C3′ test fidelity | a cited test has a direct link to the hop and does not mock it; a test that only reaches the hop may be cited only with `"strength": "reachable"` |
+| groups | no hop is test-group code; an eval or dev flow's hops are not production code, and its `exercises` hop must call, cross into or declare a link into that flow's code |
+| shape | no unknown field, unique ids, real titles (not slugs, ellipses or "Part N"), a flow's `group`, when given, is its entry's, `uses` names a core with no cycle, a `lines` range inside its span, `teach` names a recorded point |
+
+`flows.validated.json` (schema 1, `ok: true`) holds everything `flow-plan` needs: `inputs` (the flows, candidates,
+code map and ranking files with their sha256), `params` (`explainTop`, `explainTopEval`: the effective K, never below 10 and 5; `maxPath`), `series[]`
+(`kind`, `id`, `title`, `why`, `rank`), `flows[]` and `cores[]` with every hop resolved (`symbol`, `name`, `file`,
+`start`, `end`, `sha256`, `lines`, `connection` (`how`: entry, start, variant, candidate, edges or link; `path`; `steps[{from, to, kind, rule, evidence, down}]`),
+`crossing`, `break`, `uses`, `exercises`, `selectedBy`,
+`pinnedBy[{test, file, line, end, asserts, assertLines, lines, say, strength, via, observed}]`), segments with their
+decision, variants with their rank, `teach[{dispatch, guard, say, hop, alternatives}]` (the hop that holds the
+point, else its nearest narrated ancestor), `links`; `skipped`, `promote`, `excluded` (with what each rule matched);
+`triage` (every entry's status and the high-ranked rows per group); `outOfRepo` (`verified: false`); and `tests`
+(`sessionMocks`, `autouseMocks`: mocks every test under a conftest runs with).
+
+`flows.md` opens with the **approval table**: the series with group, rank, size and reason; the skipped rows; the
+variants; the promoted and dev rows; and the estimate from `flow-plan`'s cost model. Then the C1′ and C1
+accounting, every flow and core with every hop, how it is reached, the rule and evidence of each edge and the cited
+tests with their assertion lines, the segments, taught branches and declared links, the hops kept by two or more
+flows (core candidates), the out-of-repo claims and the test configuration. Two runs give byte-identical outputs.
+
+## `flows.approved.json` (`approve-flows.mjs`)
+
+`{schema, tool, flowsFile, flowsHash, series[{kind, id, title, why}], approvedBy, at, note}`: `flowsHash` is the
+sha256 of `flows.validated.json`. It is written only after the user's explicit yes (the skill's rule: code cannot
+prove a human said yes). `approve-flows` exits 2 when the validated list is missing, did not pass, or `flows.json`
+changed since it was validated.
+
+## `plan.json` and `plan.md` (`flow-plan.mjs`)
+
+`flow-plan` refuses (exit 5) unless `flows.approved.json` carries the current `flows.validated.json`'s sha256 and
+`flows.json` still matches what was validated: no plan, so no script, exists before the user approves the list.
+
+The plan has the coursework plan's shape, so `apply-enrichment`, `script-check`, `timing-report` and the per-video
+stages read it unchanged: `generatedFrom`, `kind: "codebase"`, `model` (below), `forms: ["overview", "flow",
+"core"]` (what `apply-enrichment` accepts), `approval` (`by`, `at`, `note`, `flowsHash`), `inputs`, `totals`
+(`videos`, `seriesMinutes`, `longestVideoMin`, `capMinutes`, `hops`, `flows`, `cores`), `coverage[]` (every hop:
+`item`, `hop`, `symbol`, `section`, `video`), `orphans`, `capViolations`, `outOfRepo`, `tests`, and `videos[]`:
+`index`, `title` (a placeholder for `/enrich`), `form`, `group` (the flow or core id; `timing-report` groups by it),
+`flowGroup` (prod or eval), `words`, `seconds`, `minutes`, `formWhy` (the series reason), `sources` (the hops'
+files), `artefacts` (the cited tests' files), `evidence`, `teach`, `sections` (`"<file> :: <symbol> @L<start>"`,
+what a script's `covers` names) and `sectionSpans` (each hop's span, sha256, narrated lines and `pinnedBy`).
+
+Videos: one `overview` first (its sections are the series items), then each series item in order. A hop with
+`break` starts a new video; hops pack greedily under `--max-min` (25); on overflow a video splits at its latest
+crossing, else at the overflowing hop; a hop is never split and two items are never glued; a piece under 2.5
+minutes merges with a neighbour of the same item when the two fit (never across a `break`). C4: every kept hop is
+assigned to exactly one video; an orphan or a video over the cap exits 2. Re-planning when `plan.enriched.json`
+exists and the tree, candidates, flows, approval or cap changed exits 4 unless `--force`.
+
+The cost model (`lib/decompose.mjs`), every constant but WPM and EXPANSION (coursework's measured `model.mjs`)
+uncalibrated until the pilot:
+
+```
+words   = FRAME 150 + Σ hops (HOP_BASE 60 + WPL 8 × narrated) + crossings × BOUNDARY 60
+        + taught branches × BRANCH 80 + min(3, cited tests) × TEST 30          (the overview: 1000 words)
+narrated = count(hop.lines) or min(22, ceil(0.5 × span lines))
+minutes  = words / 153 × 1.10
+```
+
+A crossing is a hop reached through a queue, HTTP or spawn edge, or an eval hop that `exercises` a production flow.

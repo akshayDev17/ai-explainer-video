@@ -55,7 +55,7 @@ if (existsSync(planPath)) {
     for (const v of (plan.videos || [])) {
       if (v.index == null) continue;
       titles[String(v.index)] = v.title;
-      planModule[String(v.index)] = ((v.sources && v.sources[0]) || '').split('/')[0];
+      planModule[String(v.index)] = v.group || ((v.sources && v.sources[0]) || '').split('/')[0];   // a code-flow plan groups by flow
     }
   } catch { /* plan unreadable — fall back to the raw key and a single module */ }
 }
