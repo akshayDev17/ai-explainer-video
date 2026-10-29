@@ -120,7 +120,8 @@ JWT, a provider token, a long random string) is written as `set (redacted)` ever
 `ok` is false — and `mine` exits 2 — when the parser saw a definition the extractor did not record
 (`defsExtracted` < `defNodes`), or when two definitions in different scopes collapsed into one symbol
 (fewer non-`main` symbols than `defScopes`, the distinct qualified names the parser saw; a definition repeated in
-both branches of an `if` / `try` is one). Also reported: files with syntax errors, resolved calls, unresolved calls
+both branches of an `if` / `try` is one). Also reported: files with syntax errors, dependency files that are not
+valid TOML (`dependencyFilesNotParsed`, above), resolved calls, unresolved calls
 by where their head name comes from (`inRepo`, `external`, `builtin`, `local`), and the in-repo miss rate:
 calls whose head is an in-repo name but whose target could not be resolved. `packageRoots` lists the package roots
 below the repo root (above); `crossRootImports` the calls resolved through a root that does not hold the importing
