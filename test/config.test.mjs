@@ -4,7 +4,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { FIXTURES, mine, gitRepo, git, cleanup } from './helpers.mjs';
+import { FIXTURES, mine, gitRepo, git, cleanup, scratch } from './helpers.mjs';
 
 const repo = gitRepo(join(FIXTURES, 'config'));
 after(() => cleanup(dirname(repo)));
@@ -12,7 +12,7 @@ mkdirSync(join(repo, 'deploy'));
 writeFileSync(join(repo, 'deploy', 'prod.env'),
   'API_TOKEN=tok-not-a-real-one\nDATABASE_URL=postgres://app:hunter2@db:5432/app\nOPENAI_API_KEY=sk-test-000000000000000000\nWORKERS=4\n');
 git(repo, 'add', '-A');
-writeFileSync(join(repo, '.env'), 'BACKEND_MODE=local-only\n');   // untracked, as a real .env is
+writeFileSync(join(repo, '.env'), 'BACKEND_MODE=local-only\nOPENAI_API_KEY=sk-real-secret\n');   // untracked, as a real .env is
 const r = mine(repo);
 const m = r.codemap;
 const kv = (file, key) => m.config.kv.find(x => x.file === file && x.key === key);
@@ -44,7 +44,7 @@ test('a secret key and a credential-shaped value read by a guard are shown only 
   assert.equal(site('svc.factories:create_client').decidedByProfile['deploy/prod.env'], 'svc.factories:SignedClient');
   assert.equal(site('svc.factories:create_store').decidedByProfile['deploy/prod.env'], 'svc.factories:PostgresStore');
   assert.match(r.md, /deploy\/prod\.env:1=set \(redacted\)/);
-  for (const secret of ['tok-not-a-real-one', 'hunter2', 'sk-test-']) {
+  for (const secret of ['tok-not-a-real-one', 'hunter2', 'sk-test-', 'sk-real-secret', 'local-only']) {
     assert.equal(JSON.stringify(m).includes(secret), false, `codemap.json leaks ${secret}`);
     assert.equal(r.md.includes(secret), false, `codemap.md leaks ${secret}`);
   }
@@ -55,4 +55,17 @@ test('--exclude keeps an excluded path\'s config out of the code map', () => {
   assert.equal(x.status, 0, x.stderr);
   assert.deepEqual(x.codemap.config.files.map(f => f.path), ['.env.example']);
   assert.equal(x.codemap.config.kv.some(k => k.file.startsWith('deploy/')), false);
+});
+
+test('a directory outside a git work tree has no config read, and the code map and stdout say why', () => {
+  const dir = scratch();
+  mkdirSync(join(dir, 'svc'));
+  writeFileSync(join(dir, 'svc', 'app.py'), 'def run():\n    return 1\n');
+  writeFileSync(join(dir, '.env'), 'OPENAI_API_KEY=sk-real-secret\n');
+  const x = mine(dir);
+  cleanup(dir);
+  assert.equal(x.status, 0, x.stderr);
+  assert.deepEqual([x.codemap.config.files, x.codemap.config.kv, x.codemap.config.notGitWorkTree], [[], [], [dir]]);
+  assert.match(x.stdout, /config not read from .*: not a git work tree, so no config file can be proven tracked/);
+  assert.match(x.md, /\*\*Config not read from `[^`]+`: not a git work tree, so no config file can be proven tracked\.\*\*/);
 });

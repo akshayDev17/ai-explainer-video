@@ -85,10 +85,10 @@ function walk(root, dir, out, skip) {
   return out;
 }
 const newWalk = () => ({ code: [], config: [], projects: [] });
-// git-tracked files under a directory (relative to it); none when it is not in a git work tree
+// git-tracked files under a directory (relative to it); null when it is not in a git work tree
 const trackedFiles = root => {
   try { return new Set(execFileSync('git', ['-c', 'core.fsmonitor=false', '-C', root, 'ls-files', '-z'], { stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 28 })
-    .toString().split('\0').filter(Boolean)); } catch { return new Set(); }
+    .toString().split('\0').filter(Boolean)); } catch { return null; }
 };
 const { code, config, projects } = walk(ROOT, ROOT, newWalk(), excluded);
 const pyFiles = code.filter(f => CODE_EXT[extname(f)] === 'python');
@@ -150,6 +150,7 @@ pytest.directLinks(py, tests, fixtures, mocks);
 /* ---------------- config facts ---------------- */
 const configFiles = [], configKV = [];
 let untrackedConfig = 0;
+const notGitWorkTree = [];
 const readConfig = (root, rel, reader, group, label) => {
   let txt; try { txt = readFileSync(join(root, rel), 'utf8'); } catch { return; }
   const facts = READERS.find(([n]) => n === reader)[1].readFacts(txt);
@@ -157,6 +158,7 @@ const readConfig = (root, rel, reader, group, label) => {
   for (const kv of facts) configKV.push({ ...kv, file: label, group });
 };
 const readTracked = (root, cs, groupOf, labelOf) => { const tracked = trackedFiles(root);
+  if (!tracked) { notGitWorkTree.push(root); return; }
   for (const c of cs) if (tracked.has(c.rel)) readConfig(root, c.rel, c.reader, groupOf(c.rel), labelOf(c.rel)); else untrackedConfig++; };
 readTracked(ROOT, config, rel => classifyFile(rel, overrides, null).group, rel => rel);
 for (const d of CONFIG_ROOTS) readTracked(d, walk(d, d, newWalk(), () => false).config, () => 'prod', rel => `${d}/${rel}`);
@@ -217,7 +219,7 @@ const codemap = {
   rules: { routes: entries.filter(e => e.kind === 'http').length, depends, taskiq: producers.links, registry: registryKeys, haystack: pipelines,
     pyHttp: httpCalls, spawn: spawns, callbacks: py.edges.filter(e => e.rule === 'py.callback').length },
   dispatchSites: py.dispatchSites, factories,
-  config: { files: configFiles, untracked: untrackedConfig,
+  config: { files: configFiles, untracked: untrackedConfig, notGitWorkTree,
     settingsFields: py.settingsFields.map(f => ({ ...f, default: shownValue(f.alias || f.name, f.default) })), settingsProps: py.settingsProps,
     kv: configKV.map(({ value, ...kv }) => dispatch.guardKeys.has(kv.key.toUpperCase()) ? { ...kv, value: shownValue(kv.key, value) } : kv),
     profiles: dispatch.profiles, sites: dispatch.sites },
@@ -235,6 +237,7 @@ console.log(`[mine] files by group ${JSON.stringify(codemap.groups.files)} · en
 console.log(`[mine] ${symbols.length} symbols · ${py.edges.length} edges ${JSON.stringify(ek)}`);
 console.log(`[mine] entries ${JSON.stringify(nk)} · Depends ${depends.length} · registry producers ${JSON.stringify(queueBy)} · haystack ${pipelines.length} · http ${httpCalls.filter(h => h.handler).length}/${httpCalls.length} · spawn ${spawns.length} · callbacks ${codemap.rules.callbacks}`);
 console.log(`[mine] tests ${ts.tests} (asserting ${ts.asserting}) · fixtures ${ts.fixtures} (autouse ${ts.autouse}) · fixture links ${ts.fixtureLinks} · mocks ${ts.mocks} (resolved ${ts.mocksResolved}, session-wide ${ts.sessionMocks}) · prod functions with a direct test link ${ts.prodFunctionsWithDirectLink}/${ts.prodFunctions}`);
+for (const d of notGitWorkTree) console.log(`[mine] config not read from ${d}: not a git work tree, so no config file can be proven tracked`);
 console.log(`[mine] config: ${dispatch.sites.length} factory dispatch sites · profiles ${dispatch.profiles.map(p => `${p.name} (${p.group})`).join(', ')}`);
 console.log(`[mine] self-check ${selfCheck.ok ? 'ok' : 'FAILED'}: ${selfCheck.defsExtracted}/${selfCheck.defNodes} definitions extracted · ${definedSymbols} distinct symbols for ${selfCheck.defScopes} distinct definitions · source roots ${selfCheck.sourceRoots.join(', ') || 'none'} · external calls named like repo dirs ${likeRepoCalls} · in-repo miss rate ${(selfCheck.inRepoMissRate * 100).toFixed(1)}% · wrote ${relative(process.cwd(), OUT) || '.'}/codemap.{json,md}`);
 if (!selfCheck.ok) process.exit(2);

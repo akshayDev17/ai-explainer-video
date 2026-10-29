@@ -312,11 +312,13 @@ const dotted = dir => dir.split('/').filter(x => x && x !== '.').join('.');
    pyproject.toml or setup.cfg and the package dirs it names (`where`, `from`, `package-dir`, `pythonpath`), applying to
    modules under that directory; and the parent of an in-repo package that an absolute import from inside
    that parent names while the repo root holds no such package. That second kind needs proof: some import there
-   names a submodule the package has (`app.x`, `from app import x`), none names what the package lacks, and the
-   package never does a bare `import <its name>` (a `redis/` wrapper that does `import redis` wraps the library).
+   names a submodule the package has (`app.x`, `from app import x`), no `from <name> import n` names what the package
+   lacks (a submodule, def, class, module-level assignment or re-export of its __init__.py), and the package never
+   does a bare `import <its name>` (a `redis/` wrapper that does `import redis` wraps the library).
    Longest prefix first. */
 export function sourceRoots(py, projects) {
   const pkgs = packagesOf(py), roots = new Map();
+  const assigned = new Map(); for (const a of py.moduleAssigns) (assigned.get(a.module) || assigned.set(a.module, new Set()).get(a.module)).add(a.name);
   const add = (prefix, scope) => { if (prefix && pkgs.has(prefix) && !roots.has(prefix)) roots.set(prefix, { prefix, scope }); };
   for (const { rel, text } of projects) {
     const dir = dotted(rel.split('/').slice(0, -1).join('/'));
@@ -329,9 +331,9 @@ export function sourceRoots(py, projects) {
     for (const p of pkgs) if (p.endsWith('.' + top)) {
       const root = p.slice(0, -top.length - 1), init = py.modules.get(p);
       const has = path => pkgs.has(`${root}.${path}`) || py.modules.has(`${root}.${path}`);
-      const provides = n => init?.defs.has(n) || (init?.imports.has(n) && (init.imports.get(n).from ?? init.imports.get(n).module) !== top);
+      const provides = n => init?.defs.has(n) || assigned.get(p)?.has(n) || (init?.imports.has(n) && (init.imports.get(n).from ?? init.imports.get(n).module) !== top);
       const proves = u => u.path !== top ? has(u.path) : (u.names || []).some(n => has(`${top}.${n}`));
-      const denies = u => u.path !== top ? !has(u.path) : (u.names || []).some(n => !has(`${top}.${n}`) && !provides(n));
+      const denies = u => u.path === top && (u.names || []).some(n => !has(`${top}.${n}`) && !provides(n));
       const under = uses.filter(u => u.in.startsWith(root + '.'));
       const wrapsLibrary = under.some(u => (u.in === p || u.in.startsWith(p + '.')) && u.path === top && !u.names);
       if (under.some(proves) && !under.some(denies) && !wrapsLibrary) add(root, root);

@@ -76,6 +76,7 @@ export function renderCodemap(m) {
   out.push('### Tests per file', '', table(['file', 'tests', 'direct links'], [...perFile].map(([f, x]) => [`\`${f}\``, x.n, x.direct])), '');
 
   out.push('## Config', '', `${m.config.settingsFields.length} settings fields · ${m.config.settingsProps.length} settings properties · ${m.config.kv.length} config facts in ${m.config.files.length} git-tracked files · ${m.config.untracked} untracked config files not read`, '',
+    ...m.config.notGitWorkTree.map(d => `**Config not read from \`${d}\`: not a git work tree, so no config file can be proven tracked.**`), ...(m.config.notGitWorkTree.length ? [''] : []),
     'A value is kept only for a key a dispatch guard reads; a secret-looking key or value is shown as `set (redacted)`.', '',
     table(['config file', 'group', 'reader', 'facts'], m.config.files.map(f => [`\`${f.path}\``, f.group, f.reader, f.facts])), '',
     '### Profiles', '', table(['profile', 'group', 'keys a guard reads'], m.config.profiles.map(p => [p.name, p.group, p.keys.join(', ')])), '',

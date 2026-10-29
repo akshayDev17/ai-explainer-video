@@ -22,7 +22,7 @@ byte-identical output (timings go to stdout only).
 | `tests[]`, `fixtures[]`, `fixtureBindings[]`, `mocks[]`, `testSummary` | below |
 | `rules` | per-pack records: Depends links, queue producers, registry tables (with dropped constructors), Haystack pipelines, HTTP client calls (linked or not), spawns, callback count |
 | `dispatchSites[]`, `factories` | every narrowed or CHA dispatch point; every function that can return two or more classes, with branch guards |
-| `config` | git-tracked config files (`group`, `reader`, fact count) and the number of `untracked` ones not read, settings fields and properties, every fact (`key`, `file:line`, and `value` only for a key a dispatch guard reads), profiles and classified dispatch sites (below) |
+| `config` | git-tracked config files (`group`, `reader`, fact count), the number of `untracked` ones not read, and `notGitWorkTree` (the mined or `--config-root` directories outside a git work tree, whose config is not read at all), settings fields and properties, every fact (`key`, `file:line`, and `value` only for a key a dispatch guard reads), profiles and classified dispatch sites (below) |
 | `frameworksWithoutPack[]` | known frameworks the repo imports that no rule pack covers: their wiring is not linked |
 | `selfCheck` | below |
 
@@ -110,7 +110,7 @@ both branches of an `if` / `try` is one). Also reported: files with syntax error
 by where their head name comes from (`inRepo`, `external`, `builtin`, `local`), and the in-repo miss rate:
 calls whose head is an in-repo name but whose target could not be resolved. `sourceRoots` lists the Python
 source roots found (a pyproject.toml / setup.cfg directory and the package dirs it names; the parent of an
-in-repo package imported by absolute name from inside it, once an import there names one of its submodules, none
-names what it lacks, and it never does a bare `import <its own name>` — a wrapper package named after a library is no root). `externalLikeRepoDirs` counts calls into imports
+in-repo package imported by absolute name from inside it, once an import there names one of its submodules, no
+`from <name> import n` names what it lacks, and it never does a bare `import <its own name>` — a wrapper package named after a library is no root). `externalLikeRepoDirs` counts calls into imports
 that resolved as external although an in-repo directory has their name, with their `rate` among in-repo calls:
 a high rate means a source root was missed and those calls are not linked.

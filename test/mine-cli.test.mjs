@@ -67,7 +67,7 @@ test('--exclude skips a path; --config-root adds config facts from outside the r
 });
 
 test('the self-check passes on every fixture and reports unresolved calls by origin', () => {
-  for (const dir of ['resolver', 'polyglot', 'rules/fastapi', 'rules/pytest', 'nested-classes', 'source-roots', 'source-roots-wrapper', 'package-imports']) {
+  for (const dir of ['resolver', 'polyglot', 'rules/fastapi', 'rules/pytest', 'nested-classes', 'source-roots', 'source-roots-wrapper', 'source-roots-flask', 'package-imports']) {
     const { status, codemap } = mine(join(FIXTURES, dir));
     assert.equal(status, 0, dir);
     assert.equal(codemap.selfCheck.ok, true, dir);
