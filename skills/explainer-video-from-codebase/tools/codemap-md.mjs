@@ -20,9 +20,9 @@ export function renderCodemap(m) {
   out.push('## Self-check', '',
     `- **${sc.ok ? 'ok' : 'FAILED'}**: ${sc.defsExtracted} of ${sc.defNodes} parsed definitions extracted (${sc.defLinesRaw} \`def\`/\`class\` lines by regex) · ${sc.defScopes} distinct definitions, ${sc.symbols} symbols`,
     `- calls: ${sc.calls.resolved} resolved · unresolved by origin ${JSON.stringify(sc.unresolvedByOrigin)} · in-repo miss rate ${(sc.inRepoMissRate * 100).toFixed(1)}%`,
-    `- Python source roots besides the repo root: ${sc.sourceRoots.length ? sc.sourceRoots.map(r => `\`${r}/\``).join(', ') : 'none'}`,
-    ...(sc.externalLikeRepoDirs.calls ? [`- **${sc.externalLikeRepoDirs.calls} calls (${(sc.externalLikeRepoDirs.rate * 100).toFixed(1)}%) go to imports resolved as external although an in-repo directory has their name**: ` +
-      sc.externalLikeRepoDirs.names.map(x => `\`${x.name}\` ${x.calls} (${x.dirs.map(d => `\`${d}/\``).join(', ')})`).join(', ') + ' — if these are in-repo, their module was not found (a missed source root, or an excluded file) and these calls are not linked'] : []),
+    `- Python package roots below the repo root: ${sc.packageRoots.length ? sc.packageRoots.map(r => `\`${r}/\``).join(', ') : 'none'}`,
+    ...(sc.externalLikeRepoDirs.calls ? [`- **${sc.externalLikeRepoDirs.calls} calls (${(sc.externalLikeRepoDirs.rate * 100).toFixed(1)}%) go to imports resolved as external although an in-repo directory with no \`__init__.py\` has their name**: ` +
+      sc.externalLikeRepoDirs.names.map(x => `\`${x.name}\` ${x.calls} (${x.dirs.map(d => `\`${d}/\``).join(', ')})`).join(', ') + ' — if these are in-repo namespace packages, these calls are not linked'] : []),
     `- files with syntax errors: ${sc.filesWithErrors.length ? sc.filesWithErrors.map(f => `\`${f}\``).join(', ') : 'none'}`, '');
 
   out.push('## Groups', '', 'Rules, first match wins (a `--group` override wins over all of them):', '', ...m.groups.rules.map((r, i) => `${i + 1}. ${r}`), '',

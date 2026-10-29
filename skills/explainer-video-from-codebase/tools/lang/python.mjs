@@ -9,14 +9,13 @@
    attribute by the method's returns (B19), a callable or coroutine passed as an argument is linked
    from the callee that runs it (B17), and a call inside an `except` is labelled "on failure". */
 import { dirname } from 'node:path';
+import { STDLIB } from './python-stdlib.mjs';
 
 export function newPythonModel() {
   return {
     symbols: new Map(), classes: new Map(), modules: new Map(),
     rawCalls: [], decorated: [], dictPairs: [], returns: [], mains: [], annotParams: [], paramDefaults: [], moduleAssigns: [],
     fnAssigns: new Map(), fnAlias: new Map(), fnLists: new Map(), settingsFields: [], settingsProps: [], externalImports: new Map(),
-    absImports: new Map(),    // top-level name of an absolute import -> [{ in, path, names }]: who imports what from it
-    sourceRoots: [],          // { prefix, scope }: dotted dirs an absolute import is also resolved against (sourceRoots())
     uses: new Map(),          // fn -> { called, awaited, passed }: name -> first line (how a callee runs what it was handed)
     typeAliases: new Map(),   // alias symbol -> { type, provider, module, imports }: filled by rule packs before resolveCalls
     edges: [], dispatchSites: [], callStats: { resolved: 0, unresolvedName: 0, unresolvedAttr: 0 },
@@ -64,8 +63,7 @@ export function extractPythonFile(py, rel, root, group, text) {
     const base = pkg.split('.').slice(0, Math.max(0, pkg.split('.').length - (dots - 1)));
     return [...base, ...(rest ? [rest] : [])].filter(Boolean).join('.');
   };
-  const noteExternal = (name, rel_, names = null) => { const top = name.split('.')[0]; if (!py.externalImports.has(top)) py.externalImports.set(top, rel_);
-    (py.absImports.get(top) || py.absImports.set(top, []).get(top)).push({ in: module, path: name, names }); };
+  const noteExternal = (name, rel_) => { const top = name.split('.')[0]; if (!py.externalImports.has(top)) py.externalImports.set(top, rel_); };
   function addImports(node, table) {
     if (node.type === 'import_statement') {
       for (const c of node.namedChildren) {
@@ -75,7 +73,7 @@ export function extractPythonFile(py, rel, root, group, text) {
     } else if (node.type === 'import_from_statement') {
       const mn = node.childForFieldName('module_name');
       const from = mn.type === 'relative_import' ? absImport(mn) : mn.text;
-      if (mn.type !== 'relative_import') noteExternal(from, rel, node.childrenForFieldName('name').map(c => (c.type === 'aliased_import' ? c.childForFieldName('name') : c).text));
+      if (mn.type !== 'relative_import') noteExternal(from, rel);
       for (const c of node.childrenForFieldName('name')) {
         if (c.type === 'dotted_name') table.set(c.text, { from, name: c.text, in: module });
         if (c.type === 'aliased_import') table.set(c.childForFieldName('alias').text, { from, name: c.childForFieldName('name').text, in: module });
@@ -297,7 +295,7 @@ export function extractPythonFile(py, rel, root, group, text) {
   visit(root, { imports: M.imports, fn: null, cls: null, inClass: false, locals: new Map(), types: new Map(), guards: [], onFailure: null });
 }
 
-/* ---------------- source roots ---------------- */
+/* ---------------- package roots ---------------- */
 
 const packagesOf = py => {   // every in-repo package: a directory holding modules, or an __init__.py
   const out = new Set();
@@ -305,63 +303,55 @@ const packagesOf = py => {   // every in-repo package: a directory holding modul
     if (M.file.endsWith('__init__.py')) out.add(k); }
   return out;
 };
-const dotted = dir => dir.split('/').filter(x => x && x !== '.').join('.');
+const initDirsOf = py => new Set([...py.modules.values()].filter(M => M.file.endsWith('__init__.py')).map(M => dirname(M.file)));
 
-/* A Python source root is a directory an absolute import is resolved against besides the repo root, so a
-   backend/ that imports itself as `app.*` resolves into backend/app. Two sources: the directory of a
-   pyproject.toml or setup.cfg and the package dirs it names (`where`, `from`, `package-dir`, `pythonpath`), applying to
-   modules under that directory; and the parent of an in-repo package that an absolute import from inside
-   that parent names while the repo root holds no such package. That second kind needs proof: some import there
-   names a submodule the package has (`app.x`, `from app import x`), no `from <name> import n` names what the package
-   lacks (a submodule, def, class, module-level assignment or re-export of its __init__.py), and the package never
-   does a bare `import <its name>` (a `redis/` wrapper that does `import redis` wraps the library).
-   Longest prefix first. */
-export function sourceRoots(py, projects) {
-  const pkgs = packagesOf(py), roots = new Map();
-  const assigned = new Map(); for (const a of py.moduleAssigns) (assigned.get(a.module) || assigned.set(a.module, new Set()).get(a.module)).add(a.name);
-  const add = (prefix, scope) => { if (prefix && pkgs.has(prefix) && !roots.has(prefix)) roots.set(prefix, { prefix, scope }); };
-  for (const { rel, text } of projects) {
-    const dir = dotted(rel.split('/').slice(0, -1).join('/'));
-    for (const m of text.matchAll(/\b(?:where|from|package[-_]dir|pythonpath)\s*=\s*([^\n]*)/g))
-      for (const [v] of m[1].matchAll(/[A-Za-z_][\w./-]*/g)) if (!/^(include|from|where|true|false)$/.test(v)) add([dir, dotted(v)].filter(Boolean).join('.'), dir);
-    add(dir, dir);
+/* Modules are named from the repo root; an absolute import is also resolved the way Python finds it from a package
+   root below it. A file's package root is the top of the contiguous run of ancestor directories holding an
+   __init__.py, and its dotted name there is that run plus the file: `backend/app/x.py`, with `backend/app/__init__.py`
+   and no `backend/__init__.py`, is also `app.x`. A dotted name resolves only when exactly one file claims it, and
+   never when its top-level name is a standard-library module (an in-repo `logging/` never captures `import logging`).
+   Returns the unique names and the package roots (the directories those runs sit in). */
+export function packageAliases(py) {
+  const initDirs = initDirsOf(py), claims = new Map(), roots = new Set();
+  for (const [key, M] of py.modules) {
+    const dirs = M.file.split('/').slice(0, -1);
+    let k = 0; while (k < dirs.length && initDirs.has(dirs.slice(0, dirs.length - k).join('/'))) k++;
+    const root = dirs.slice(0, dirs.length - k);
+    if (!k || !root.length) continue;
+    const alias = key.slice(root.join('.').length + 1);
+    if (STDLIB.has(alias.split('.')[0])) continue;
+    (claims.get(alias) || claims.set(alias, new Set()).get(alias)).add(key);
+    roots.add(root.join('/'));
   }
-  for (const [top, uses] of py.absImports) {
-    if (pkgs.has(top) || py.modules.has(top)) continue;
-    for (const p of pkgs) if (p.endsWith('.' + top)) {
-      const root = p.slice(0, -top.length - 1), init = py.modules.get(p);
-      const has = path => pkgs.has(`${root}.${path}`) || py.modules.has(`${root}.${path}`);
-      const provides = n => init?.defs.has(n) || assigned.get(p)?.has(n) || (init?.imports.has(n) && (init.imports.get(n).from ?? init.imports.get(n).module) !== top);
-      const proves = u => u.path !== top ? has(u.path) : (u.names || []).some(n => has(`${top}.${n}`));
-      const denies = u => u.path === top && (u.names || []).some(n => !has(`${top}.${n}`) && !provides(n));
-      const under = uses.filter(u => u.in.startsWith(root + '.'));
-      const wrapsLibrary = under.some(u => (u.in === p || u.in.startsWith(p + '.')) && u.path === top && !u.names);
-      if (under.some(proves) && !under.some(denies) && !wrapsLibrary) add(root, root);
-    }
-  }
-  return [...roots.values()].sort((a, b) => b.prefix.length - a.prefix.length || (a.prefix < b.prefix ? -1 : 1));
+  return { aliases: new Map([...claims].filter(([, ks]) => ks.size === 1).map(([a, ks]) => [a, [...ks][0]])), roots: [...roots].sort() };
 }
-// the source roots that apply to a module: those whose scope holds it
-export const rootsFor = (py, module) => py.sourceRoots.filter(r => !r.scope || module === r.scope || module.startsWith(r.scope + '.')).map(r => r.prefix);
 
 /* ---------------- resolution ---------------- */
 
 export function resolverFor(py) {
   const { modules, classes, symbols } = py;
-  const pkgs = packagesOf(py);
+  const pkgs = packagesOf(py), initDirs = initDirsOf(py);
+  const { aliases, roots: packageRoots } = packageAliases(py);
   const inRepo = m => modules.has(m) || pkgs.has(m);
-  // an absolute module name as the importing module sees it: the repo root, then each source root that applies
-  const findModule = (name, from) => inRepo(name) ? name : rootsFor(py, from || '').map(r => `${r}.${name}`).find(inRepo) || name;
+  // a standard-library name resolves at the repo root only to a package (`logging/__init__.py`), never a loose module
+  const atRoot = name => { const top = name.split('.')[0]; return inRepo(name) && (!STDLIB.has(top) || !!modules.get(top)?.file.endsWith('__init__.py')); };
+  // beside the importing file when its directory is no package (a script dir on sys.path), then the package roots
+  const sibling = (name, from) => { const f = modules.get(from)?.file, dir = f && dirname(f);
+    if (!dir || dir === '.' || initDirs.has(dir) || f.endsWith('__init__.py') || STDLIB.has(name.split('.')[0])) return null;
+    const m = `${dir.split('/').join('.')}.${name}`; return inRepo(m) ? m : null; };
+  // an absolute module name as the importing module sees it, or null when no in-repo module answers to it
+  const findModule = (name, from) => atRoot(name) ? name : sibling(name, from) || aliases.get(name) || null;
   function resolveImport(t, depth = 0) {
     if (!t || depth > 4) return null;
-    if (t.module) { const mod = findModule(t.module, t.in); return inRepo(mod) ? { module: mod } : { ext: t.module }; }
-    const from = findModule(t.from, t.in), m = modules.get(from);
+    if (t.module) { const mod = findModule(t.module, t.in); return mod ? { module: mod } : { ext: t.module }; }
+    const from = findModule(t.from, t.in), m = from && modules.get(from);
     if (m?.defs.has(t.name)) return { id: m.defs.get(t.name) };
     const followed = m?.imports.has(t.name) ? resolveImport(m.imports.get(t.name), depth + 1) : null;
     if (followed && !followed.missing) return followed;
+    if (!from) { const sub = findModule(`${t.from}.${t.name}`, t.in); return sub ? { module: sub } : { ext: `${t.from}.${t.name}` }; }
     const sub = `${from}.${t.name}`;
     // `missing`: an in-repo module that does not define the name; counted as an in-repo miss
-    return inRepo(sub) ? { module: sub } : inRepo(from) ? { missing: sub } : { ext: `${t.from}.${t.name}` };
+    return inRepo(sub) ? { module: sub } : { missing: sub };
   }
   function resolveName(name, c) {
     if (c.locals && c.locals.has(name)) return { id: c.locals.get(name) };
@@ -446,7 +436,7 @@ export function resolverFor(py) {
     }
     return null;
   }
-  return { findModule, resolveImport, resolveName, resolveExpr, mro, lookup, overrides, subclasses, factoryReturns, receiverOf, attrReceiver };
+  return { packageRoots, findModule, resolveImport, resolveName, resolveExpr, mro, lookup, overrides, subclasses, factoryReturns, receiverOf, attrReceiver };
 }
 
 const CFG_GUARD = /settings\.|getattr\(\s*settings\b|is_prod|is_dev|env_mode/;

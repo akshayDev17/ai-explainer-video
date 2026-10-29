@@ -29,8 +29,14 @@ byte-identical output (timings go to stdout only).
 Symbol ids: `pkg.module:func`, `pkg.module:Class.method`, `pkg.module:Outer.Inner` for a nested class,
 `…:outer.<locals>.inner` for a function or class defined in a function, `pkg.module:<main>`
 for an `if __name__ == "__main__":` block. Modules are named from the repo root (`backend/app/x.py` is
-`backend.app.x`); an absolute import is resolved from the repo root, then from each Python source root that
-applies to the importing module (`selfCheck.sourceRoots`), so `from app.x import f` inside `backend/` finds it. A call made at module level has `from: pkg.module:<module>`.
+`backend.app.x`). An absolute import resolves to the module of that name at the repo root; else, for a file in a
+directory with no `__init__.py`, to a module beside it; else through a package root: a file's package root is the
+top of the contiguous run of ancestor directories holding an `__init__.py`, and its dotted name there is that run
+plus the file, so with `backend/app/__init__.py` (and no `backend/__init__.py`) `from app.x import f` finds
+`backend/app/x.py`. A name claimed by two files stays external. A top-level name of the standard library never
+resolves to an in-repo loose module, namespace directory or nested package (`app/logging/` never captures
+`import logging`); only a repo-root package `logging/__init__.py` shadows it. `selfCheck.packageRoots` lists the
+package roots below the repo root. A call made at module level has `from: pkg.module:<module>`.
 A library target is `ext:<dotted.name>`.
 
 ## Groups
@@ -108,9 +114,7 @@ JWT, a provider token, a long random string) is written as `set (redacted)` ever
 (fewer non-`main` symbols than `defScopes`, the distinct qualified names the parser saw; a definition repeated in
 both branches of an `if` / `try` is one). Also reported: files with syntax errors, resolved calls, unresolved calls
 by where their head name comes from (`inRepo`, `external`, `builtin`, `local`), and the in-repo miss rate:
-calls whose head is an in-repo name but whose target could not be resolved. `sourceRoots` lists the Python
-source roots found (a pyproject.toml / setup.cfg directory and the package dirs it names; the parent of an
-in-repo package imported by absolute name from inside it, once an import there names one of its submodules, no
-`from <name> import n` names what it lacks, and it never does a bare `import <its own name>` — a wrapper package named after a library is no root). `externalLikeRepoDirs` counts calls into imports
-that resolved as external although an in-repo directory has their name, with their `rate` among in-repo calls:
-a high rate means a source root was missed and those calls are not linked.
+calls whose head is an in-repo name but whose target could not be resolved. `packageRoots` lists the package roots
+below the repo root (above). `externalLikeRepoDirs` counts calls into imports that resolved as external although an
+in-repo directory with no `__init__.py` (a namespace package) has their name, with their `rate` among in-repo calls:
+a high rate means those in-repo calls are not linked.

@@ -22,7 +22,8 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { loadGrammars } from './lib/tree-sitter.mjs';
 import { PATH_RULES, DEFAULT_RULE, classifyFile, parseOverrides } from './lib/groups.mjs';
-import { newPythonModel, extractPythonFile, sourceRoots, resolverFor, resolveCalls, pythonEntries } from './lang/python.mjs';
+import { newPythonModel, extractPythonFile, resolverFor, resolveCalls, pythonEntries } from './lang/python.mjs';
+import { STDLIB } from './lang/python-stdlib.mjs';
 import { classifyDispatch } from './lang/python-config.mjs';
 import * as fastapi from './rules/fastapi.mjs';
 import * as celeryTaskiq from './rules/celery-taskiq.mjs';
@@ -68,7 +69,6 @@ const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__
 const CODE_EXT = { '.py': 'python', '.ts': 'typescript', '.tsx': 'tsx', '.js': 'javascript', '.jsx': 'javascript', '.mjs': 'javascript',
   '.cjs': 'javascript', '.go': 'go', '.c': 'c', '.h': 'c', '.cc': 'cpp', '.cpp': 'cpp', '.cxx': 'cpp', '.hpp': 'cpp', '.hh': 'cpp' };
 const READERS = [['dotenv', dotenv], ['yaml-lite', yamlLite], ['toml-lite', tomlLite], ['json', json]];
-const PROJECT_FILES = /^(pyproject\.toml|setup\.cfg)$/;
 const excluded = rel => EXCLUDE.some(p => rel === p || rel.startsWith(p + '/'));
 function walk(root, dir, out, skip) {
   for (const name of readdirSync(dir).sort()) {
@@ -76,7 +76,6 @@ function walk(root, dir, out, skip) {
     const p = join(dir, name), rel = relative(root, p).split(sep).join('/'), st = lstatSync(p);
     if (st.isSymbolicLink() || skip(rel)) continue;
     if (st.isDirectory()) { if (!name.startsWith('.')) walk(root, p, out, skip); continue; }
-    if (PROJECT_FILES.test(name)) out.projects.push(rel);
     const reader = READERS.find(([, r]) => r.matches(rel));
     if (reader && st.size < 512 * 1024) out.config.push({ rel, reader: reader[0] });
     if (name.startsWith('.')) continue;
@@ -84,13 +83,13 @@ function walk(root, dir, out, skip) {
   }
   return out;
 }
-const newWalk = () => ({ code: [], config: [], projects: [] });
+const newWalk = () => ({ code: [], config: [] });
 // git-tracked files under a directory (relative to it); null when it is not in a git work tree
 const trackedFiles = root => {
   try { return new Set(execFileSync('git', ['-c', 'core.fsmonitor=false', '-C', root, 'ls-files', '-z'], { stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 28 })
     .toString().split('\0').filter(Boolean)); } catch { return null; }
 };
-const { code, config, projects } = walk(ROOT, ROOT, newWalk(), excluded);
+const { code, config } = walk(ROOT, ROOT, newWalk(), excluded);
 const pyFiles = code.filter(f => CODE_EXT[extname(f)] === 'python');
 if (!pyFiles.length) fail(1, `no supported source files under ${ROOT} (supported: ${LANGS.join(', ')})`);
 
@@ -118,7 +117,6 @@ for (const rel of code) {
 }
 const parseMs = Date.now() - t0;
 const groupOfFile = new Map(files.map(f => [f.path, f.group]));
-py.sourceRoots = sourceRoots(py, projects.map(rel => ({ rel, text: readText(rel) })));
 
 /* ---------------- resolve: core rules, then framework packs ---------------- */
 fastapi.registerAliases(py);
@@ -142,7 +140,7 @@ const registryKeys = registry.linkRegistry(py, producers.dispatchers, producers.
 const depends = fastapi.linkDepends(py, R);
 const pipelines = haystack.linkPipelines(py, R);
 const httpCalls = pyHttp.linkHttpCalls(py, entries);
-const spawns = spawn.linkSpawns(py, entries);
+const spawns = spawn.linkSpawns(py, R, entries);
 pytest.linkFixtures(py, fixtureBindings);
 const mocks = pytest.mockTargets(py, R);
 pytest.directLinks(py, tests, fixtures, mocks);
@@ -175,9 +173,12 @@ const FRAMEWORKS = ['flask', 'django', 'rq', 'dramatiq', 'huey', 'arq', 'tornado
 const withoutPack = FRAMEWORKS.filter(f => py.externalImports.has(f) && !KNOWN_PACKS.has(f)).map(f => ({ name: f, firstSeen: py.externalImports.get(f) }));
 const defLinesRaw = pyFiles.reduce((n, f) => n + (readText(f).match(/^[ \t]*(async[ \t]+def|def|class)[ \t]+[A-Za-z_]/gm) || []).length, 0);
 const inRepoCalls = py.callStats.resolved + py.unresolved.inRepo;
-// calls into an import the resolver called external although an in-repo directory has its name: a missed source root
+// calls into an import the resolver called external although an in-repo directory with no __init__.py (a namespace
+// package) has its name: Python may find them in the repo, the code map cannot
+const initDirs = new Set(pyFiles.filter(f => /(^|\/)__init__\.py$/.test(f)).map(f => f.split('/').slice(0, -1).join('/')));
 const pyDirs = new Map();
-for (const f of pyFiles) f.split('/').slice(0, -1).forEach((d, i, a) => (pyDirs.get(d) || pyDirs.set(d, new Set()).get(d)).add(a.slice(0, i + 1).join('/')));
+for (const f of pyFiles) f.split('/').slice(0, -1).forEach((d, i, a) => { const dir = a.slice(0, i + 1).join('/');
+  if (!initDirs.has(dir) && !STDLIB.has(d)) (pyDirs.get(d) || pyDirs.set(d, new Set()).get(d)).add(dir); });
 const likeRepoDirs = [...py.externalCalls].filter(([top]) => pyDirs.has(top)).sort()
   .map(([name, calls]) => ({ name, calls, dirs: [...pyDirs.get(name)].sort() }));
 const likeRepoCalls = likeRepoDirs.reduce((n, x) => n + x.calls, 0);
@@ -187,7 +188,7 @@ const selfCheck = {
   filesWithErrors: files.filter(f => f.parseError).map(f => f.path),
   calls: py.callStats, unresolvedByOrigin: py.unresolved,
   inRepoMissRate: inRepoCalls ? Number((py.unresolved.inRepo / inRepoCalls).toFixed(4)) : 0,
-  sourceRoots: py.sourceRoots.map(r => r.prefix.split('.').join('/')),
+  packageRoots: R.packageRoots,
   externalLikeRepoDirs: { calls: likeRepoCalls, rate: likeRepoCalls ? Number((likeRepoCalls / (inRepoCalls + likeRepoCalls)).toFixed(4)) : 0, names: likeRepoDirs },
   ok: py.defsVisited === py.defNodes && definedSymbols >= py.defScopes,
 };
@@ -239,5 +240,5 @@ console.log(`[mine] entries ${JSON.stringify(nk)} · Depends ${depends.length} �
 console.log(`[mine] tests ${ts.tests} (asserting ${ts.asserting}) · fixtures ${ts.fixtures} (autouse ${ts.autouse}) · fixture links ${ts.fixtureLinks} · mocks ${ts.mocks} (resolved ${ts.mocksResolved}, session-wide ${ts.sessionMocks}) · prod functions with a direct test link ${ts.prodFunctionsWithDirectLink}/${ts.prodFunctions}`);
 for (const d of notGitWorkTree) console.log(`[mine] config not read from ${d}: not a git work tree, so no config file can be proven tracked`);
 console.log(`[mine] config: ${dispatch.sites.length} factory dispatch sites · profiles ${dispatch.profiles.map(p => `${p.name} (${p.group})`).join(', ')}`);
-console.log(`[mine] self-check ${selfCheck.ok ? 'ok' : 'FAILED'}: ${selfCheck.defsExtracted}/${selfCheck.defNodes} definitions extracted · ${definedSymbols} distinct symbols for ${selfCheck.defScopes} distinct definitions · source roots ${selfCheck.sourceRoots.join(', ') || 'none'} · external calls named like repo dirs ${likeRepoCalls} · in-repo miss rate ${(selfCheck.inRepoMissRate * 100).toFixed(1)}% · wrote ${relative(process.cwd(), OUT) || '.'}/codemap.{json,md}`);
+console.log(`[mine] self-check ${selfCheck.ok ? 'ok' : 'FAILED'}: ${selfCheck.defsExtracted}/${selfCheck.defNodes} definitions extracted · ${definedSymbols} distinct symbols for ${selfCheck.defScopes} distinct definitions · package roots ${selfCheck.packageRoots.join(', ') || 'none'} · external calls named like repo dirs ${likeRepoCalls} · in-repo miss rate ${(selfCheck.inRepoMissRate * 100).toFixed(1)}% · wrote ${relative(process.cwd(), OUT) || '.'}/codemap.{json,md}`);
 if (!selfCheck.ok) process.exit(2);

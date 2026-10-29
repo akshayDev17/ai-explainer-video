@@ -6,9 +6,9 @@
      taskiq scheduler mod:x     -> every scheduled task          celery -A mod beat   -> every scheduled task
      python -m pkg              -> pkg's `__main__` entry
    The app module is looked up as the spawned process would find it from the spawning file: its directory, then each
-   parent, then the Python source roots, then the repo root. */
+   parent, then as an absolute import from that file (the repo root, then the package roots). */
 import { dirname } from 'node:path';
-import { addEdge, rootsFor } from '../lang/python.mjs';
+import { addEdge } from '../lang/python.mjs';
 
 const SUBPROCESS = /^(Popen|run|call|check_call|check_output)$/;
 // `subprocess.run(…)`, `asyncio.create_subprocess_exec(…)`, or the bare name imported from either module
@@ -21,11 +21,11 @@ function argvOf(py, c) {
   return items ? items.map(a => (a.type === 'string' ? a.s : null)) : null;
 }
 
-export function linkSpawns(py, entries) {
+export function linkSpawns(py, R, entries) {
   const spawns = [];
   const appModule = spec => spec && spec.includes(':') ? spec.split(':')[0] : spec;
   const near = (c, name) => { const dirs = dirname(c.file) === '.' ? [] : dirname(c.file).split('/');
-    return [...dirs.map((_, i) => [...dirs.slice(0, dirs.length - i), name].join('.')), ...rootsFor(py, c.module).map(r => `${r}.${name}`), name]; };
+    return [...dirs.map((_, i) => [...dirs.slice(0, dirs.length - i), name].join('.')), R.findModule(name, c.module)].filter(Boolean); };
   for (const c of py.rawCalls) {
     if (!isSpawn(c)) continue;
     const argv = argvOf(py, c);

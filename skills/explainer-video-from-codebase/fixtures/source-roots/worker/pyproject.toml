@@ -1,5 +1,0 @@
-[project]
-name = "worker"
-
-[tool.setuptools.packages.find]
-where = ["src"]
