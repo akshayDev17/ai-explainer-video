@@ -170,6 +170,7 @@ for (const { key, cfg } of scenes) {
     report.push(`  ${bad ? '✗' : '✓'} ${at.padEnd(24)} ${src.test ? `test ${src.test.split(':').pop()}` : src.symbol || src.file} · ${visible} lines · ${mined.from}${isPause ? ' · pause segment' : ''}${unread.length ? ` · ${unread.length} unfocused` : ''}`);
   }
 }
+for (const k of pauseSegs) if (!scenes.some(s => s.key === k)) focus.push(`${k}: a pause segment shows no pause badge (only a code scene with panels shows one; host it there)`);
 if (pauseSegs.size > MAX_PAUSES) focus.push(`${pauseSegs.size} pause segments (max ${MAX_PAUSES}): a video that asks for that much silent reading must be split`);
 
 console.log(`\nexcerpt-check ${WORK}`);

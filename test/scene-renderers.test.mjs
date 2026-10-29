@@ -24,6 +24,14 @@ test('each new language colours its own keywords, strings and comments', () => {
   assert.deepEqual(kinds('template <typename T> class Box {', 'cpp').filter(s => /^k:/.test(s)), ['k:template', 'k:typename', 'k:class']);
 });
 
+test('every lang name the code map emits gets its own colouring, not the java fallback', () => {
+  const own = { python: 'def', typescript: 'async', tsx: 'let', javascript: 'let', go: 'func', c: 'sizeof', cpp: 'template' };
+  for (const [lang, kw] of Object.entries(own)) {
+    assert.ok(kinds(`${kw} x`, lang).includes(`k:${kw}`), `${lang} colours ${kw} as a keyword`);
+    assert.ok(!kinds(`${kw} x`, 'java').includes(`k:${kw}`), `java does not, so ${lang} is not falling back`);
+  }
+});
+
 test('java and python colouring is unchanged, and an unknown language still falls back to java', () => {
   assert.equal(CodeScenes.highlight('def f(self):  # hi', 'python'),
     '<span class="t-k">def</span><span class="t-p"> </span><span class="t-f">f</span><span class="t-u">(</span><span class="t-k">self</span><span class="t-u">)</span><span class="t-p">:</span><span class="t-p"> </span><span class="t-p"> </span><span class="t-c"># hi</span>');

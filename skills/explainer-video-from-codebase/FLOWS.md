@@ -333,7 +333,7 @@ focus act. A `{op: "pause", from, to, text?}` act shows the pause badge.
   exactly its gap; at most 22 shown lines.
 - **focus, exit 3**: every shown non-blank line is in a focus act whose `narration` names lines of the segment in
   `lines.json` and whose window starts at the first line's onset and ends between the last line's end and the next
-  line's onset (scene time = line time + `lead`, ±0.06 s). A pause segment (its script segment carries `pause`) is exempt, must carry a `pause` act, and a video has at most 3;
+  line's onset (scene time = line time + `lead`, ±0.06 s). A pause segment (its script segment carries `pause`; it must be a code scene with panels) is exempt, must carry a `pause` act, and a video has at most 3;
   a `pause` act on any other segment is an error.
 
 A pause segment's script carries `"pause": {"dwell": <s>}` with 0 < dwell ≤ 2, said out loud ("pause" in its

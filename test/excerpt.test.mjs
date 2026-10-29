@@ -190,6 +190,18 @@ test('a pause segment may show a whole block unfocused, with its badge; at most 
   assert.match(rb.stdout, /a pause segment shows no pause badge/);
   const stray = goodScene(); stray.acts.push({ op: 'pause', from: 4, to: 6 });
   assert.match(check(work(stray)).stdout, /a pause badge on a segment whose narration does not ask for a pause/);
+  const offPanel = work();
+  const man = JSON.parse(readFileSync(join(offPanel, 'manifest.json'), 'utf8'));
+  man.segments.overview = { host: 'diagram', scene: 'overview' };
+  writeFileSync(join(offPanel, 'manifest.json'), JSON.stringify(man));
+  const spoken = { text: 'Pause the video here and read this block.', pause: { dwell: 2 } };
+  const sc = JSON.parse(readFileSync(join(offPanel, 'script.json'), 'utf8'));
+  sc.segments.push({ key: 'overview', ...spoken }, { key: 'outro', ...spoken });
+  writeFileSync(join(offPanel, 'script.json'), JSON.stringify(sc));
+  const ro = check(offPanel);
+  assert.equal(ro.status, 3, 'a spoken pause on a scene that cannot show the badge');
+  assert.match(ro.stdout, /overview: a pause segment shows no pause badge/);
+  assert.match(ro.stdout, /outro: a pause segment shows no pause badge/);
   const four = work(whole, { extra: { a: whole, b: whole, c: whole }, pauses: ['hop2', 'a', 'b', 'c'] });
   const rf = check(four);
   assert.equal(rf.status, 3);

@@ -81,7 +81,7 @@
       directive: /^#\s*[a-z]+/,
     },
   };
-  LANGS.js = LANGS.ts;
+  LANGS.js = LANGS.typescript = LANGS.tsx = LANGS.javascript = LANGS.ts;
   const STRING = /^"(?:[^"\\]|\\.)*"|^'(?:[^'\\]|\\.)*'/;
 
   function tokenize(line, lang) {
