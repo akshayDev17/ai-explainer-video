@@ -208,7 +208,7 @@ The series proposal. Every reason (`why`, `say`, `claim`) is at least three word
 | `skipped[]` | `{entry, rank?, why}`: one entry each, never a glob; `rank` ("prod #6"), when given, must match the ranking |
 | `promote[]` | `{entry, why}`: a dev-group row brought into consideration; it then needs a decision like any other row |
 | `flows[]` | `{id, title, from, group?, hops, segments?, variants?, teach?, links?}`: `from` is an entry with a candidate; `group`, when given, is the entry's |
-| `cores[]` | `{id, title, hops, pinnedBy?, variants?, teach?, links?}`: shared code with no entry of its own; `pinnedBy` here is `{symbol, test, say}` |
+| `cores[]` | `{id, title, hops, pinnedBy?, variants?, teach?, links?}`: shared code with no entry of its own; `pinnedBy` here is `{symbol, test, say, lines?, strength?}` |
 | `triage.excluded[]` | `{match, why}`: a glob (`*`, `?`) over entry ids and segment roots; it must match something |
 | `outOfRepo[]` | `{claim, evidence, selects?}`: context outside the repo, checked for shape only and printed as **unverified**; `selects` names the config sites the claim decides |
 | `codemap`, `candidates`, `trace` | accepted for the reader; the inputs are always the files beside `--candidates` |
