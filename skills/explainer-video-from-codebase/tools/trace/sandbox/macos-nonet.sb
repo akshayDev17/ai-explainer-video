@@ -1,0 +1,21 @@
+; macos-nonet.sb — trace.mjs's macOS sandbox (sandbox-exec), for running a repo's test command.
+; SCRATCH (passed with -D SCRATCH=<realpath>) is the only place a write may land.
+(version 1)
+(allow default)
+
+; no network at all: no IP traffic (localhost included), no connects to unix sockets (the DNS resolver,
+; docker.sock, database sockets); socketpair() still works, so asyncio does
+(deny network-outbound (remote ip))
+(deny network-inbound (local ip))
+(deny network-bind (local ip))
+(deny network-outbound (remote unix-socket))
+
+; writes only inside the scratch dir (and the null and terminal devices)
+(deny file-write*)
+(allow file-write*
+  (subpath (param "SCRATCH"))
+  (literal "/dev/null")
+  (literal "/dev/zero")
+  (literal "/dev/tty")
+  (literal "/dev/dtracehelper")
+  (regex #"^/dev/fd/"))

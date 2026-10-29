@@ -1,0 +1,48 @@
+{
+  "outcome": {
+    "collected": 5,
+    "passed": 4,
+    "failed": 1,
+    "errors": 0,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0
+  },
+  "observed": [
+    "shop.cart:Cart.total -> shop.cart:apply_discount static [tests.test_cart:test_discount_can_be_mocked, tests.test_cart:test_total_applies_discount, tests.test_jobs:test_nightly_total_runs_the_body]",
+    "shop.cart:apply_discount -> shop.cart:discount_for static [tests.test_cart:test_total_applies_discount, tests.test_jobs:test_nightly_total_runs_the_body]",
+    "shop.jobs:nightly_total -> shop.jobs:run_with_retry static [tests.test_jobs:test_nightly_total_runs_the_body]",
+    "shop.jobs:run_with_retry -> shop.jobs:nightly_total.<locals>._body static py.callback [tests.test_jobs:test_nightly_total_runs_the_body]",
+    "tests.conftest:cart -> shop.cart:Cart.__init__ ctor [tests.test_cart:test_discount_can_be_mocked, tests.test_cart:test_total_applies_discount, tests.test_jobs:test_nightly_total_runs_the_body]",
+    "tests.conftest:cart -> shop.cart:Cart.add static [tests.test_cart:test_discount_can_be_mocked, tests.test_cart:test_total_applies_discount, tests.test_jobs:test_nightly_total_runs_the_body]",
+    "tests.test_cart:test_discount_can_be_mocked -> shop.cart:Cart.__init__ ctor [tests.test_cart:test_discount_can_be_mocked]",
+    "tests.test_cart:test_discount_can_be_mocked -> shop.cart:Cart.total static [tests.test_cart:test_discount_can_be_mocked]",
+    "tests.test_cart:test_total_applies_discount -> shop.cart:Cart.total static [tests.test_cart:test_total_applies_discount]",
+    "tests.test_discount:DiscountTest.test_threshold -> shop.cart:discount_for static [tests.test_discount:DiscountTest.test_threshold]",
+    "tests.test_jobs:test_nightly_total_runs_the_body -> shop.jobs:nightly_total static [tests.test_jobs:test_nightly_total_runs_the_body]",
+    "tests.test_net:test_ping_reaches_the_cache -> shop.net:ping static [tests.test_net:test_ping_reaches_the_cache]"
+  ],
+  "noStaticEdge": [
+    "shop.jobs:nightly_total.<locals>._body -> shop.cart:Cart.total other"
+  ],
+  "ran": {
+    "tests.test_cart:test_discount_can_be_mocked": "passed: shop.cart:Cart.__init__, shop.cart:Cart.add, shop.cart:Cart.total, shop.cart:apply_discount, tests.conftest:cart, tests.test_cart:test_discount_can_be_mocked",
+    "tests.test_cart:test_total_applies_discount": "passed: shop.cart:Cart.__init__, shop.cart:Cart.add, shop.cart:Cart.total, shop.cart:apply_discount, shop.cart:discount_for, tests.conftest:cart, tests.test_cart:test_total_applies_discount",
+    "tests.test_discount:DiscountTest.test_threshold": "passed: shop.cart:discount_for, tests.test_discount:DiscountTest.test_threshold",
+    "tests.test_jobs:test_nightly_total_runs_the_body": "passed: shop.cart:Cart.__init__, shop.cart:Cart.add, shop.cart:Cart.total, shop.cart:apply_discount, shop.cart:discount_for, shop.jobs:nightly_total, shop.jobs:nightly_total.<locals>._body, shop.jobs:run_with_retry, tests.conftest:cart, tests.test_jobs:test_nightly_total_runs_the_body",
+    "tests.test_net:test_ping_reaches_the_cache": "failed: shop.net:ping, tests.test_net:test_ping_reaches_the_cache"
+  },
+  "directLinksPerTest": {
+    "tests": 5,
+    "observed": 11,
+    "total": 11,
+    "prod": {
+      "observed": 11,
+      "total": 11
+    }
+  },
+  "fixtureLinks": {
+    "observed": 3,
+    "total": 3
+  }
+}
