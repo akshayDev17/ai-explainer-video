@@ -1,10 +1,11 @@
 # FLOWS.md — reference for the code-flow artifacts
 
-This file grows with the skill. Today it describes the one artifact that exists:
-`codemap.json`, written by `tools/mine.mjs` (schema 1). Its readable twin is `codemap.md`.
+This file grows with the skill. Today it describes the stage 1 artifacts: `codemap.json`, written
+by `tools/mine.mjs`, with its readable twin `codemap.md`; `candidates.json`, written from it by
+`tools/propose.mjs`; and `ranking.json` and `ranking.md`, written from that by `tools/rank.mjs` (each schema 1).
 
-`mine` is a pure function of the repo tree and the tool versions: it never writes inside the
-repo, never uses the network and never runs repo code. Two runs over the same tree produce
+`mine`, `propose` and `rank` are pure functions of their input and the tool versions: they never write
+inside the repo, never use the network and never run repo code. Two runs over the same input produce
 byte-identical output (timings go to stdout only).
 
 ## Top level
@@ -129,3 +130,66 @@ file (`name`, `root`, `calls`: right only when that root is on its sys.path) and
 because several roots claim their import and none holds the importer (`name`, `roots`, `calls`). `externalLikeRepoDirs` counts calls into imports that resolved as external although an
 in-repo directory with no `__init__.py` (a namespace package) has their name, with their `rate` among in-repo calls:
 a high rate means those in-repo calls are not linked.
+
+## `candidates.json` (`propose.mjs`)
+
+One candidate per prod, eval and dev entry (test-group entries are not walked). A candidate is the tree of paths from its entry, walked over `static`, `ctor`, `framework`,
+`dispatch`, `virtual`, `queue`, `http` and `spawn` edges with the receiver class carried, so a `self.m()` call
+resolves under the class that was constructed. No candidate is chosen here.
+
+The walk's rules:
+
+- **A non-test walk never enters test-group code.** A test subclass or fake that production CHA reaches is a
+  *test double*: listed in `testDoubles`, never walked.
+- **A production walk expands any non-test code** it reaches; a node from another group is listed in `crossGroup`.
+- **An eval or dev walk folds every production symbol** into a `uses-prod` leaf, and its crossings into production
+  are `exercises` links: an eval flow is the harness's own story plus the production flows it drives.
+- **Helpers fold by same-group fan-in.** A symbol with at least `--fanin` (6) callers from its own group and an
+  in-repo subtree of at most `--leafy` (5) symbols is a `helper` leaf. Test callers never count, so a production
+  function many tests call is not folded.
+- **Collaborators fold at the interface.** An abstract target is an `interface` leaf; two or more concrete targets
+  of one call site are `alternative` leaves, with the config site that selects them. `--no-iface-fold` expands them.
+- **Data-model constructors** (dataclasses, pydantic models, exceptions, enums) are listed in `constructs`, not walked.
+- **A `py.callback` link is followed only from the caller that handed the callable over**, as a child of the callee
+  that runs it (`via: callback`).
+
+| Field | What it holds |
+|---|---|
+| `params` | `fanin`, `leafy`, `ifaceFold` |
+| `totals` | entries per group, candidates and top-level candidates per group, `continuations`, `helpers` (symbols that fold, all groups), `testDoublesRefused`, production functions with a direct test link and reached from tests |
+| `unwalked[]` | entries whose symbol is not in the code map (`propose` exits 2) |
+| `candidates{entry id}` | `group`, the entry's `kind` / `method` / `path` / `key` / `file` / `line`; `continues` (below); `symbols`, `own`, `folded`, `modules`, `maxDepth`; `ownIds[]`; `nodes[]` (`id`, `depth`, `via`, `ctx` receiver, `parent`, `folded` ∈ `helper` / `interface` / `alternative` / `uses-prod`); `crossings[]` (`from`, `to`, `kind`, `evidence`, `intoGroup`); `exercises[]` (the crossings into another group); `dispatch[]` (`site`, `how` ∈ `receiver` / `cha` / `factory`, `before` → `after` target counts, `targets`, `narrowedBy`, `config` = the factory's classification and alternatives with their guards, Haystack `selectors`); `branches[]` (followed calls under a config guard: `cfg`, `onFailure`); `constructs`, `testDoubles`, `usesProd`, `crossGroup`; `segments[]` |
+| `testLinks[]` | per test: `asserts`, `assertLines`, `mocked`, `direct[]` (mine's direct links) and `exercised` / `exercisedIds` |
+| `bySymbol{id}` | `direct[]` (the tests with a direct link to it) and `exercised` (how many tests reach it) |
+| `symbols{id}` | `group`, `kind`, `file`, `start`, `end`, `module` of every symbol a candidate or test link touches |
+
+**Segments and continuations.** A candidate is cut into segments at each crossing that stays in its group: the
+entry, then each crossing target (`root`, the `from` that crosses, `kind`, its own and folded counts, `ownIds`).
+A crossing into another group is an `exercises` link, not a segment. An entry reached through another candidate's
+same-group crossing is a **continuation**: `continues` lists the candidates that reach it, and it is not ranked
+on its own.
+
+**Test reach is reach, not proof.** From each direct link's target, with the call site's receiver, the walk runs
+until it meets a symbol the test mocks (`mocked`, session-wide mocks included), a crossing or test code. Only
+expanded symbols and helpers count. Narration calls a hop "tested" only for a direct link.
+
+## `ranking.json` and `ranking.md` (`rank.mjs`)
+
+Each group's top-level candidates (prod, eval, dev; continuations excluded), ordered by greedy marginal coverage of
+that group's own symbols, ties broken by more crossings. **There is no cut line and no series**: no row is marked
+chosen, and `--min-new`, `--min-share` and `--series` do not exist. The agent proposes the series from the full
+tables.
+
+| Field | What it holds |
+|---|---|
+| `params` | `explainTop` (10) and `explainTopEval` (5): how many prod and eval rows `ranking.md` explains in full |
+| `totals` | top-level rows and universe (distinct own symbols) per group, continuations |
+| `ranked.{prod,eval,dev}[]` | per row: `rank`, the entry and its route or key, `gain` (new own symbols), `cumulative`, `coverage`, `own`, `folded`, `modules`, `crossings`; `nearest` (the most-overlapping higher row) and `jaccard`; `pinned` (own functions with a direct test link), `tests` (distinct tests pinning own code), `testsNew` (tests pinning this row's new code); `cfg` (distinct dispatch points, one per site and target set, that a config read narrows, that have two or more concrete targets, or that Haystack selectors pick: the same points the explained rows list); `evals` (top-level eval rows whose `uses-prod` leaves or crossings reach this row's own code). Eval and dev rows add `exercises[]` and `usesProd[]`, each with `flowRank`, the first production row that owns it |
+| `merged[]` | prod and eval top-level rows on one list, evidence only |
+| `shared[]` | production modules whose functions appear in at least 3 production rows and that at least 5 tests pin directly: `module`, `candidates`, `firstOwner` (rank) and `firstOwnerEntry`, `functions`, `directTests`. Cross-cutting code (auth, retry, tokens) has no entry point of its own, so this table is where it shows |
+| `continuations[]` | every continuation with its parents |
+
+`ranking.md` prints every row of every group with these columns, what each eval row exercises, the dev group as
+filtered by default (promotable in `flows.json`), the shared table, the continuations, the merged order, and for the
+top prod and eval rows their segment table, dispatch points with the config that selects them, and config-guarded
+branches.
