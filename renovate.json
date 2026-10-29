@@ -7,6 +7,13 @@
       "groupName": "coursework-author",
       "automerge": false,
       "labels": ["dependencies", "vendored-skill"]
+    },
+    {
+      "matchPackageNames": ["web-tree-sitter", "tree-sitter-python", "tree-sitter-typescript", "tree-sitter-javascript", "tree-sitter-go", "tree-sitter-c", "tree-sitter-cpp"],
+      "groupName": "tree-sitter",
+      "rangeStrategy": "pin",
+      "automerge": false,
+      "labels": ["dependencies", "vendored-grammars"]
     }
   ]
 }
