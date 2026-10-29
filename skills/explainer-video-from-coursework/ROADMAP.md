@@ -706,7 +706,7 @@ but only verified on macOS (§2.1).
 
 This skill is `explainer-video-from-coursework` — it assumes structured coursework
 notes (markdown READMEs, a heading per topic, `code/` demos) and is **not known to
-generalise** beyond that. Two siblings are planned, split by where the source
+generalise** beyond that. Three siblings are planned, split by where the source
 material comes from:
 
 | Skill | Source | What it adds over this one |
@@ -714,6 +714,8 @@ material comes from:
 | `explainer-video-from-coursework` *(this)* | structured coursework notes | decompose + prove coverage + narrate + animate |
 | `explainer-video-from-source` | a general source — docs, papers, codebases, arbitrary notes | generalise the planner's assumptions (README layout, heading structure, `code/` convention) so non-coursework sources decompose cleanly |
 | `explainer-video` | no source — a narrow-to-broad topic description | author the study material first (a pre-stage that builds the notes), then feed it through the same plan→video pipeline |
+| `explainer-video-from-codebase` | a codebase's major code flows (Python, TS/JS, Go, C, C++, or a mix) | mine the code (tree-sitter, grouped prod/test/eval/dev, tests as evidence), propose candidate flows, the agent proposes the series with reasons, the user approves the flow list, then a coursework-shaped plan reuses stages 3–8 |
 
-Not started. Recorded here so the naming is reserved and the "from coursework"
-scope of this skill stays explicit.
+`explainer-video-from-codebase` is being built one milestone at a time (stage 1's mining
+tool exists); the other two are not started. Recorded here so the naming is reserved and
+the "from coursework" scope of this skill stays explicit.
