@@ -1,0 +1,12 @@
+{
+  "entries": [
+    "queue-consumer worker.tasks:build_report reports.build",
+    "scheduled worker.tasks:nightly reports.nightly"
+  ],
+  "links": [
+    "worker.producer:delay_it -> worker.tasks:build_report queue taskiq.delay",
+    "worker.producer:kick_by_name -> worker.tasks:build_report queue taskiq.literal-key",
+    "worker.producer:request_report -> worker.tasks:build_report queue taskiq.literal-key",
+    "worker.tasks:nightly -> worker.tasks:build_report queue taskiq.kiq"
+  ]
+}

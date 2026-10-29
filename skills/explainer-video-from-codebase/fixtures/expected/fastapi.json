@@ -1,0 +1,11 @@
+{
+  "entries": [
+    "http app.routers.items:create_item POST /api/v1/items",
+    "http app.routers.items:read_item GET /api/v1/items/{item_id}",
+    "registered-callback app.main:lifespan"
+  ],
+  "links": [
+    "app.routers.items:create_item -> app.deps:get_clock framework fastapi.Depends",
+    "app.routers.items:read_item -> app.deps:get_store framework fastapi.Depends"
+  ]
+}

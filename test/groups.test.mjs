@@ -1,0 +1,67 @@
+// Every file is put in exactly one group by ordered rules, first match wins; content signals only reclassify a
+// file the path rules left in prod; a --group override wins over everything.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { join } from 'node:path';
+import { FIXTURES, mine } from './helpers.mjs';
+import { globToRegExp, classifyFile, parseOverrides } from '../skills/explainer-video-from-codebase/tools/lib/groups.mjs';
+
+const POLYGLOT = join(FIXTURES, 'polyglot');
+const EXPECTED = {
+  prod: ['backend/app.py', 'cmd/server/main.go', 'frontend/src/App.tsx'],
+  test: ['backend/conftest.py', 'backend/selfcheck.py', 'backend/test/legacy.py', 'backend/test_utils.py', 'backend/tests/helpers.py',
+    'backend/thing_test.py', 'backend/verification/test_connections.py', 'cmd/server/main_test.go', 'frontend/src/App.test.tsx', 'frontend/src/__tests__/util.ts'],
+  eval: ['backend/bench/quick.py', 'backend/benchmarks/bench_search.py', 'backend/evals/run_eval.py', 'backend/evals_data/load.py',
+    'backend/evaluation/score.py', 'backend/finetune.py', 'backend/rag_quality.py', 'backend/search_evals/case.py'],
+  dev: ['backend/alembic/env.py', 'backend/db/migration_controller.py', 'backend/debug/dump.py', 'backend/debug_cache.py', 'backend/dev/tool.py',
+    'backend/dev_setup/boot.py', 'backend/diagnose_queue.py', 'backend/migrations/0001_init.py', 'backend/routers/dev.py', 'backend/scripts/seed.py',
+    'backend/verification/check.py'],
+};
+
+const r = mine(POLYGLOT);
+const groupOf = Object.fromEntries(r.codemap.files.map(f => [f.path, f.group]));
+const ruleOf = Object.fromEntries(r.codemap.files.map(f => [f.path, f.rule]));
+
+test('every file lands in its expected group', () => {
+  assert.equal(r.status, 0, r.stderr);
+  for (const [g, files] of Object.entries(EXPECTED)) for (const f of files) assert.equal(groupOf[f], g, f);
+  assert.equal(r.codemap.files.length, Object.values(EXPECTED).flat().length, 'every file is listed, none twice');
+});
+
+test('first match wins: a test_*.py under verification/ is a test file, not dev', () => {
+  assert.match(ruleOf['backend/verification/test_connections.py'], /^test:/);
+});
+
+test('content signals reclassify only files the path rules left in prod', () => {
+  assert.match(ruleOf['backend/selfcheck.py'], /content: imports pytest/);
+  assert.match(ruleOf['backend/rag_quality.py'], /content: imports an eval framework/);
+  assert.match(ruleOf['backend/finetune.py'], /content: training-loop markers/);
+  assert.equal(ruleOf['backend/app.py'], 'prod: everything else');
+});
+
+test('non-Python files are grouped and listed but not mined yet', () => {
+  assert.deepEqual(r.codemap.unsupported, { files: 5, byExt: { '.go': 2, '.tsx': 2, '.ts': 1 } });
+  assert.equal(r.codemap.symbols.filter(s => !s.file.endsWith('.py')).length, 0);
+});
+
+test('an entry that lands in the test group is reported with the override that would move it', () => {
+  assert.deepEqual(r.codemap.entries.map(e => [e.id, e.group]), [['backend.verification.test_connections:<main>', 'test']]);
+  assert.match(r.md, /Entries in the test group[\s\S]*--group 'backend\/verification\/test_connections.py=dev'/);
+});
+
+test('a --group override wins over every rule and is recorded', () => {
+  const o = mine(POLYGLOT, '--group', 'backend/verification/**=dev');
+  const f = o.codemap.files.find(x => x.path === 'backend/verification/test_connections.py');
+  assert.deepEqual([f.group, f.rule], ['dev', 'override: backend/verification/**=dev']);
+  assert.equal(o.codemap.entries[0].group, 'dev');
+  assert.deepEqual(o.codemap.groups.overrides, ['backend/verification/**=dev']);
+});
+
+test('globs: ** crosses directories, * does not, a slash-free pattern matches at any depth', () => {
+  assert.ok(globToRegExp('a/**/x.py').test('a/b/c/x.py'));
+  assert.ok(globToRegExp('a/**/x.py').test('a/x.py'));
+  assert.ok(!globToRegExp('a/*.py').test('a/b/x.py'));
+  assert.ok(globToRegExp('*.gen.py').test('deep/dir/m.gen.py'));
+  assert.equal(classifyFile('tests/x.py', parseOverrides(['tests/**=prod']), null).group, 'prod');
+  assert.throws(() => parseOverrides(['tests/**=staging']), /expected 'glob=prod\|test\|eval\|dev'/);
+});

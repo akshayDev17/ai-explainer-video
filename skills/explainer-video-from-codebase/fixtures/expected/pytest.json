@@ -1,0 +1,15 @@
+{
+  "entries": [],
+  "links": [
+    "tests.test_cart:CartCase.test_starts_empty -> tests.conftest:no_mail framework pytest.fixture.autouse",
+    "tests.test_cart:TestPricing.test_price -> tests.conftest:no_mail framework pytest.fixture.autouse",
+    "tests.test_cart:TestPricing.test_price -> tests.test_cart:TestPricing.rate framework pytest.fixture",
+    "tests.test_cart:test_add -> tests.conftest:cart framework pytest.fixture",
+    "tests.test_cart:test_add -> tests.conftest:no_mail framework pytest.fixture.autouse",
+    "tests.test_cart:test_mail_is_mocked_for_everyone -> tests.conftest:no_mail framework pytest.fixture.autouse",
+    "tests.test_cart:test_patch_object -> tests.conftest:no_mail framework pytest.fixture.autouse",
+    "tests.test_cart:test_settings_are_mocked_for_the_session -> tests.conftest:no_mail framework pytest.fixture.autouse",
+    "tests.test_cart:test_through_a_helper -> tests.conftest:no_mail framework pytest.fixture.autouse",
+    "tests.test_cart:test_total_ignores_mocked_discount -> tests.conftest:no_mail framework pytest.fixture.autouse"
+  ]
+}
