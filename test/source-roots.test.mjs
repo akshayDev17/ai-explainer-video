@@ -30,10 +30,20 @@ test('nothing is external under a name an in-repo directory has', () => {
   assert.equal(m.selfCheck.externalLikeRepoDirs.calls, 0);
 });
 
+test('a wrapper package named after the library it wraps is no source root: `redis` and `celery` stay external', () => {
+  const w = mine(join(FIXTURES, 'source-roots-wrapper'));
+  assert.equal(w.status, 0, w.stderr);
+  assert.deepEqual(w.codemap.selfCheck.sourceRoots, []);
+  assert.equal(edgesFrom(w.codemap, 'myapp.integrations.cache:make').some(e => e.to.startsWith('myapp.integrations.redis')), false);
+  assert.equal(edgesFrom(w.codemap, 'myapp.integrations.redis:connect').some(e => e.to.startsWith('myapp.integrations.redis')), false);
+  assert.deepEqual(w.codemap.entries.map(e => `${e.kind} ${e.id}`), ['queue-consumer myapp.integrations.tasks:job']);
+});
+
 test('calls into an in-repo-named import that resolved as external are reported, with their rate', () => {
   const x = mine(REPO, '--exclude', 'backend/app/services.py');
   assert.equal(x.status, 0, x.stderr);
-  assert.deepEqual(x.codemap.selfCheck.externalLikeRepoDirs.names, [{ name: 'app', calls: 3, dirs: ['backend/app'] }]);
+  assert.equal(x.codemap.selfCheck.sourceRoots.includes('backend'), false, 'an import of a module backend/app lacks is no proof of the root');
+  assert.deepEqual(x.codemap.selfCheck.externalLikeRepoDirs.names, [{ name: 'app', calls: 4, dirs: ['backend/app'] }]);
   assert.ok(x.codemap.selfCheck.externalLikeRepoDirs.rate > 0.5);
-  assert.match(x.md, /3 calls \(\d+\.\d%\) go to imports resolved as external although an in-repo directory has their name\*\*: `app` 3 \(`backend\/app\/`\)/);
+  assert.match(x.md, /4 calls \(\d+\.\d%\) go to imports resolved as external although an in-repo directory has their name\*\*: `app` 4 \(`backend\/app\/`\)/);
 });

@@ -105,10 +105,12 @@ JWT, a provider token, a long random string) is written as `set (redacted)` ever
 
 `ok` is false — and `mine` exits 2 — when the parser saw a definition the extractor did not record
 (`defsExtracted` < `defNodes`), or when two definitions in different scopes collapsed into one symbol
-(fewer non-`main` symbols than `defScopes`, the distinct scope + name pairs the parser saw). Also reported: files with syntax errors, resolved calls, unresolved calls
+(fewer non-`main` symbols than `defScopes`, the distinct qualified names the parser saw; a definition repeated in
+both branches of an `if` / `try` is one). Also reported: files with syntax errors, resolved calls, unresolved calls
 by where their head name comes from (`inRepo`, `external`, `builtin`, `local`), and the in-repo miss rate:
 calls whose head is an in-repo name but whose target could not be resolved. `sourceRoots` lists the Python
 source roots found (a pyproject.toml / setup.cfg directory and the package dirs it names; the parent of an
-in-repo package imported by absolute name from inside it). `externalLikeRepoDirs` counts calls into imports
+in-repo package imported by absolute name from inside it, once an import there names one of its submodules, none
+names what it lacks, and it never does a bare `import <its own name>` — a wrapper package named after a library is no root). `externalLikeRepoDirs` counts calls into imports
 that resolved as external although an in-repo directory has their name, with their `rate` among in-repo calls:
 a high rate means a source root was missed and those calls are not linked.

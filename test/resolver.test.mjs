@@ -70,5 +70,20 @@ test('nested and function-local classes get scoped ids: two models\' `class Conf
   assert.deepEqual([sym('pkg.m:Item.Config.describe').kind, sym('pkg.m:Item.Config.describe').cls], ['method', 'pkg.m:Item.Config']);
   assert.ok(edgesFrom(n.codemap, 'pkg.m:default_config').some(e => e.to === 'pkg.m:Config' && e.kind === 'ctor'), 'Config() is the top-level class');
   assert.ok(edgesFrom(n.codemap, 'pkg.m:build').some(e => e.to === 'pkg.m:build.<locals>.Impl.run'), 'a function-local class resolves inside its function');
-  assert.equal(n.codemap.selfCheck.symbols, n.codemap.selfCheck.defScopes);
+  assert.equal(n.codemap.selfCheck.ok, true);
+});
+
+test('a class or function redefined in both branches of an if / try is one symbol, and the self-check passes', () => {
+  const n = mine(join(FIXTURES, 'nested-classes'));
+  assert.equal(n.status, 0, n.stderr);
+  const ids = n.codemap.symbols.filter(s => s.file === 'pkg/compat.py').map(s => s.id).sort();
+  assert.deepEqual(ids, ['pkg.compat:Compat', 'pkg.compat:Compat.run', 'pkg.compat:speedup']);
+  assert.equal(n.codemap.symbols.length, n.codemap.selfCheck.defScopes);
+});
+
+test('`from pkg import items` reaches the submodule when pkg/__init__.py does `from . import items`; a missing name is an in-repo miss', () => {
+  const p = mine(join(FIXTURES, 'package-imports'));
+  assert.equal(p.status, 0, p.stderr);
+  assert.ok(edgesFrom(p.codemap, 'pkg.use:run').some(e => e.to === 'pkg.items:list_items'));
+  assert.deepEqual([p.codemap.selfCheck.unresolvedByOrigin.inRepo, p.codemap.selfCheck.unresolvedByOrigin.local], [1, 0]);
 });

@@ -1,7 +1,7 @@
 /* Rule pack: FastAPI / Starlette.
    - routes: `@<router>.get/post/…(path)` where <router> is an APIRouter or FastAPI app (a module-level variable,
-     imported or not, or a function's local or parameter, built by `APIRouter()` / `FastAPI()` or a factory returning
-     one) -> an `http` entry. Its path is every `include_router(r, prefix=)` up the include chain (at module level
+     imported or not, or a function's local or parameter, built by `APIRouter()` / `FastAPI()`, an in-repo subclass
+     of either, or a factory returning one) -> an `http` entry. Its path is every `include_router(r, prefix=)` up the include chain (at module level
      or inside an app factory) + `APIRouter(prefix=)` + the decorator path;
    - DI: `p: T = Depends(provider)` and `Alias = Annotated[T, Depends(provider)]` -> handler links to provider;
      a parameter typed by such an alias is narrowed to whatever the provider returns. */
@@ -29,8 +29,9 @@ const ROUTER = /(^|\.)(APIRouter|FastAPI)$/;
 
 // a router's prefix as mounted: each include_router prefix up the chain, then its own APIRouter(prefix=)
 export function routePrefixes(py, R) {
+  const routerClass = id => R.mro(id).some(c => py.classes.get(c).baseExprs.some(b => ROUTER.test(b) || ROUTER.test(R.resolveExpr(b, py.classes.get(c))?.ext || '')));
   const makesRouter = (expr, sc) => { if (!expr) return false; if (ROUTER.test(expr)) return true; const r = R.resolveExpr(expr, sc);
-    return !!(r?.ext && ROUTER.test(r.ext)) || !!(r?.id && R.factoryReturns(r.id).some(x => x.ext && ROUTER.test(x.ext))); };
+    return !!(r?.ext && ROUTER.test(r.ext)) || !!(r?.id && (py.classes.has(r.id) ? routerClass(r.id) : R.factoryReturns(r.id).some(x => x.ext && ROUTER.test(x.ext)))); };
   const routers = new Map();   // `module:name` (or `fn#name` for a local) -> own prefix
   for (const a of py.moduleAssigns) if (a.fn && makesRouter(a.fn, a)) {
     const kw = a.args.find(x => x.kw === 'prefix');

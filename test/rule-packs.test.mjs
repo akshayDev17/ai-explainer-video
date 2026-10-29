@@ -24,9 +24,10 @@ test('fastapi: a route needs a router receiver, so `@mock.patch(...)` on a test 
   assert.equal(m.entries.some(e => e.id === 'tests.test_users:test_get_user'), false);
 });
 
-test('fastapi: prefixes compose along nested include_router calls, an imported alias and an app factory', () => {
+test('fastapi: prefixes compose along nested include_router calls, an imported alias, a package re-export and an app factory; an APIRouter subclass routes', () => {
   const m = pack('fastapi-layouts');
   assert.deepEqual(m.entries.filter(e => e.kind === 'http').map(e => `${e.method} ${e.path} ${short(e.id)}`).sort(), [
+    'GET /admin/stats stats',
     'GET /api/v1/users/{user_id} get_user',
     'GET /health create_app.<locals>.health',
     'POST /shop/items create_item',
