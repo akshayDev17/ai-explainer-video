@@ -399,14 +399,15 @@ copied into a fresh dir and read there with `gcov -t`; nothing outside the sandb
 through a no-symlink read of a plain file, and the run's process group is killed when it ends. A binary that aborts
 writes no counters. A test belongs to the first unit its own lines ran in, and its direct links are judged against that
 unit's coverage; its status comes from GoogleTest (`[ OK ]`, `[ FAILED ]`) or Unity (`file:line:test:PASS`) output,
-else from its recipe line's exit status, as far as the line's shape lets that status speak for one binary: a single
-simple command that ran one program's `main` is `passed` on 0 and `failed` otherwise; an all-`&&` chain is `passed` on
-0 and `unknown` otherwise (a binary that aborted wrote no counters, so which one failed cannot be told); any other line
-(`./a; ./b`, `||`, a pipe, a loop, a subshell) is `unknown` either way, since its status is only its last command's;
-`not run` when its lines never ran. Network errors in a
-line's output (`connect: Operation not permitted`) put its failing test in `deniedBySandbox`. Neither runner records
-a caller → callee pair, so `pairs`, `edges`, `noStaticEdge` and `callbacks` are empty, and `outcome` adds `unknown` and
-`notRun`.
+else from its recipe line's exit status, only when every command of the line (one simple command, or each part of an
+all-`&&` chain) has at its head a native executable (ELF or Mach-O) that the build produced in the copy: one such
+binary is `passed` on 0 and `failed` otherwise; an `&&` chain of them is `passed` on 0 and `unknown` otherwise (a
+binary that aborted wrote no counters, so which one failed cannot be told). Every other line is `unknown` either way:
+a script or a shell or interpreter at its head (`sh tests/run.sh`, a `./run.sh` starting with `#!`, `env`, `python`),
+a command that runs others (`find -exec`, `xargs`, `cd`, `time`), `;`, `||`, a pipe, a loop or a subshell; `not run`
+when its lines never ran. Network errors in a line's output (`connect: Operation not permitted`) put its failing test
+in `deniedBySandbox`. Neither runner records a caller → callee pair, so `pairs`, `edges`, `noStaticEdge` and
+`callbacks` are empty, and `outcome` adds `unknown` and `notRun`.
 
 A fixture, a FastAPI `Depends` provider or a queue consumer has no in-repo caller frame, so those links are never
 observed as pairs; a fixture link is observed by attribution (the fixture ran under its test). The trace is one

@@ -12,9 +12,12 @@
      there with `gcov -t` for the line counts of each source it covers. A test whose own lines ran in a unit belongs to
      that unit (the first, if several), and its direct links are judged against that unit's coverage; its status
      comes from GoogleTest's `[ RUN ]` / `[ OK ]` / `[ FAILED ]` lines or Unity's `file:line:test:PASS` lines, else from
-     its recipe line's exit status, as far as the line's shape (lineShape) lets that status speak for one binary: one
-     simple command running one program's `main` is passed on 0 and failed otherwise; an `&&` chain is passed on 0
-     and `unknown` otherwise; any other line (`./a; ./b`, `||`, a pipe, a loop, a subshell) is `unknown` either way. */
+     its recipe line's exit status, only when every command of the line (lineHeads: one simple command, or each part of
+     an all-`&&` chain) is a native executable the build produced in the copy (ELF or Mach-O, isNativeExecutable): one
+     such command is passed on 0 and failed otherwise, an `&&` chain of them is passed on 0 and `unknown` otherwise.
+     Every other line is `unknown` either way: a script or a shell or interpreter at its head (`sh tests/run.sh`,
+     `./run.sh` starting with `#!`, `env`, `python`), a command that runs others (`find -exec`, `xargs`, `cd`, `time`),
+     `;`, `||`, `|`, a loop or a subshell. */
 import { posix } from 'node:path';
 
 /* -> { runner: 'make', dir, target } or null */
@@ -35,29 +38,32 @@ export function makefileShell(text) {
   return sh && !sh.includes('$') ? sh : null;
 }
 
-const KEYWORDS = new Set(['!', 'if', 'then', 'else', 'elif', 'fi', 'for', 'while', 'until', 'do', 'done', 'case', 'esac', 'select', 'function', 'time']);
-/* what a recipe line's exit status can say about the programs it runs: 'single' (one simple command), 'and' (simple
-   commands joined by `&&`, so 0 means each one passed) or 'other' (`;`, `||`, `|`, `&`, a newline, a subshell or group,
-   a command substitution, a compound command); quotes and redirections are read as a shell would */
-export function lineShape(cmd) {
+/* the head word of each command a recipe line runs, when the line is one simple command or simple commands joined by
+   `&&` (so its exit status is 0 only if each one's was); null for any other line (`;`, `||`, `|`, `&`, a newline, a
+   subshell or group, a command substitution). Quotes and redirections are read as a shell would; a quoted head word is
+   kept unreadable, so it names no file */
+export function lineHeads(cmd) {
   const segs = ['']; let q = null;
   for (let i = 0; i < cmd.length; i++) {
     const c = cmd[i];
-    if (q === "'") { if (c === "'") q = null; segs[segs.length - 1] += 'x'; continue; }
-    if (c === '`' || (c === '$' && cmd[i + 1] === '(')) return 'other';
-    if (c === '\\') { i++; segs[segs.length - 1] += 'x'; continue; }
-    if (q === '"') { if (c === '"') q = null; segs[segs.length - 1] += 'x'; continue; }
-    if (c === "'" || c === '"') { q = c; segs[segs.length - 1] += 'x'; continue; }
+    if (q === "'") { if (c === "'") q = null; segs[segs.length - 1] += '\0'; continue; }
+    if (c === '`' || (c === '$' && cmd[i + 1] === '(')) return null;
+    if (c === '\\') { i++; segs[segs.length - 1] += '\0'; continue; }
+    if (q === '"') { if (c === '"') q = null; segs[segs.length - 1] += '\0'; continue; }
+    if (c === "'" || c === '"') { q = c; segs[segs.length - 1] += '\0'; continue; }
     if (c === '&' && cmd[i + 1] === '&') { segs.push(''); i++; continue; }
     if (c === '>' || c === '<') { if (cmd[i + 1] === '&' || cmd[i + 1] === c) i++; segs[segs.length - 1] += ' '; continue; }
-    if (';|&(){}\n'.includes(c)) return 'other';
+    if (';|&(){}\n'.includes(c)) return null;
     segs[segs.length - 1] += c;
   }
-  if (q) return 'other';
+  if (q) return null;
   const heads = segs.map(x => x.trim().split(/\s+/).find(w => !/^\w+=/.test(w)));
-  if (heads.some(h => !h || KEYWORDS.has(h))) return 'other';
-  return segs.length > 1 ? 'and' : 'single';
+  return heads.every(Boolean) ? heads : null;
 }
+
+// a native executable's first bytes: ELF, Mach-O (32 and 64 bit, either byte order) and a universal Mach-O
+const NATIVE_MAGIC = ['7f454c46', 'feedface', 'cefaedfe', 'feedfacf', 'cffaedfe', 'cafebabe'];
+export const isNativeExecutable = buf => !!buf && buf.length >= 4 && NATIVE_MAGIC.includes(buf.subarray(0, 4).toString('hex'));
 
 export const makeArgv = ({ make, dir, target, shell }) => [make, ...(dir ? ['-C', dir] : []), target, 'CC=cc --coverage', 'CXX=c++ --coverage', `SHELL=${shell}`];
 

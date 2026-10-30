@@ -33,10 +33,10 @@ export function exposable(p, { scratch, hidden }) {
 }
 
 // a file the sandboxed run wrote (or could have replaced), read from outside the sandbox: opened without following a
-// symlink, and read only when the open file is a plain file; null otherwise
-export function readRunFile(p) {
+// symlink, and read only when the open file is a plain file; null otherwise (`encoding` null: a Buffer)
+export function readRunFile(p, encoding = 'utf8') {
   let fd = null;
-  try { fd = openSync(p, constants.O_RDONLY | constants.O_NOFOLLOW); return fstatSync(fd).isFile() ? readFileSync(fd, 'utf8') : null; }
+  try { fd = openSync(p, constants.O_RDONLY | constants.O_NOFOLLOW); return fstatSync(fd).isFile() ? readFileSync(fd, encoding) : null; }
   catch { return null; } finally { if (fd != null) closeSync(fd); }
 }
 // the same, parsed as JSON: [value], or [] when it cannot be read or parsed

@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { FIXTURES, SKILL, scratch, cleanup, tool, gitRepo, assertGolden } from './helpers.mjs';
 import { sandboxWorks, readRunFile, readRunJson } from '../skills/explainer-video-from-codebase/tools/lib/sandbox.mjs';
 import { recogniseGo, goModuleDir, goTestsToRun, goTestArgv, parseGoTestJson, parseCoverProfile } from '../skills/explainer-video-from-codebase/tools/lib/trace-go.mjs';
-import { recogniseMake, makeArgv, makefileShell, lineShape, parseGcov, parseCTestOutput } from '../skills/explainer-video-from-codebase/tools/lib/trace-c.mjs';
+import { recogniseMake, makeArgv, makefileShell, lineHeads, isNativeExecutable, parseGcov, parseCTestOutput } from '../skills/explainer-video-from-codebase/tools/lib/trace-c.mjs';
 import { symbolsRan, linesToBlocks, observeCoverage } from '../skills/explainer-video-from-codebase/tools/lib/observe-coverage.mjs';
 
 const OPT_IN = '--i-ran-this-by-the-user';
@@ -78,10 +78,14 @@ test('the Go module the run uses, and the tests it runs: one alone per run, in t
   assert.deepEqual(goTestsToRun(nested, recogniseGo('go -C tools test ./...'.split(' ')), 'tools').map(t => t.name), ['TestGen']);
 });
 
-test('a recipe line\'s shape: what its exit status can say about the programs it runs', () => {
-  const shapes = { './tests/test_cart': 'single', './t > log 2>&1': 'single', 'VAR=1 ./t "a;b"': 'single', './a && ./b': 'and', 'cd t && ./t': 'and',
-    './a; ./b': 'other', './a || true': 'other', './a | tee log': 'other', '(./a)': 'other', './t $(cat args)': 'other', 'for t in a b; do ./$t || exit 1; done': 'other', './a &': 'other' };
-  assert.deepEqual(Object.fromEntries(Object.keys(shapes).map(c => [c, lineShape(c)])), shapes);
+test('a recipe line\'s commands: the head of each, for one simple command or an && chain; none for any other line', () => {
+  const heads = { './tests/test_cart': ['./tests/test_cart'], './t > log 2>&1': ['./t'], 'VAR=1 ./t "a;b"': ['./t'], './a && ./b': ['./a', './b'],
+    'sh tests/run.sh': ['sh'], 'cd t && ./t': ['cd', './t'], 'xargs -n1 sh < tests/list': ['xargs'], "find tests -name 'test_*' -exec {} \\;": null, '"./t"': ['\0\0\0\0\0'],
+    './a; ./b': null, './a || true': null, './a | tee log': null, '(./a)': null, './t $(cat args)': null, 'for t in a b; do ./$t || exit 1; done': null, './a &': null };
+  assert.deepEqual(Object.fromEntries(Object.keys(heads).map(c => [c, lineHeads(c)])), heads);
+  const bytes = hex => Buffer.from(hex, 'hex');
+  assert.deepEqual(['7f454c4602010100', 'cffaedfe07000001', 'cafebabe00000002', Buffer.from('#!/bin/sh\n').toString('hex'), '7f45'].map(h => isNativeExecutable(bytes(h))),
+    [true, true, true, false, false], 'ELF and Mach-O are native executables; a script is not');
 });
 
 test('a file the run wrote is read from outside the sandbox only as a plain file, never through a symlink', () => {
@@ -226,12 +230,12 @@ test('make test: a recipe line that runs two test binaries and fails gives their
 });
 
 test('make test runs recipe lines under the shell the Makefile names', { skip: skipFor(['cc', 'make', 'gcov']) }, () => {
-  const repo = cRepo(`SHELL := ./mysh\n\ntest: tests/test_cart\n\ttest "$$VIA_MYSH" = 1 && ./tests/test_cart\n\n${C_RULES}`,
-    { mysh: ['#!/bin/sh\nVIA_MYSH=1 exec /bin/sh "$@"\n', 0o755] });
+  const repo = cRepo(`SHELL := ./mysh\n\ntest: tests/test_cart\n\t./tests/test_cart\n\n${C_RULES}`,
+    { mysh: ['#!/bin/sh\necho "mysh ran: $2" >&2\nexec /bin/sh "$@"\n', 0o755] });
   const out = mineFixture(repo), r = trace(out, 'make test');
   assert.equal(r.status, 0, r.stderr + r.stdout);
-  const t = read(out, 'trace.json');
-  assert.equal(t.byTest['tests/test_cart.c:test_total'].status, 'passed');
+  assert.match(readFileSync(join(out, 'trace.log'), 'utf8'), /^mysh ran: \.\/tests\/test_cart$/m);
+  assert.equal(read(out, 'trace.json').byTest['tests/test_cart.c:test_total'].status, 'passed');
   cleanup(dirname(repo)); cleanup(join(out, '..'));
 });
 
@@ -266,6 +270,19 @@ test('make test: a recipe line gives its tests a status only when its shape lets
   assert.deepEqual(statuses('./tests/test_cart && ./tests/test_abort'), { test_total: 'unknown', test_discount: 'unknown' },
     'the second binary aborted and wrote no counters: the first is not blamed');
   assert.deepEqual(statuses('./tests/test_cart && ./tests/test_more'), { test_total: 'passed', test_discount: 'passed', test_more: 'passed' });
+  assert.deepEqual(statuses('./tests/test_net'), { test_ping: 'failed' });
+});
+
+test('make test: a recipe line that hands its binaries to a script gives their tests no status of their own (unknown)', { skip: skipFor(['cc', 'make', 'gcov']) }, () => {
+  const run = ['#!/bin/sh\n./tests/test_net\necho done\n', 0o755];
+  for (const line of ['sh tests/run.sh', './tests/run.sh']) {
+    const repo = cRepo(`test: tests/test_net\n\t${line}\n\n${C_RULES}`, { 'tests/run.sh': run }), out = mineFixture(repo);
+    const r = trace(out, 'make test');
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    const t = read(out, 'trace.json');
+    assert.deepEqual([t.exitCode, t.byTest['tests/test_net.c:test_ping'].status], [0, 'unknown'], `${line}: the script exits 0 after test_net failed, so test_ping is never passed`);
+    cleanup(dirname(repo)); cleanup(join(out, '..'));
+  }
 });
 
 test('a process a test leaves behind is killed when its run ends', { skip: skipFor(['go']) }, () => {

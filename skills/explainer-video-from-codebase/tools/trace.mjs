@@ -55,7 +55,7 @@ import { observe } from './lib/observe.mjs';
 import { observeV8, parseTap, parseJestJson } from './lib/observe-v8.mjs';
 import { recogniseJs, jsTestFiles, passThrough, runnerPackage, nodeModulesDirs, nodeModulesLinks, fileArgv } from './lib/trace-js.mjs';
 import { recogniseGo, goModuleDir, goTestsToRun, goTestArgv, parseGoTestJson, parseCoverProfile, GO_NETWORK } from './lib/trace-go.mjs';
-import { recogniseMake, makeArgv, makefileShell, lineShape, parseGcov, parseCTestOutput, C_NETWORK } from './lib/trace-c.mjs';
+import { recogniseMake, makeArgv, makefileShell, lineHeads, isNativeExecutable, parseGcov, parseCTestOutput, C_NETWORK } from './lib/trace-c.mjs';
 import { observeCoverage, symbolsRan, linesToBlocks } from './lib/observe-coverage.mjs';
 
 const fail = (code, msg) => { console.error(`[trace] ${msg}`); process.exit(code); };
@@ -228,7 +228,7 @@ function copyRepo(dest) {
     if (st.isSymbolicLink()) symlinkSync(readlinkSync(src), dst);
     else if (st.isFile()) copyFileSync(src, dst);
   }
-  return files.length;
+  return files;
 }
 
 /* ---------------- run ---------------- */
@@ -260,7 +260,7 @@ function runSandboxed(argv, env, { box: kind, readOnly, limitMs, cwd = COPY }) {
 
 let code = 0;
 try {
-  const copied = copyRepo(COPY);
+  const copiedFiles = copyRepo(COPY), copied = copiedFiles.length;
   const sha = p => { try { return createHash('sha256').update(readFileSync(p)).digest('hex'); } catch { return null; } };
   const changedFiles = (m.files || []).filter(f => f.sha256 && sha(join(COPY, f.path)) !== f.sha256).map(f => f.path);
   const readOnly = readOnlyPaths(), shown = readOnly.filter(p => exposable(p, { scratch: SCRATCH, hidden: HIDDEN }));
@@ -268,7 +268,7 @@ try {
     console.log(`[trace] not exposing ${p} to the run: it holds your home folder, the repo or scratch`);
   if (lang === 'js') code = await runJs({ copied, changedFiles, shown });
   else if (lang === 'go') code = await runGo({ copied, changedFiles, shown });
-  else if (lang === 'c') code = await runC({ copied, changedFiles, shown });
+  else if (lang === 'c') code = await runC({ copied, copiedFiles, changedFiles, shown });
   else {
     for (const f of readdirSync(PAYLOAD).filter(f => f.endsWith('.py'))) copyFileSync(join(PAYLOAD, f), join(SCRATCH, 'trace', f));
     const env = {
@@ -438,7 +438,7 @@ async function runGo({ copied, changedFiles, shown }) {
 }
 
 /* ---------------- C / C++: the make target once, with coverage per test binary, read by gcov ---------------- */
-async function runC({ copied, changedFiles, shown }) {
+async function runC({ copied, copiedFiles, changedFiles, shown }) {
   const dir = makeCmd.dir;
   const makefile = ['GNUmakefile', 'makefile', 'Makefile'].find(f => existsSync(join(COPY, dir, f)));
   if (!makefile) { console.error(`[trace] refused: no Makefile in ${dir || 'the repo root'}`); return 1; }
@@ -450,21 +450,25 @@ async function runC({ copied, changedFiles, shown }) {
   console.log(`[trace] ${SANDBOX_LABEL[box.kind]} · ${copied} files copied to scratch · running: ${argv.join(' ')}, coverage per test binary (limit ${timeoutSec}s)`);
   const t0 = Date.now();
   const run = await runSandboxed(argv, env, { box: box.kind, readOnly: shown, limitMs: timeoutSec * 1000 });
-  // each recipe line fmtrace-sh ran, in order: its command, its shape, exit status, output and the counters it wrote.
+  // each recipe line fmtrace-sh ran, in order: its command, the commands it runs, exit status, output and the counters
+  // it wrote.
   // The run wrote these files, so only plain files inside its own line dirs are read, never through a symlink
   const gcdasIn = d => { const out = []; (function walk(p) { let st; try { st = lstatSync(p); } catch { return; }
     if (st.isDirectory()) for (const n of readdirSync(p)) walk(join(p, n)); else if (st.isFile() && p.endsWith('.gcda')) out.push(p); })(d); return out; };
   const lines = [...new Set((readRunFile(join(UNITS, 'order')) || '').split('\n').map(l => basename(l.trim())).filter(n => /^line-\w+$/.test(n)))]
     .filter(n => lstatSync(join(UNITS, n), { throwIfNoEntry: false })?.isDirectory())
     .map(n => { const d = join(UNITS, n), st = readRunFile(join(d, 'status')), command = readRunFile(join(d, 'command')) ?? '';
-      return { dir: d, command, shape: lineShape(command), status: st == null ? null : Number(st.trim()), output: readRunFile(join(d, 'output')) || '', gcdas: gcdasIn(join(d, 'gcda')) }; });
+      return { dir: d, command, heads: lineHeads(command), status: st == null ? null : Number(st.trim()), output: readRunFile(join(d, 'output')) || '', gcdas: gcdasIn(join(d, 'gcda')) }; });
   // inside the same sandbox, each counter file and the notes file the compiler wrote beside its object are copied into
   // a fresh dir and read there by gcov: nothing outside the sandbox opens what the run wrote; a source is named as the
   // compiler saw it, from the make dir
   const cFiles = new Set((m.files || []).filter(f => f.lang === 'c' || f.lang === 'cpp').map(f => f.path));
   const toRepo = src => { const a = src.startsWith('/') ? (src.startsWith(COPY + '/') ? src.slice(COPY.length + 1) : null) : posix.normalize(posix.join(dir, src));
     if (a && cFiles.has(a)) return a; const hits = [...cFiles].filter(f => f.endsWith('/' + src.replace(/^(\.\.?\/)+/, ''))); return hits.length === 1 ? hits[0] : null; };
-  const mains = new Set(m.symbols.filter(x => x.name === 'main' && cFiles.has(x.file)).map(x => x.id));
+  // a head word that names a native executable in the copy which the repo did not hold: a binary the build produced
+  const repoHeld = new Set(copiedFiles);
+  const built = h => { const p = posix.normalize(h.startsWith('/') ? h : posix.join(COPY, dir, h));
+    return h.includes('/') && p.startsWith(COPY + '/') && !repoHeld.has(p.slice(COPY.length + 1)) && isNativeExecutable(readRunFile(p, null)); };
   const GCOV_COPY = 'd=$(mktemp -d "$TMPDIR/gcov-XXXXXX") && cp -- "$1" "$d/x.gcda" && cp -- "$2" "$d/x.gcno" && exec "$3" -t -o "$d" "$d/x.gcda"';
   const units = [], seen = new Map();
   for (const l of lines.filter(x => x.gcdas.length)) {
@@ -475,8 +479,8 @@ async function runC({ copied, changedFiles, shown }) {
       for (const [src, ls] of parseGcov(r.stdout)) { const f = toRepo(src); if (f) (counts.get(f) || counts.set(f, []).get(f)).push(...linesToBlocks(ls)); }
     }
     const n = (seen.get(l.command) || 0) + 1; seen.set(l.command, n);
-    const ran = symbolsRan(m, counts), one = l.shape === 'single' && [...ran].filter(id => mains.has(id)).length <= 1;
-    units.push({ key: n > 1 ? `${l.command} #${n}` : l.command, line: l, tests: [], ran, provesPass: one || l.shape === 'and', provesFail: one });
+    const binaries = !!l.heads && l.heads.every(built);
+    units.push({ key: n > 1 ? `${l.command} #${n}` : l.command, line: l, tests: [], ran: symbolsRan(m, counts), provesPass: binaries, provesFail: binaries && l.heads.length === 1 });
   }
   const durationMs = Date.now() - t0;
   const logText = redactSecrets(run.log.toString('utf8'));
@@ -488,7 +492,7 @@ async function runC({ copied, changedFiles, shown }) {
     return 2;
   }
   // a test belongs to the first binary its own lines ran in; it passed or failed as that binary's recipe line did, when
-  // the line's shape lets its exit status speak for the binary (one program: either way; an && chain: 0 only), else
+  // every command the line runs is a binary the build produced (one: either way; an && chain of them: 0 only), else
   // unknown, unless it printed a status of its own
   const printed = parseCTestOutput(logText);
   const tests = (m.tests || []).filter(t => cFiles.has(t.file) && (!dir || t.file.startsWith(dir + '/')));
