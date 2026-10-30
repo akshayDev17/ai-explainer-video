@@ -60,9 +60,13 @@ agy plugin install https://github.com/akshayDev17/ai-explainer-video
 ```
 
 All four commands install the **same** npm package — one package, three manifest surfaces,
-one copy of all twelve skills: the ten video skills, `coursework-author`, the companion
-skill for writing the coursework these videos come from, and `explainer-video-from-codebase`,
-a sibling for codebases that is still being built (only its stage 1 to 1c tools and its on-screen code tools exist so far: mining and ranking candidate flows, an opt-in sandboxed trace of the test suite, validating and approving the flow list, planning the videos, and cutting verified code panels and diagram skeletons for the scenes). How each platform reads it, and how
+one copy of all sixteen skills: the ten video skills, `coursework-author`, the companion
+skill for writing the coursework these videos come from, and the five code-flow skills:
+`explainer-video-from-codebase`, which makes explainer videos of a codebase's major code flows
+(Python, TypeScript / JavaScript, Go, C, C++, or a mix), and its four stage skills. It mines the
+repo, ranks candidate flows, optionally traces the test suite in a sandbox, has you approve the
+flow list, plans the videos, then runs the same per-video stages with verified code panels and
+generated flow diagrams. How each platform reads it, and how
 to publish, is in
 [`DISTRIBUTION.md`](./DISTRIBUTION.md).
 
@@ -93,6 +97,15 @@ chapter block) and `captions.srt`, copied to the destination you chose — by
 default `videos/` beside the source. Scratch stays in a gitignored
 `out/<name>/<NN>/`.
 
+For a codebase, invoke the code-flow skill with the repo root instead:
+
+```
+/explainer-video-from-codebase path/to/your/repo/
+```
+
+It shows you the ranked candidate flows and its proposed series, and plans no video until you
+approve the flow list. Its scratch root sits outside the repo.
+
 Run every command from the **project** (where `out/` lives), not from the skill's
 install folder. The tools self-locate their own `tools/`, `src/` and `scenes/`,
 so only the work and scratch paths depend on the current directory.
@@ -107,7 +120,8 @@ cordis.patch.yml + lib/index.js          DSH bundle plugin (serves this package'
 skills/explainer-video-from-coursework/  the main skill: SKILL.md, tools/, src/, scenes/, SETUP.md
 skills/craft-video-<stage>/              the 9 stage skills, separately invocable
 skills/coursework-author/                the companion skill: authoring the coursework (vendored copy)
-skills/explainer-video-from-codebase/    in progress: code-flow videos from a codebase (stages 1–1c, mine to flow-plan, the 1t trace, and the stage 5 code tools, so far)
+skills/explainer-video-from-codebase/    the code-flow skill: SKILL.md, FLOWS.md, tools/, vendored tree-sitter
+skills/craft-codeflow-<stage>/           its 4 stage skills (mine, flows, plan, scene), separately invocable
 DISTRIBUTION.md                          publish + install commands
 ```
 
@@ -116,6 +130,8 @@ DISTRIBUTION.md                          publish + install commands
 | file | what it covers |
 |------|----------------|
 | [`SKILL.md`](./skills/explainer-video-from-coursework/SKILL.md) | the contract of record — the agent's entry point |
+| [`SKILL.md`](./skills/explainer-video-from-codebase/SKILL.md) (codebase) | the code-flow pipeline's contract of record |
+| [`FLOWS.md`](./skills/explainer-video-from-codebase/FLOWS.md) | every code-flow artifact's fields, from the code map to the code panels |
 | [`SETUP.md`](./skills/explainer-video-from-coursework/SETUP.md) | cited, per-OS machine prerequisites |
 | [`ARCHITECTURE.md`](./skills/explainer-video-from-coursework/ARCHITECTURE.md) | how the pieces fit together |
 | [`PIPELINE.md`](./skills/explainer-video-from-coursework/PIPELINE.md) | the stage-by-stage pipeline |

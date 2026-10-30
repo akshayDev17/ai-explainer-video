@@ -15,8 +15,8 @@ The one package carries three manifest surfaces, and each consumer reads only it
 | `plugin.json` (root) + `.agents/plugins/marketplace.json` | Codex, Antigravity |
 | `dsh.bundle.patch` → `cordis.patch.yml` → `lib/index.js` | DeepSeek Harness |
 
-`skills/` holds all eleven skills once (ten video skills plus the vendored `coursework-author`),
-and every surface points at that single copy.
+`skills/` holds all sixteen skills once (ten video skills, the vendored `coursework-author` and the
+five code-flow skills), and every surface points at that single copy.
 
 ## A release is a button click
 
