@@ -195,6 +195,10 @@ def _reset_in_child():
 
 
 def _on_term(signum, frame):
+    # the test the time limit cut off: its own record would come after this, so it gets one with no call phase,
+    # which counts as an error
+    if CURRENT[0] is not None:
+        OUTCOMES.setdefault(CURRENT[0], {}).setdefault("message", "cut off by the time limit")
     _dump()
     os._exit(128 + signum)
 

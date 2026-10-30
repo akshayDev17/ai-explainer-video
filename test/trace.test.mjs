@@ -429,18 +429,27 @@ test('python -m unittest is traced too, attributed by test id', { skip }, () => 
   cleanup(join(out, '..'));
 });
 
-test('exit 5: the time limit stops the run and keeps the partial trace, marked', { skip }, () => {
+// a test the limit cut off counts as an error however far it got: mid-call under pytest, in a slow fixture's setup,
+// mid-test under unittest
+for (const [what, file, body, cmd, id] of [
+  ['mid-call', 'test_slow.py', 'def test_slow():\n    discount_for(1)\n    time.sleep(60)\n', 'python3 -m pytest -q tests/test_slow.py', 'tests.test_slow:test_slow'],
+  ['in a fixture\'s setup', 'test_slow_setup.py', 'import pytest\n\n\n@pytest.fixture\ndef slow():\n    discount_for(1)\n    time.sleep(60)\n\n\ndef test_slow_setup(slow):\n    pass\n',
+    'python3 -m pytest -q tests/test_slow_setup.py', 'tests.test_slow_setup:test_slow_setup'],
+  ['under unittest', 'test_slow_case.py', 'import unittest\n\n\nclass SlowTest(unittest.TestCase):\n    def test_slow(self):\n        discount_for(1)\n        time.sleep(60)\n',
+    'python3 -m unittest tests.test_slow_case', 'tests.test_slow_case:SlowTest.test_slow'],
+]) test(`exit 5: the time limit stops the run and keeps the partial trace, marked; a test cut off ${what} is an error`, { skip }, () => {
   const repo = join(scratch(), 'repo');
   cpSync(REPO, repo, { recursive: true });
-  writeFileSync(join(repo, 'tests', 'test_slow.py'), 'import time\n\nfrom shop.cart import discount_for\n\n\ndef test_slow():\n    discount_for(1)\n    time.sleep(60)\n');
+  writeFileSync(join(repo, 'tests', file), `import time\n\nfrom shop.cart import discount_for\n\n\n${body}`);
   const out = mineFixture(repo);
-  const r = trace(out, 'python3 -m pytest -q tests/test_slow.py', '--timeout', '3');
+  const r = trace(out, cmd, '--timeout', '3');
   assert.equal(r.status, 5, r.stderr + r.stdout);
   const t = read(out, 'trace.json');
   assert.equal(t.timedOut, true);
-  assert.ok(t.byTest['tests.test_slow:test_slow'].ran.includes('shop.cart:discount_for'), 'what ran before the limit is kept');
-  assert.equal(t.byTest['tests.test_slow:test_slow'].status, 'error', 'a test the limit cut off did not pass');
-  assert.deepEqual([t.outcome.passed, t.outcome.errors], [0, 1]);
+  assert.ok(t.byTest[id].ran.includes('shop.cart:discount_for'), 'what ran before the limit is kept');
+  assert.equal(t.byTest[id].status, 'error', 'a test the limit cut off did not pass');
+  assert.deepEqual([t.outcome.collected, t.outcome.passed, t.outcome.errors], [1, 0, 1]);
+  assert.deepEqual(t.failures.map(f => [f.test, f.status, f.message]), [[id, 'error', 'cut off by the time limit']]);
   cleanup(join(repo, '..')); cleanup(join(out, '..'));
 });
 
