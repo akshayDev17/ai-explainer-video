@@ -12,7 +12,8 @@
    that matches nothing is counted, never guessed; an anonymous one (a callback inside a symbol) has nothing of its own
    to mark.
    A file whose run ended cleanly but reported no test is listed as not collected (the runner's own config leaves it
-   out, or it defines none), never as an error. */
+   out, or it defines none), with the code map's count of tests in it, never as an error; those tests never ran, so they
+   are left out of byTest and the direct-link share. */
 import { fileURLToPath } from 'node:url';
 
 const byStr = (a, b) => a < b ? -1 : a > b ? 1 : 0;
@@ -180,7 +181,7 @@ export function observeV8(m, runs, { root, readFile, node }) {
       if (network.length || PERMISSION.test(t.message)) denied.push({ test: id, nodeid, status: 'failed', network, permission: !network.length && PERMISSION.test(t.message), message: t.message });
     }
     const errs = [...run.outcomes.suiteErrors];
-    if (!reported.length && !errs.length && run.exitCode === 0 && !run.timedOut) notCollected.push(run.file);
+    if (!reported.length && !errs.length && run.exitCode === 0 && !run.timedOut) notCollected.push({ file: run.file, tests: known.length });
     if (!reported.length && !errs.length && (run.exitCode !== 0 || run.timedOut)) errs.push({ message: run.timedOut ? 'cut off by the time limit' : `the runner exited ${run.exitCode} and reported no test` });
     for (const e of errs) {
       outcome.errors++;
@@ -194,9 +195,10 @@ export function observeV8(m, runs, { root, readFile, node }) {
   /* ---- per test (by its file's run): direct links and hooks that ran ---- */
   const byTest = {};
   let dObs = 0, dAll = 0, pObs = 0, pAll = 0, linked = 0;
+  const uncollected = new Set(notCollected.map(n => n.file));
   for (const t of tests) {
     const ran = ranIn.get(t.file);
-    if (!ran && !statusBy.has(t.id)) continue;
+    if ((!ran && !statusBy.has(t.id)) || uncollected.has(t.file)) continue;
     const direct = [...new Set(t.direct.map(d => d.to).filter(to => sym.has(to) && grp(to) !== 'test' && sym.get(to).kind !== 'class'))];
     const missing = ran ? direct.filter(to => !ran.has(to)).sort(byStr) : direct;
     if (ran && direct.length) { linked++; dAll += direct.length; dObs += direct.length - missing.length;
@@ -217,7 +219,7 @@ export function observeV8(m, runs, { root, readFile, node }) {
   for (const [file, set] of [...ranIn].sort(([a], [b]) => byStr(a, b))) for (const id of set) (ran[id] ||= []).push(file);
   const byFile = Object.fromEntries([...ranIn].sort(([a], [b]) => byStr(a, b)).map(([file, set]) => [file, { ran: [...set].sort(byStr) }]));
   return {
-    runtime: { node }, granularity: 'test-file', outcome, notCollected: notCollected.sort(byStr), failures, deniedBySandbox: denied,
+    runtime: { node }, granularity: 'test-file', outcome, notCollected: notCollected.sort((a, b) => byStr(a.file, b.file)), failures, deniedBySandbox: denied,
     summary: {
       scripts, functionsRan: functionsRanBy, unmappedFunctions: unmapped, anonymousCallbacks: anonymous,
       pairs: 'not recorded: V8 coverage says which functions ran in a test file, not which called which (an inspector-based tracer would be needed)',

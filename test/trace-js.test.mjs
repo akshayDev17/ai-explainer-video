@@ -159,7 +159,8 @@ test('observeV8: a file whose run ended cleanly but reported no test is not coll
   const runs = [{ file: 'e2e/login.spec.ts', exitCode: 0, timedOut: false, network: [], outcomes: { tests: [], suiteErrors: [] }, coverage: [] },
     { file: 'src/a.test.ts', exitCode: 1, timedOut: false, network: [], outcomes: { tests: [], suiteErrors: [] }, coverage: [] }];
   const o = observeV8(m, runs, { root: '/r', readFile: () => TEXT, node: 'v22' });
-  assert.deepEqual(o.notCollected, ['e2e/login.spec.ts']);
+  assert.deepEqual(o.notCollected, [{ file: 'e2e/login.spec.ts', tests: 1 }]);
+  assert.deepEqual([o.summary.directLinksPerTest.tests, o.byTest['e2e/login.spec.ts:logs in']], [0, undefined], 'its tests never ran: out of the share');
   assert.equal(o.outcome.errors, 1, 'a run that failed with no report is still an error');
   assert.deepEqual(o.failures.map(f => f.nodeid), ['src/a.test.ts']);
 });
@@ -291,6 +292,32 @@ test('jest-style transformed code (compiled through node:vm with an inline sourc
   cleanup(dirname(repo)); cleanup(join(out, '..'));
 });
 
+test('a frontend with its own package.json and node_modules (frontend/) is traced from that package: its runner, its paths', { skip }, () => {
+  const repo = realpathSync(gitRepo());
+  const fe = join(repo, 'frontend');
+  mkdirSync(join(fe, 'src'), { recursive: true }); mkdirSync(join(fe, 'node_modules', 'jest'), { recursive: true }); mkdirSync(join(fe, 'node_modules', '.bin'));
+  writeFileSync(join(fe, 'node_modules', 'jest', 'bin.js'), FAKE_JEST);
+  symlinkSync('../jest/bin.js', join(fe, 'node_modules', '.bin', 'jest'));
+  writeFileSync(join(repo, '.gitignore'), 'node_modules\n');
+  writeFileSync(join(fe, 'package.json'), '{ "name": "frontend", "devDependencies": { "jest": "29" } }\n');
+  writeFileSync(join(fe, 'src', 'price.js'), 'function withTax(p) { return p * 2; }\nfunction round(p) { return Math.round(p); }\nmodule.exports = { withTax, round };\n');
+  writeFileSync(join(fe, 'src', 'price.test.js'), ["const assert = require('node:assert');", "const { withTax } = require('./price');", "it('adds tax', () => { assert.equal(withTax(2), 4); });", ''].join('\n'));
+  writeFileSync(join(fe, 'src', 'round.test.js'), ["const assert = require('node:assert');", "const { round } = require('./price');", "it('rounds', () => { assert.equal(round(1.2), 1); });", ''].join('\n'));
+  git(repo, 'add', '-A');
+  const out = mineFixture(repo);
+  let r = trace(out, 'npx jest');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  let t = read(out, 'trace.json');
+  assert.deepEqual(t.files, ['frontend/src/price.test.js', 'frontend/src/round.test.js']);
+  assert.deepEqual(Object.fromEntries(Object.entries(t.byTest).map(([k, v]) => [k, v.status])), { 'frontend/src/price.test.js:adds tax': 'passed', 'frontend/src/round.test.js:rounds': 'passed' });
+  assert.deepEqual(t.ran['frontend/src/price.js:withTax'], ['frontend/src/price.test.js']);
+  r = trace(out, 'npx jest src/price');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  t = read(out, 'trace.json');
+  assert.deepEqual(t.files, ['frontend/src/price.test.js'], 'a path is read from the package, as jest run there reads it');
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
 test('jest\'s module wrapper, which runs once per file, is no function of the file: a class on line 1 constructed only in a skipped test never ran', { skip }, () => {
   const repo = jestRepo();
   writeFileSync(join(repo, 'src', 'units.js'), ['class Pound {', '  constructor(lb) { this.lb = lb; }', '}', 'function kilos(lb) { return lb * 0.45; }', 'module.exports = { Pound, kilos };', ''].join('\n'));
@@ -358,6 +385,24 @@ test('vitest after an ordinary local run (an empty node_modules/.vite-temp left 
   assert.deepEqual(Object.values(t.byTest).map(v => v.status), ['passed']);
   assert.deepEqual(t.ran['src/add.js:add'], ['src/add.test.js']);
   assert.deepEqual(readdirSync(join(repo, 'node_modules', '.vite-temp')), [], 'nothing is written into the repo\'s own cache dir');
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+test('vitest: the direct-link share counts only the tests the runner collected; an e2e spec its config leaves out is listed as not collected', { skip }, () => {
+  // like vitest with an `include` that leaves e2e/ out: an e2e spec it is handed reports no test and exits 0
+  const bin = FAKE_VITEST.replace("const temp =", "if (file.includes('/e2e/')) { fs.writeFileSync(argv.find(a => a.startsWith('--outputFile=')).slice(13), JSON.stringify({ testResults: [] })); return; }\nconst temp =");
+  const repo = vitestRepo(bin, ["test('adds', () => { assert.equal(add(1, 2), 3); });"]);
+  mkdirSync(join(repo, 'e2e'));
+  writeFileSync(join(repo, 'e2e', 'add.spec.js'), ["const { add } = require('../src/add');", "test('adds in the browser', () => { add(1, 1); });", "test('adds again', () => { add(2, 2); });", ''].join('\n'));
+  git(repo, 'add', '-A');
+  const out = mineFixture(repo);
+  const r = trace(out, 'npx vitest run');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(t.notCollected, [{ file: 'e2e/add.spec.js', tests: 2 }]);
+  assert.deepEqual([t.summary.directLinksPerTest.tests, t.summary.directLinksPerTest.observed, t.summary.directLinksPerTest.total], [1, 1, 1]);
+  assert.deepEqual(Object.keys(t.byTest), ['src/add.test.js:adds'], 'a test in a file the runner did not collect never ran');
+  assert.match(r.stdout, /direct links whose target ran in their test's file 1\/1 \(100\.0%, 1 tests\)/);
   cleanup(dirname(repo)); cleanup(join(out, '..'));
 });
 

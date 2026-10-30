@@ -61,8 +61,9 @@ per mined commit, and only when both hold:
 
 - the repo has a test command you can name: `pytest`, `python -m pytest` or `python -m unittest`, run with the repo's
   own interpreter (its `.venv/bin/python` when it has one); or `node --test`, `npx jest` or `npx vitest run`, with the
-  runner installed in the repo's `node_modules` (tracing never installs one); plus the arguments its own config or docs
-  use (a jest or vitest flag's value as `-t=name` or `-t name`; any other flag is boolean, so a path after it stays a path);
+  runner installed in the repo's `node_modules`, at its root or in the package below it that holds the tests, such as
+  `frontend/` (tracing never installs one; paths are then given as you would from that package); plus the arguments
+  its own config or docs use (a jest or vitest flag's value as `-t=name` or `-t name`; any other flag is boolean, so a path after it stays a path);
 - this platform has a sandbox: macOS (`sandbox-exec`) or Linux with `bwrap` (bubblewrap). Elsewhere, do not offer it.
 
 Ask with exactly this text, filling in the command and the test count from `codemap.md`:

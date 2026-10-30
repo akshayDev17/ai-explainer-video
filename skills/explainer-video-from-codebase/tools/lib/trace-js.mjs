@@ -1,6 +1,9 @@
 /* trace.mjs's JavaScript / TypeScript runners (design §3.14, §3.17): which test commands are recognised, which test
    files each one runs, and the command line that runs one file under V8 precise coverage with a machine-readable
-   report. Only the repo's own installed runner is ever run (its node_modules/.bin); nothing is installed.
+   report. Only the repo's own installed runner is ever run (its node_modules/.bin); nothing is installed. jest and vitest
+   run from the package that holds the runner: the repo root, else the one package below it (a package.json beside a
+   node_modules/.bin holding the runner, such as frontend/) that holds the code map's test files; test files and the
+   paths given are read relative to it, as the runner run there reads them.
    - `node --test [--test-* flags] [paths]`: the TAP reporter on stdout;
    - `npx jest [args]`, `jest [args]`, `node_modules/.bin/jest [args]`: --json --outputFile, --runInBand, no watchman;
    - `npx vitest [run] [args]`, `vitest …`: --reporter=json --outputFile, run mode, the threads pool (a forked worker is
@@ -57,10 +60,12 @@ const SELECTS = {
 };
 // what an argument selects test files by: a positional, or jest's --testPathPattern(s) (which --runTestsByPath ignores)
 const selectorOf = (runner, a) => !a.startsWith('-') ? a : runner === 'jest' && /^--testPathPatterns?=/.test(a) ? a.slice(a.indexOf('=') + 1) : null;
-export function jsTestFiles(m, runner, args) {
+// -> the repo-relative test files the command runs, from the package `pkg` ('' for the repo root)
+export function jsTestFiles(m, runner, args, pkg = '') {
   const selects = args.map(a => selectorOf(runner, a)).filter(p => p != null).map(p => SELECTS[runner](p.replace(/^\.\//, '').replace(/\/$/, '')));
   const files = [...new Set((m.tests || []).filter(t => /\.[cm]?[jt]sx?$/.test(t.file)).map(t => t.file))].sort();
-  return files.filter(f => PATTERNS[runner](f) && (!selects.length || selects.some(sel => sel(f))));
+  const inPkg = f => pkg ? (f.startsWith(pkg + '/') ? f.slice(pkg.length + 1) : null) : f;
+  return files.filter(f => { const p = inPkg(f); return p != null && PATTERNS[runner](p) && (!selects.length || selects.some(sel => sel(p))); });
 }
 export const passThrough = (runner, args) => args.filter(a => selectorOf(runner, a) == null);
 
@@ -71,6 +76,17 @@ export function runnerBin(root, runner) {
   const real = realpathSync(bin);
   const head = readFileSync(real, 'utf8').slice(0, 200);
   return { rel: `node_modules/.bin/${runner}`, node: /\.[cm]?js$/.test(real) || /^#!.*\bnode\b/.test(head) };
+}
+
+// the package jest or vitest runs from: { dir, bin } (dir '' for the repo root), or { why } when none can be chosen
+export function runnerPackage(root, m, runner) {
+  if (runnerBin(root, runner)) return { dir: '', bin: runnerBin(root, runner) };
+  const pkgs = nodeModulesDirs(root).map(d => d.slice(0, -'/node_modules'.length)).filter(d => d && existsSync(join(root, d, 'package.json')) && runnerBin(join(root, d), runner));
+  if (!pkgs.length) return { why: `${runner} is not installed in the repo (no node_modules/.bin/${runner} at its root or beside a package.json below it)` };
+  const owners = pkgs.filter(d => jsTestFiles(m, runner, [], d).length);
+  if (owners.length > 1) return { why: `${runner} is installed in ${owners.length} packages that hold test files (${owners.join(', ')}), and one command runs from one of them` };
+  const dir = owners[0] ?? (pkgs.length === 1 ? pkgs[0] : null);
+  return dir == null ? { why: `${runner} is installed in ${pkgs.join(', ')}, none of which holds a test file` } : { dir, bin: runnerBin(join(root, dir), runner) };
 }
 
 // node_modules dirs under the repo (not inside another one), to link into the copy and expose read-only

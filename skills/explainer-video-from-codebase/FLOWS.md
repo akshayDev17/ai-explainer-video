@@ -237,7 +237,10 @@ unittest` (python, python3 or python3.N, by name or path; a bare name is found i
 `-t=name` or `-t name`, split only for the jest and vitest flags that take a value, so a word after any other flag is
 a test path or filter), or `jest` / `vitest`
 from the repo's `node_modules/.bin`; refuses (exit 1) a jest or vitest the repo has not installed (nothing is ever
-installed, and `npx` itself is never run), with any shell syntax (`;`, `&&`, `|`, redirects, `$`, backticks) or a wrapper (`uv run`,
+installed, and `npx` itself is never run). jest and vitest run from the package that holds them: the repo root, else
+the one package below it (a `package.json` beside a `node_modules/.bin` holding the runner, such as `frontend/`) that
+holds the code map's test files, whose test files and the paths given are read relative to it (`cwd` in `trace.json`);
+two such packages holding test files are refused (exit 1). It refuses (exit 3), too, a command with any shell syntax (`;`, `&&`, `|`, redirects, `$`, backticks) or a wrapper (`uv run`,
 `env`); and refuses (exit 4) on a platform with no OS sandbox, or where this platform's sandbox does not start
 (`sandbox-exec` on macOS, `bwrap` on Linux, always chosen by platform; there is no option to pick or skip one). It
 never runs unsandboxed.
@@ -294,7 +297,8 @@ the repo, such as `node_modules/@app/shared -> ../../packages/shared`) points at
 Reports: node --test's TAP on stdout; jest `--json --outputFile --runInBand --watchman=false --passWithNoTests`;
 vitest `run --reporter=json --outputFile --pool=threads --passWithNoTests` (a forked worker is killed before it
 writes its coverage). A file whose run ends cleanly with no test reported (the repo's own runner config does not
-collect it, or it defines none) is listed in `notCollected`, never counted as an error. A covered
+collect it, or it defines none) is listed in `notCollected` (`{file, tests}`: the code map's tests in it), never
+counted as an error; those tests never ran, so they are not in `byTest` or `directLinksPerTest`. A covered
 function is matched to a symbol through the script's source map when there is one (Node's own, or the inline map of a
 file jest or vitest compiled through `node:vm`, which `tools/trace/js/fmtrace-srcmap.cjs` records), else by position
 when the script V8 ran is the file (plain JavaScript, or TypeScript with its types stripped in place and a comment
