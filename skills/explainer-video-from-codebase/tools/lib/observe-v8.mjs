@@ -35,11 +35,23 @@ export function decodeMappings(mappings) {
   }
   return lines;
 }
+// the generated line (0-based) an offset falls on, and that line's start offset
+function generatedLine(entry, offset) {
+  let line = 0, start = 0;
+  while (line < entry.lineLengths.length && start + entry.lineLengths[line] < offset) { start += entry.lineLengths[line] + 1; line++; }
+  return [line, start];
+}
+// a function that closes after every line the map covers is the runner's module wrapper (jest's `Object.<anonymous>`,
+// opened on the file's first line, closed after the inline map), no function of the file
+function wrapsMappedCode(entry, endOffset) {
+  if (!entry?.lineLengths || !entry.data?.mappings) return false;
+  const decoded = entry.decoded ||= decodeMappings(entry.data.mappings);
+  return generatedLine(entry, endOffset)[0] > decoded.findLastIndex(segs => segs.length);
+}
 // the original line (1-based) a generated offset maps to, through a source-map-cache entry
 function sourceMapLine(entry, offset) {
   if (!entry?.lineLengths || !entry.data?.mappings) return null;
-  let line = 0, start = 0;
-  while (line < entry.lineLengths.length && start + entry.lineLengths[line] < offset) { start += entry.lineLengths[line] + 1; line++; }
+  const [line, start] = generatedLine(entry, offset);
   const segs = (entry.decoded ||= decodeMappings(entry.data.mappings))[line] || [];
   const col = offset - start;
   let best = null; for (const s of segs) { if (s[0] <= col) best = s; else break; }
@@ -74,7 +86,7 @@ export function functionsRan(m, dump, root, readFile) {
     const sm = smc[script.url] || smc[path];
     for (const f of fns) {
       const r0 = f.ranges[0];
-      if (!r0.count) continue;
+      if (!r0.count || (sm && wrapsMappedCode(sm, r0.endOffset))) continue;
       const line = sm ? sourceMapLine(sm, r0.startOffset) : identical ? lineOf(starts, r0.startOffset) : null;
       let cand = line != null ? here.filter(s => s.start === line) : [];
       if (cand.length > 1) cand = cand.filter(s => nameMatches(s, f.functionName));

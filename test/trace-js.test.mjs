@@ -234,15 +234,16 @@ test('a workspace package linked from node_modules into the repo is imported fro
   cleanup(dirname(repo)); cleanup(join(out, '..'));
 });
 
-// a stand-in for jest, installed in the repo's node_modules: like jest (and vitest), it transforms each file it loads
-// (here, a line put above it) and compiles it through node:vm with an inline source map, then writes jest's --json report
+// a stand-in for jest, installed in the repo's node_modules: like jest (and vitest), it compiles each file it loads through
+// node:vm with an inline source map, in jest's module wrapper (`Object.<anonymous>`, opened on the file's first line and
+// closed after the map), then writes jest's --json report
 const FAKE_JEST = `#!/usr/bin/env node
 const vm = require('node:vm'), fs = require('node:fs'), path = require('node:path');
 const argv = process.argv.slice(2), file = path.resolve(argv[argv.indexOf('--runTestsByPath') + 1]);
 const load = f => {
   const src = fs.readFileSync(f, 'utf8');
-  const map = { version: 3, sources: [f], names: [], mappings: ';AAAA' + ';AACA'.repeat(src.split('\\n').length - 1) };
-  const code = '({"Object.<anonymous>":function(module,exports,require){"use strict";\\n' + src
+  const map = { version: 3, sources: [f], names: [], mappings: 'AAAA' + ';AACA'.repeat(src.split('\\n').length - 1) };
+  const code = '({"Object.<anonymous>":function(module,exports,require){' + src
     + '\\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,' + Buffer.from(JSON.stringify(map)).toString('base64') + '\\n}});';
   const module = { exports: {} };
   new vm.Script(code, { filename: f }).runInThisContext()['Object.<anonymous>'](module, module.exports,
@@ -253,21 +254,27 @@ const tests = [], stack = [];
 global.describe = (title, fn) => { stack.push({ title, hooks: [] }); fn(); stack.pop(); };
 global.beforeEach = fn => stack.at(-1).hooks.push(fn);
 global.it = (title, fn) => tests.push({ titles: stack.map(s => s.title), title, hooks: stack.flatMap(s => s.hooks), fn });
+global.it.skip = title => tests.push({ titles: stack.map(s => s.title), title, skip: true });
 load(file);
-const results = tests.map(t => { try { t.hooks.forEach(h => h()); t.fn(); return { ancestorTitles: t.titles, title: t.title, status: 'passed', failureMessages: [] }; }
+const results = tests.map(t => { if (t.skip) return { ancestorTitles: t.titles, title: t.title, status: 'pending', failureMessages: [] }; try { t.hooks.forEach(h => h()); t.fn(); return { ancestorTitles: t.titles, title: t.title, status: 'passed', failureMessages: [] }; }
   catch (e) { return { ancestorTitles: t.titles, title: t.title, status: 'failed', failureMessages: [String(e)] }; } });
 const failed = results.some(r => r.status === 'failed');
 fs.writeFileSync(argv.find(a => a.startsWith('--outputFile=')).slice(13), JSON.stringify({ testResults: [{ name: file, status: failed ? 'failed' : 'passed', assertionResults: results }] }));
 process.exitCode = failed ? 1 : 0;
 `;
 
-test('jest-style transformed code (compiled through node:vm with an inline source map) is placed through that map: a method whose name its file shares, an anonymous hook', { skip }, () => {
+const jestRepo = () => {
   const repo = realpathSync(gitRepo());
   mkdirSync(join(repo, 'src')); mkdirSync(join(repo, 'node_modules', 'jest'), { recursive: true }); mkdirSync(join(repo, 'node_modules', '.bin'));
   writeFileSync(join(repo, 'node_modules', 'jest', 'bin.js'), FAKE_JEST);
   symlinkSync('../jest/bin.js', join(repo, 'node_modules', '.bin', 'jest'));
   writeFileSync(join(repo, '.gitignore'), 'node_modules\n');
   writeFileSync(join(repo, 'package.json'), '{ "name": "shapes", "devDependencies": { "jest": "29" } }\n');
+  return repo;
+};
+
+test('jest-style transformed code (compiled through node:vm with an inline source map) is placed through that map: a method whose name its file shares, an anonymous hook', { skip }, () => {
+  const repo = jestRepo();
   writeFileSync(join(repo, 'src', 'shapes.js'), ['class Square {', '  constructor(s) { this.s = s; }', '  area() { return this.s * this.s; }', '}',
     'class Circle {', '  constructor(r) { this.r = r; }', '  area() { return 3 * this.r * this.r; }', '}', 'module.exports = { Square, Circle };', ''].join('\n'));
   writeFileSync(join(repo, 'src', 'shapes.test.js'), ["const assert = require('node:assert');", "const { Square } = require('./shapes');", "describe('Square', () => {", '  let sq;',
@@ -281,6 +288,23 @@ test('jest-style transformed code (compiled through node:vm with an inline sourc
   assert.deepEqual(t.byTest['src/shapes.test.js:Square > has an area'].direct.missing, [], 'Square.area ran, though Circle has an area too');
   assert.equal(t.ran['src/shapes.js:Circle.area'], undefined, 'the other area never ran');
   assert.deepEqual(t.summary.fixtureLinks, { observed: 2, total: 2 }, 'the anonymous beforeEach ran for both tests');
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+test('jest\'s module wrapper, which runs once per file, is no function of the file: a class on line 1 constructed only in a skipped test never ran', { skip }, () => {
+  const repo = jestRepo();
+  writeFileSync(join(repo, 'src', 'units.js'), ['class Pound {', '  constructor(lb) { this.lb = lb; }', '}', 'function kilos(lb) { return lb * 0.45; }', 'module.exports = { Pound, kilos };', ''].join('\n'));
+  writeFileSync(join(repo, 'src', 'units.test.js'), ["const assert = require('node:assert');", "const { Pound, kilos } = require('./units');", "describe('units', () => {",
+    "  it('converts', () => { assert.equal(kilos(2), 0.9); });", "  it.skip('makes a pound', () => { assert.equal(new Pound(1).lb, 1); });", '});', ''].join('\n'));
+  git(repo, 'add', '-A');
+  const out = mineFixture(repo);
+  const r = trace(out, 'npx jest');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(Object.values(t.byTest).map(v => v.status).sort(), ['passed', 'skipped']);
+  assert.deepEqual(t.ran['src/units.js:kilos'], ['src/units.test.js']);
+  assert.equal(t.ran['src/units.js:Pound.constructor'], undefined, 'no Pound was ever built');
+  assert.deepEqual(t.byTest['src/units.test.js:units > makes a pound'].direct.missing, ['src/units.js:Pound.constructor']);
   cleanup(dirname(repo)); cleanup(join(out, '..'));
 });
 
