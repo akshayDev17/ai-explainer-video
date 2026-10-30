@@ -36,6 +36,8 @@ _net = {}          # test -> [network attempts]
 OUTCOMES = {}      # test -> {phase: outcome, ...}, filled by fmtrace_plugin or the unittest wrapper
 COLLECTED = [None]
 COLLECT_ERRORS = []
+FIXTURE_ERRORS = []  # unittest's failing class and module fixtures: not tests, so not in OUTCOMES
+FIXTURE = [None]   # (name, phase) of the unittest class or module fixture running outside any test
 CURRENT = [None]   # the running test's key, set around its setup, call and teardown
 _done = [False]
 _forked = [False]
@@ -87,7 +89,7 @@ def _prof(frame, event, arg):
 
 def _audit(event, args):
     if event in ("socket.connect", "socket.getaddrinfo", "socket.gethostbyname", "socket.gethostbyaddr", "socket.sendto"):
-        seen = _net.setdefault(CURRENT[0], [])
+        seen = _net.setdefault(FIXTURE[0][0] if FIXTURE[0] else CURRENT[0], [])
         if len(seen) < 5:
             target = args[1] if event in ("socket.connect", "socket.sendto") else args[0] if args else None
             if event == "socket.getaddrinfo" and len(args) > 1:
@@ -106,7 +108,7 @@ def _dump():
     rows = [{"from": list(c) if c else None, "to": list(t), "test": k, "n": n} for (c, t, k), n in _pairs.items()]
     data = {"argv": sys.argv, "python": sys.version.split()[0], "pairs": rows,
             "network": {k: v for k, v in _net.items() if k is not None}, "outcomes": OUTCOMES,
-            "collected": COLLECTED[0], "collectErrors": COLLECT_ERRORS}
+            "collected": COLLECTED[0], "collectErrors": COLLECT_ERRORS, "fixtureErrors": FIXTURE_ERRORS}
     name = "trace-%d-%s.json" % (os.getpid(), os.urandom(4).hex())
     with open(os.path.join(OUT, name), "w") as fh:
         json.dump(data, fh)
@@ -193,6 +195,7 @@ def _reset_in_child():
     _net.clear()
     OUTCOMES.clear()
     COLLECT_ERRORS.clear()
+    FIXTURE_ERRORS.clear()
     COLLECTED[0] = None
     _forked[0] = True
 
@@ -200,7 +203,9 @@ def _reset_in_child():
 def _on_term(signum, frame):
     # the test the time limit cut off, in the process that ran it (a forked worker's SIGTERM is not a cut-off): the
     # phase it was in fails, as pytest counts it; under unittest the test is an error
-    if CURRENT[0] is not None and not _forked[0]:
+    if FIXTURE[0] and not _forked[0]:
+        FIXTURE_ERRORS.append({"nodeid": FIXTURE[0][0], "phase": FIXTURE[0][1], "message": "cut off by the time limit"})
+    elif CURRENT[0] is not None and not _forked[0]:
         rec = OUTCOMES.setdefault(CURRENT[0], {})
         rec.setdefault("message", "cut off by the time limit")
         if RUNNER == "pytest":
@@ -226,16 +231,23 @@ def _wrap_unittest():
     def counts(result):
         return {k: len(getattr(result, k, ()) or ()) for k in kinds}
 
+    # only the outermost test records: a suite a test runs inside itself is that test's own business
+    inside = [False]
+
     def traced_run(self, result=None):
+        if inside[0]:
+            return run(self, result)
         key = "unittest::" + self.id()
         before = counts(result) if result is not None else None
         CURRENT[0] = key
+        inside[0] = True
         if before is not None:
             OUTCOMES[key] = {}
         try:
             return run(self, result)
         finally:
             CURRENT[0] = None
+            inside[0] = False
             if before is not None:
                 after = counts(result)
                 grew = [k for k in kinds if after[k] > before[k]]
@@ -252,14 +264,16 @@ def _wrap_unittest():
     unittest.case.TestCase.run = traced_run
 
     # a failing setUpModule, setUpClass, tearDownClass or tearDownModule is reported outside any TestCase.run, under
-    # unittest's own name for it (`setUpClass (pkg.mod.Class)`): record it as an error, and make it current while it
-    # runs, so its network attempts and a cut-off there are recorded under that name too
+    # unittest's own name for it (`setUpClass (pkg.mod.Class)`): record it as a fixture error (in its setup or teardown
+    # phase), and note the fixture while it runs, so its network attempts and a cut-off there are recorded under that
+    # name too
     add_error = unittest.result.TestResult.addError
 
     def traced_add_error(self, test, err):
-        if isinstance(test, unittest.suite._ErrorHolder):
+        if isinstance(test, unittest.suite._ErrorHolder) and not inside[0]:
             last = traceback.format_exception_only(err[0], err[1])[-1].strip()
-            OUTCOMES["unittest::" + test.id()] = {"call": "error", "message": last[:200], "permission": denied(err[1])}
+            FIXTURE_ERRORS.append({"nodeid": "unittest::" + test.id(), "phase": "setup" if test.id().startswith("setUp") else "teardown",
+                                   "message": last[:200], "permission": denied(err[1])})
         return add_error(self, test, err)
 
     unittest.result.TestResult.addError = traced_add_error
@@ -274,12 +288,14 @@ def _wrap_unittest():
         handle = getattr(unittest.suite.TestSuite, method)
 
         def traced(self, *args):
-            prev, p = CURRENT[0], parent(*args)
-            CURRENT[0] = "unittest::%s (%s)" % (name, p) if p else prev
+            p = None if inside[0] else parent(*args)
+            if not p:
+                return handle(self, *args)
+            prev, FIXTURE[0] = FIXTURE[0], ("unittest::%s (%s)" % (name, p), "setup" if name.startswith("setUp") else "teardown")
             try:
                 return handle(self, *args)
             finally:
-                CURRENT[0] = prev
+                FIXTURE[0] = prev
 
         setattr(unittest.suite.TestSuite, method, traced)
 

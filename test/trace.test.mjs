@@ -20,6 +20,7 @@ const OPT_IN = '--i-ran-this-by-the-user';
 const KIND = { darwin: 'macos', linux: 'bwrap' }[process.platform];
 const works = KIND ? sandboxWorks(KIND) : { ok: false, why: `no sandbox on ${process.platform}` };
 const hasPytest = spawnSync('python3', ['-c', 'import pytest'], { encoding: 'utf8' }).status === 0;
+const hasXdist = spawnSync('python3', ['-c', 'import xdist'], { encoding: 'utf8' }).status === 0;
 const unavailable = !works.ok ? `no OS sandbox here: ${works.why}` : !hasPytest ? 'python3 with pytest is not installed' : false;
 const skip = process.env.FM_TRACE_REQUIRE_SANDBOX === '1' ? false : unavailable;
 if (process.env.FM_TRACE_REQUIRE_SANDBOX === '1') test('the sandbox and pytest are available (FM_TRACE_REQUIRE_SANDBOX=1)', () => assert.equal(unavailable, false, unavailable));
@@ -429,23 +430,48 @@ test('python -m unittest is traced too, attributed by test id', { skip }, () => 
   cleanup(join(out, '..'));
 });
 
-// unittest reports a failing setUpClass outside any test and skips the class: it is an error under unittest's name for
-// it, and one that needed the network is listed as denied
-test('python -m unittest: a setUpClass the sandbox denied is an error, listed as denied', { skip }, () => {
+// unittest reports a failing class fixture outside any test (and skips the class when it is setUpClass): it is an error
+// under unittest's name for it, in its setup or teardown phase, never a test, so `collected` and `byTest` hold only the
+// tests unittest ran; one that needed the network is listed as denied
+test('python -m unittest: a failing setUpClass or tearDownClass is an error, not a test; a denied one is listed', { skip }, () => {
   const repo = join(scratch(), 'repo');
   cpSync(REPO, repo, { recursive: true });
-  writeFileSync(join(repo, 'tests', 'test_needs_cache.py'), ['import unittest', '', 'from shop.net import ping', '', '',
+  writeFileSync(join(repo, 'tests', 'test_class_fixtures.py'), ['import unittest', '', 'from shop.net import ping', '', '',
     'class NeedsTheCache(unittest.TestCase):', '    @classmethod', '    def setUpClass(cls):', '        ping("127.0.0.1", 6379)', '',
-    '    def test_a(self):', '        pass', ''].join('\n'));
+    '    def test_a(self):', '        pass', '', '',
+    'class BadTeardown(unittest.TestCase):', '    @classmethod', '    def tearDownClass(cls):', '        raise RuntimeError("teardown broke")', '',
+    '    def test_b(self):', '        pass', '', '    def test_c(self):', '        pass', ''].join('\n'));
   const out = mineFixture(repo);
-  const r = trace(out, 'python3 -m unittest tests.test_needs_cache');
+  const r = trace(out, 'python3 -m unittest tests.test_class_fixtures');
   assert.equal(r.status, 0, r.stderr + r.stdout);
-  const t = read(out, 'trace.json'), key = 'unittest::setUpClass (tests.test_needs_cache.NeedsTheCache)';
-  assert.deepEqual([t.outcome.passed, t.outcome.errors], [0, 1]);
-  assert.deepEqual(t.failures.map(f => [f.test, f.nodeid, f.status]), [[null, key, 'error']]);
-  assert.deepEqual(t.deniedBySandbox.map(d => d.nodeid), [key]);
+  const t = read(out, 'trace.json'), setUp = 'unittest::setUpClass (tests.test_class_fixtures.NeedsTheCache)';
+  assert.deepEqual([t.outcome.collected, t.outcome.passed, t.outcome.errors], [2, 2, 2]);
+  assert.deepEqual(t.failures.map(f => [f.test, f.nodeid, f.status, f.phase, f.message]), [
+    [null, setUp, 'error', 'setup', t.failures[0].message],
+    [null, 'unittest::tearDownClass (tests.test_class_fixtures.BadTeardown)', 'error', 'teardown', 'RuntimeError: teardown broke']]);
+  assert.deepEqual(t.deniedBySandbox.map(d => d.nodeid), [setUp]);
   assert.ok(t.deniedBySandbox[0].network.some(n => n.includes('6379')), JSON.stringify(t.deniedBySandbox));
-  assert.ok(t.byTest[key].ran.includes('shop.net:ping'), 'the class fixture\'s calls are attributed to it');
+  assert.deepEqual(Object.keys(t.byTest), ['tests.test_class_fixtures:BadTeardown.test_b', 'tests.test_class_fixtures:BadTeardown.test_c']);
+  cleanup(join(repo, '..')); cleanup(join(out, '..'));
+});
+
+// a unittest suite a test runs inside itself is that test's own business: the inner failure is not the repo's, and the
+// outer test stays current
+test('python -m unittest: a suite run inside a test records no outcome and leaves the outer test current', { skip }, () => {
+  const repo = join(scratch(), 'repo');
+  cpSync(REPO, repo, { recursive: true });
+  writeFileSync(join(repo, 'tests', 'test_inner_suite.py'), ['import unittest', '', 'from shop.cart import discount_for', '', '',
+    'class Outer(unittest.TestCase):', '    def test_runs_an_inner_suite(self):',
+    '        class Inner(unittest.TestCase):', '            def runTest(self):', '                self.fail("deliberate inner failure")', '',
+    '        inner = unittest.TestResult()', '        unittest.TestSuite([Inner()]).run(inner)', '        self.assertEqual(len(inner.failures), 1)',
+    '        discount_for(1)', ''].join('\n'));
+  const out = mineFixture(repo);
+  const r = trace(out, 'python3 -m unittest tests.test_inner_suite');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json'), id = 'tests.test_inner_suite:Outer.test_runs_an_inner_suite';
+  assert.deepEqual(t.failures, [], readFileSync(join(out, 'trace.log'), 'utf8'));
+  assert.deepEqual([t.outcome.collected, t.outcome.passed, t.outcome.failed], [1, 1, 0]);
+  assert.ok(t.byTest[id].ran.includes('shop.cart:discount_for'), 'the outer test keeps its attribution after the inner run');
   cleanup(join(repo, '..')); cleanup(join(out, '..'));
 });
 
@@ -469,6 +495,29 @@ test('a pytest run inside a test records no outcome and leaves the outer test cu
   cleanup(join(repo, '..')); cleanup(join(out, '..'));
 });
 
+// a pytest process that runs the copy's tests records them, whoever started it: an xdist worker, or a pytest a test
+// started in a child process
+for (const [what, cmd, extra, why] of [
+  ['xdist workers', 'python3 -m pytest -q -n 2 tests/test_cart.py', [], hasXdist ? false : 'pytest-xdist is not installed'],
+  ['a pytest child process', 'python3 -m pytest -q tests/test_runs_cart.py',
+    ['tests.test_runs_cart:test_runs_the_cart_tests_in_a_child'], false],
+]) test(`${what} running the copy's tests record their outcomes and attribution`, { skip: skip || why }, () => {
+  const repo = join(scratch(), 'repo');
+  cpSync(REPO, repo, { recursive: true });
+  writeFileSync(join(repo, 'tests', 'test_runs_cart.py'), ['import subprocess', 'import sys', '', '',
+    'def test_runs_the_cart_tests_in_a_child():',
+    '    assert subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_cart.py"]).returncode == 0', ''].join('\n'));
+  const out = mineFixture(repo);
+  const r = trace(out, cmd);
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json'), cart = ['tests.test_cart:test_discount_can_be_mocked', 'tests.test_cart:test_total_applies_discount'];
+  assert.deepEqual(t.failures, [], readFileSync(join(out, 'trace.log'), 'utf8'));
+  assert.deepEqual(Object.keys(t.byTest).sort(), [...cart, ...extra].sort());
+  for (const id of [...cart, ...extra]) assert.equal(t.byTest[id].status, 'passed', id);
+  assert.ok(t.byTest['tests.test_cart:test_total_applies_discount'].ran.includes('shop.cart:Cart.total'), JSON.stringify(t.byTest));
+  cleanup(join(repo, '..')); cleanup(join(out, '..'));
+});
+
 // a test the limit cut off counts as an error in the phase it was in: mid-call under pytest, in a slow fixture's setup
 // or teardown (pytest's count: the test passed, its teardown is an error), mid-test under unittest
 for (const [what, file, body, cmd, id, want] of [
@@ -480,8 +529,6 @@ for (const [what, file, body, cmd, id, want] of [
     'python3 -m pytest -q tests/test_slow_teardown.py', 'tests.test_slow_teardown:test_slow_teardown', { status: 'passed', phase: 'teardown', passed: 1 }],
   ['under unittest', 'test_slow_case.py', 'import unittest\n\n\nclass SlowTest(unittest.TestCase):\n    def test_slow(self):\n        discount_for(1)\n        time.sleep(60)\n',
     'python3 -m unittest tests.test_slow_case', 'tests.test_slow_case:SlowTest.test_slow', { status: 'error', phase: 'call', passed: 0 }],
-  ['in a setUpClass under unittest', 'test_slow_class.py', 'import unittest\n\n\nclass SlowClass(unittest.TestCase):\n    @classmethod\n    def setUpClass(cls):\n        discount_for(1)\n        time.sleep(60)\n\n    def test_a(self):\n        pass\n',
-    'python3 -m unittest tests.test_slow_class', 'unittest::setUpClass (tests.test_slow_class.SlowClass)', { status: 'error', phase: 'call', passed: 0, test: null }],
 ]) test(`exit 5: the time limit stops the run and keeps the partial trace, marked; a test cut off ${what} is an error`, { skip }, () => {
   const repo = join(scratch(), 'repo');
   cpSync(REPO, repo, { recursive: true });
@@ -494,7 +541,7 @@ for (const [what, file, body, cmd, id, want] of [
   assert.ok(t.byTest[id].ran.includes('shop.cart:discount_for'), 'what ran before the limit is kept');
   assert.equal(t.byTest[id].status, want.status);
   assert.deepEqual([t.outcome.collected, t.outcome.passed, t.outcome.errors], [1, want.passed, 1]);
-  assert.deepEqual(t.failures.map(f => [f.test, f.status, f.phase, f.message]), [['test' in want ? want.test : id, want.status, want.phase, 'cut off by the time limit']]);
+  assert.deepEqual(t.failures.map(f => [f.test, f.status, f.phase, f.message]), [[id, want.status, want.phase, 'cut off by the time limit']]);
   cleanup(join(repo, '..')); cleanup(join(out, '..'));
 });
 
@@ -512,6 +559,22 @@ test('a forked worker\'s SIGTERM does not mark its test cut off', { skip }, () =
   const t = read(out, 'trace.json');
   assert.deepEqual(t.failures.map(f => [f.test, f.status, f.phase, f.message]),
     [['tests.test_fork:test_forks_a_worker', 'failed', 'call', 'RuntimeError: its own failure']]);
+  cleanup(join(repo, '..')); cleanup(join(out, '..'));
+});
+
+test('exit 5: a setUpClass the limit cut off is an error in its setup phase, not a test', { skip }, () => {
+  const repo = join(scratch(), 'repo');
+  cpSync(REPO, repo, { recursive: true });
+  writeFileSync(join(repo, 'tests', 'test_slow_class.py'), ['import time', 'import unittest', '', '', 'class SlowClass(unittest.TestCase):',
+    '    @classmethod', '    def setUpClass(cls):', '        time.sleep(60)', '', '    def test_a(self):', '        pass', ''].join('\n'));
+  const out = mineFixture(repo);
+  const r = trace(out, 'python3 -m unittest tests.test_slow_class', '--timeout', '3');
+  assert.equal(r.status, 5, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual([t.outcome.collected, t.outcome.passed, t.outcome.errors], [0, 0, 1]);
+  assert.deepEqual(t.failures.map(f => [f.test, f.nodeid, f.status, f.phase, f.message]),
+    [[null, 'unittest::setUpClass (tests.test_slow_class.SlowClass)', 'error', 'setup', 'cut off by the time limit']]);
+  assert.deepEqual(t.byTest, {});
   cleanup(join(repo, '..')); cleanup(join(out, '..'));
 });
 

@@ -242,7 +242,8 @@ library frames between the two are skipped; code objects are keyed by identity, 
 compare equal; lambdas, comprehensions and generator bodies count as the function holding them; an interpreter or
 virtualenv under the repo is library code. The current test is set around each test's setup, call and teardown by
 `fmtrace_plugin.py` (pytest, via `PYTEST_PLUGINS`) or a `TestCase.run` wrapper (unittest), so a call a framework makes
-(a fixture, a DI provider) is still attributed to its test. Audit hooks record each test's network attempts. Method
+(a fixture, a DI provider) is still attributed to its test. Only the repo's own tests count: a pytest or unittest run a
+test starts inside itself (pytester, an inner suite) records no outcome and leaves the outer test current. Audit hooks record each test's network attempts. Method
 names come from `co_qualname` (Python 3.11+; older interpreters report bare function names, which miss methods). With
 `HOME` in scratch, packages installed only in the user's site dir (`pip install --user`) are not found: use the repo's
 virtualenv.
@@ -253,8 +254,8 @@ virtualenv.
 | `sandbox`, `runner`, `argv` | `macos-sandbox-exec:macos-nonet.sb` or `linux-bwrap:linux-bwrap.sh`; `pytest` or `unittest`; the command as run |
 | `timeoutSec`, `timedOut`, `exitCode`, `durationMs` | the limit and how the run ended |
 | `codemap` | the code map's file, sha256, `commit`, `treeHash`, and `changedFiles`: mined files that differ in the copy (mine again first) |
-| `outcome` | `collected`, `passed`, `failed`, `errors` (collection and setup errors, failed teardowns, a test the time limit cut off), `skipped`, `xfailed`, `xpassed` |
-| `failures[]` | `test` (code-map id, or null), `nodeid`, `status`, `phase` (`collect`, `setup`, `call`, `teardown`), `message` |
+| `outcome` | `collected`, `passed`, `failed`, `errors` (collection and setup errors, failed teardowns, a failing unittest class or module fixture, a test the time limit cut off), `skipped`, `xfailed`, `xpassed` |
+| `failures[]` | `test` (code-map id, or null: a collection error, a unittest class or module fixture such as `unittest::setUpClass (pkg.mod.Class)`), `nodeid`, `status`, `phase` (`collect`, `setup`, `call`, `teardown`), `message` |
 | `deniedBySandbox[]` | failing tests that attempted a network connect, or failed on a permission error or on a hidden path not found (bwrap hides a path by mounting an empty dir over it): `network` (the attempts), `permission`. They need a service or a file the sandbox refused; never retried |
 | `pairs[]` | `{from, to, n, tests}`: distinct in-repo caller → callee pairs, with calls and how many tests they ran under |
 | `edges[]` | the code-map edges that fired as a pair: `from`, `to`, `kind`, `rule?`, `passedBy?`, `n`, `tests` (ids). The overlay: an edge not listed is not observed, never removed |

@@ -51,13 +51,14 @@ export function observe(m, dumps) {
   const nameOf = key => testIdOf(key) || key;
 
   /* ---- merge every process's records ---- */
-  const pairs = new Map(), ranBy = new Map(), outcomes = new Map(), network = new Map(), collectErrors = new Map();
+  const pairs = new Map(), ranBy = new Map(), outcomes = new Map(), network = new Map(), collectErrors = new Map(), fixtureErrors = new Map();
   let collected = null, records = 0, unmappedRecords = 0, bodies = 0;
   const unmappedSample = new Set(), python = new Set();
   for (const d of dumps) {
     if (d.python) python.add(d.python);
     if (d.collected != null) collected = Math.max(collected ?? 0, d.collected);
     for (const e of d.collectErrors || []) collectErrors.set(e.nodeid, e);
+    for (const e of d.fixtureErrors || []) fixtureErrors.set(e.nodeid, e);
     for (const [k, rec] of Object.entries(d.outcomes || {})) outcomes.set(k, { ...outcomes.get(k), ...rec });
     for (const [k, v] of Object.entries(d.network || {})) network.set(k, [...new Set([...(network.get(k) || []), ...v])]);
     for (const p of d.pairs || []) {
@@ -78,7 +79,7 @@ export function observe(m, dumps) {
   }
 
   /* ---- outcome, failures, tests the sandbox denied ---- */
-  const outcome = { collected: collected ?? outcomes.size, passed: 0, failed: 0, errors: collectErrors.size, skipped: 0, xfailed: 0, xpassed: 0 };
+  const outcome = { collected: collected ?? outcomes.size, passed: 0, failed: 0, errors: collectErrors.size + fixtureErrors.size, skipped: 0, xfailed: 0, xpassed: 0 };
   const statusBy = new Map(), failures = [], denied = [];
   for (const [key, rec] of [...outcomes].sort(([a], [b]) => byStr(a, b))) {
     const status = statusOf(rec), name = nameOf(key);
@@ -94,6 +95,11 @@ export function observe(m, dumps) {
   }
   for (const e of [...collectErrors.values()].sort((a, b) => byStr(a.nodeid, b.nodeid)))
     failures.push({ test: null, nodeid: e.nodeid, status: 'error', phase: 'collect', message: e.message || '' });
+  for (const e of [...fixtureErrors.values()].sort((a, b) => byStr(a.nodeid, b.nodeid))) {
+    failures.push({ test: null, nodeid: e.nodeid, status: 'error', phase: e.phase, message: e.message || '' });
+    const net = network.get(e.nodeid) || [];
+    if (net.length || e.permission) denied.push({ test: null, nodeid: e.nodeid, status: 'error', network: net, permission: !!e.permission, message: e.message || '' });
+  }
 
   /* ---- static edges that fired ---- */
   const uniq = [...new Map(m.edges.map(e => [e.from + '|' + e.to + '|' + e.kind, e])).values()];

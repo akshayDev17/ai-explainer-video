@@ -2,32 +2,35 @@
 provider, a route reached through a test client thread) is still attributed to the test it ran under; and records each
 test's outcome per phase, with whether the sandbox denied it (a permission error, or a hidden path not found). Loaded
 with PYTEST_PLUGINS=fmtrace_plugin.
-It records only the repo's own run: the first pytest config in the first pytest process. A pytest run inside a test
-(pytester, in process or in a child process, which inherits PYTEST_PLUGINS) records no outcome and moves no current
-test; the collector still records its calls."""
+It records only the repo's own tests: those of the first pytest config in a process, in files inside the scratch copy.
+A pytest run inside a test (pytester, in process or in a child process, which inherits PYTEST_PLUGINS) runs tests
+from its own tmp dir, so it records no outcome and moves no current test; the collector still records its calls. An
+xdist worker runs the copy's tests, and records them."""
 import os
 
 import pytest
 import sitecustomize as fm
 
-_BOUND = "FM_TRACE_PYTEST_BOUND"
 _CONFIG = [None]
 
 
 def pytest_configure(config):
-    if _CONFIG[0] is None and not os.environ.get(_BOUND):
+    if _CONFIG[0] is None:
         _CONFIG[0] = config
-        os.environ[_BOUND] = "1"
 
 
-def _ours(config):
-    return config is _CONFIG[0]
+def _path(node):
+    return os.path.realpath(str(getattr(node, "path", None) or node.fspath))
+
+
+def _ours(config, node):
+    return config is _CONFIG[0] and (_path(node) + os.sep).startswith(fm.ROOTS)
 
 
 def _key(item):
     # the test's file relative to the repo root, then the rest of its node id: independent of pytest's rootdir
-    path = os.path.realpath(str(getattr(item, "path", None) or item.fspath))
-    rel = next((path[len(r):] for r in fm.ROOTS if path.startswith(r)), item.nodeid.split("::", 1)[0])
+    path = _path(item)
+    rel = next(path[len(r):] for r in fm.ROOTS if path.startswith(r))
     rest = item.nodeid.split("::", 1)[1] if "::" in item.nodeid else ""
     return rel + "::" + rest
 
@@ -40,7 +43,7 @@ def _last_line(longrepr):
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item, nextitem):
-    if not _ours(item.config):
+    if not _ours(item.config, item):
         yield
         return
     fm.CURRENT[0] = _key(item)
@@ -52,7 +55,7 @@ def pytest_runtest_protocol(item, nextitem):
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
     outcome = yield
-    if not _ours(item.config):
+    if not _ours(item.config, item):
         return
     rep = outcome.get_result()
     rec = fm.OUTCOMES.setdefault(_key(item), {"nodeid": item.nodeid})
@@ -69,10 +72,10 @@ def pytest_runtest_makereport(item, call):
 def pytest_make_collect_report(collector):
     outcome = yield
     report = outcome.get_result()
-    if _ours(collector.config) and report.failed:
+    if _ours(collector.config, collector) and report.failed:
         fm.COLLECT_ERRORS.append({"nodeid": report.nodeid, "message": _last_line(report.longrepr)})
 
 
 def pytest_collection_finish(session):
-    if _ours(session.config):
-        fm.COLLECTED[0] = len(session.items)
+    if session.config is _CONFIG[0]:
+        fm.COLLECTED[0] = len([i for i in session.items if _ours(session.config, i)])

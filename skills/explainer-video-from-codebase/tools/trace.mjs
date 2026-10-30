@@ -223,7 +223,7 @@ try {
 
   const dumps = readdirSync(TRACE_OUT).filter(f => /^trace-.*\.json$/.test(f)).sort().flatMap(f => {
     try { return [JSON.parse(readFileSync(join(TRACE_OUT, f), 'utf8'))]; } catch { return []; } });
-  if (!dumps.length || !dumps.some(d => d.collected || Object.keys(d.outcomes || {}).length)) {
+  if (!dumps.length || !dumps.some(d => d.collected || Object.keys(d.outcomes || {}).length || d.fixtureErrors?.length)) {
     console.error(tail);
     console.error(`[trace] the run produced no trace records or ran no test (${run.error || (run.timedOut ? 'timed out' : `exit ${run.status ?? run.signal}`)}); its output is in ${join(OUT, 'trace.log')}`);
     code = 2;
