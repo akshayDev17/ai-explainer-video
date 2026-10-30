@@ -207,7 +207,8 @@ test('make test on fixtures/trace-c builds with coverage and runs sandboxed; gco
   assert.deepEqual(files(repo), before, 'nothing is written inside the repo: the build and its counters stay in the copy');
   assert.deepEqual([t.runner, t.granularity, t.exitCode !== 0], ['make', 'binary', true]);
   assert.deepEqual(Object.keys(t.byUnit), ['./tests/test_cart', './tests/test_net'], 'one unit per test binary make ran');
-  assert.deepEqual(t.deniedBySandbox.map(d => [d.nodeid, d.network.some(x => /connect: Operation not permitted/i.test(x))]), [['tests/test_net.c::test_ping', true]]);
+  // macOS denies the connect; bwrap's fresh network namespace has only an empty loopback, so it is refused
+  assert.deepEqual(t.deniedBySandbox.map(d => [d.nodeid, d.network.some(x => /connect: (Operation not permitted|Connection refused)/i.test(x))]), [['tests/test_net.c::test_ping', true]]);
   assert.equal(t.ran['src/cart.c:unused'], undefined);
   assertGolden('trace-c', { granularity: t.granularity, ran: Object.keys(t.ran), byUnit: Object.fromEntries(Object.entries(t.byUnit).map(([k, v]) => [k, v.ran.join(', ')])), byTest: Object.fromEntries(Object.entries(t.byTest).map(([k, v]) => [k, `${v.status}: ${v.direct.observed}/${v.direct.total}`])),
     directLinksPerTest: t.summary.directLinksPerTest, functionsRan: t.summary.functionsRan });
