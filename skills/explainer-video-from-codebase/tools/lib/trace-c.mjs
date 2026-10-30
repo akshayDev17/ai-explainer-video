@@ -4,13 +4,16 @@
      target, no other flag: the trace sets CC, CXX and SHELL itself;
    - the run builds and runs the target once with `CC="cc --coverage"`, `CXX="c++ --coverage"` (a command-line
      variable wins over the Makefile's own, and the flag reaches both compiling and linking) and SHELL set to
-     trace/c/fmtrace-sh, which runs each recipe line under /bin/sh with GCOV_PREFIX pointing at a dir of its own: the
-     counters each line's test binary writes land apart, and its exit status and stderr are kept beside them;
-   - each recipe line that wrote counters is one unit (`granularity: binary`), read with `gcov -t` inside the same
-     sandbox for the line counts of each source it covers. A test whose own lines ran in a unit belongs to that unit
-     (the first, if several), and its direct links are judged against that unit's coverage; its status comes from
-     GoogleTest's `[ RUN ]` / `[ OK ]` / `[ FAILED ]` lines or Unity's `file:line:test:PASS` lines, else from its
-     unit's exit status. */
+     trace/c/fmtrace-sh, which runs each recipe line under the shell the Makefile's own top-level `SHELL =` names
+     (else /bin/sh), with the line's .SHELLFLAGS, and GCOV_PREFIX pointing at a dir of its own: the counters each
+     line's test binary writes land apart, and its exit status and output are kept beside them;
+   - each recipe line that wrote counters is one unit (`granularity: binary`); after the run, each counter file and
+     the notes file the compiler wrote beside its object are copied into a fresh dir outside scratch and read there
+     with `gcov -t`, inside the same sandbox, for the line counts of each source it covers. A test whose own lines ran
+     in a unit belongs to that unit (the first, if several), and its direct links are judged against that unit's
+     coverage; its status comes from GoogleTest's `[ RUN ]` / `[ OK ]` / `[ FAILED ]` lines or Unity's
+     `file:line:test:PASS` lines, else from its recipe line's exit status: passed on 0; failed otherwise, unless the
+     line ran more than one program's `main` (`./a && ./b`, a loop), when it is `unknown`. */
 import { posix } from 'node:path';
 
 /* -> { runner: 'make', dir, target } or null */
@@ -21,6 +24,14 @@ export function recogniseMake(words) {
   if (dir.startsWith('/') || dir.split('/').includes('..')) return null;
   if (words.length !== i + 1 || !/^(test|check)$/.test(words[i])) return null;
   return { runner: 'make', dir: dir.replace(/^\.\/?/, '').replace(/\/$/, ''), target: words[i] };
+}
+
+/* the shell a Makefile's own top-level `SHELL = …` names (its last such assignment), or null: one that needs make to
+   expand it (`$(shell which bash)`) is left to the default */
+export function makefileShell(text) {
+  let sh = null;
+  for (const m of text.matchAll(/^(?:(?:export|override)\s+)*SHELL\s*:{0,3}=[ \t]*(.*?)\s*(?:#.*)?$/gm)) sh = m[1];
+  return sh && !sh.includes('$') ? sh : null;
 }
 
 export const makeArgv = ({ make, dir, target, shell }) => [make, ...(dir ? ['-C', dir] : []), target, 'CC=cc --coverage', 'CXX=c++ --coverage', `SHELL=${shell}`];

@@ -390,14 +390,17 @@ dial, socket or lookup error is in `deniedBySandbox`.
 
 `make` builds and runs its target once with `CC="cc --coverage" CXX="c++ --coverage"` (a command-line variable wins
 over the Makefile's own and reaches compiling and linking; a Makefile that calls a compiler by another name writes no
-counters, exit 2) and `SHELL` set to `tools/trace/c/fmtrace-sh`, which runs each recipe line under `/bin/sh` with
-`GCOV_PREFIX` pointing at a dir of its own, so the counters each test binary writes land apart, beside the line's exit
-status and output. Each recipe line that wrote counters is one unit, keyed by the line (`./tests/test_cart`):
-`granularity: "binary"`; its `.gcda` files are read with `gcov -t`, inside the same sandbox. A binary that aborts
-writes no counters. A test belongs to the first binary its own lines ran in, and its direct links are judged against
-that binary's coverage; its status comes from GoogleTest (`[ OK ]`, `[ FAILED ]`) or Unity (`file:line:test:PASS`)
-output, else its binary's exit status (`passed` or `failed`; `not run` when its lines never ran). Network errors in a
-binary's output (`connect: Operation not permitted`) put its failing test in `deniedBySandbox`. Neither runner records
+counters, exit 2) and `SHELL` set to `tools/trace/c/fmtrace-sh`, which runs each recipe line, with the line's
+`.SHELLFLAGS`, under the shell the Makefile's own top-level `SHELL =` names (else `/bin/sh`), with `GCOV_PREFIX`
+pointing at a dir of its own, so the counters each test binary writes land apart, beside the line's exit status and
+output. Each recipe line that wrote counters is one unit, keyed by the line (`./tests/test_cart`):
+`granularity: "binary"`. After the run, each `.gcda` and the `.gcno` beside its object are copied into a fresh dir
+outside scratch and read there with `gcov -t`, inside the same sandbox. A binary that aborts writes no counters. A
+test belongs to the first unit its own lines ran in, and its direct links are judged against that unit's coverage;
+its status comes from GoogleTest (`[ OK ]`, `[ FAILED ]`) or Unity (`file:line:test:PASS`) output, else from its
+recipe line's exit status: `passed` on 0, else `failed`, or `unknown` when the line ran more than one program's `main`
+(`./a && ./b`, a loop), so no one binary's status can be told; `not run` when its lines never ran. Network errors in a
+line's output (`connect: Operation not permitted`) put its failing test in `deniedBySandbox`. Neither runner records
 a caller → callee pair, so `pairs`, `edges`, `noStaticEdge` and `callbacks` are empty, and `outcome` adds `unknown` and
 `notRun`.
 

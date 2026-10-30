@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { FIXTURES, SKILL, scratch, cleanup, tool, gitRepo, assertGolden } from './helpers.mjs';
 import { sandboxWorks } from '../skills/explainer-video-from-codebase/tools/lib/sandbox.mjs';
 import { recogniseGo, goModuleDir, goTestsToRun, goTestArgv, parseGoTestJson, parseCoverProfile } from '../skills/explainer-video-from-codebase/tools/lib/trace-go.mjs';
-import { recogniseMake, makeArgv, parseGcov, parseCTestOutput } from '../skills/explainer-video-from-codebase/tools/lib/trace-c.mjs';
+import { recogniseMake, makeArgv, makefileShell, parseGcov, parseCTestOutput } from '../skills/explainer-video-from-codebase/tools/lib/trace-c.mjs';
 import { symbolsRan, linesToBlocks, observeCoverage } from '../skills/explainer-video-from-codebase/tools/lib/observe-coverage.mjs';
 
 const OPT_IN = '--i-ran-this-by-the-user';
@@ -38,6 +38,8 @@ test('recognised: go test with the flags that only choose and run tests, go -C <
   assert.deepEqual(mk('make test'), { runner: 'make', dir: '', target: 'test' });
   assert.deepEqual(mk('make -C native/isbn check'), { runner: 'make', dir: 'native/isbn', target: 'check' });
   assert.deepEqual(makeArgv({ make: 'make', dir: 'x', target: 'test', shell: '/s/fmtrace-sh' }), ['make', '-C', 'x', 'test', 'CC=cc --coverage', 'CXX=c++ --coverage', 'SHELL=/s/fmtrace-sh']);
+  assert.deepEqual(['SHELL := /bin/bash\n.SHELLFLAGS := -eu -o pipefail -c\n', 'export SHELL = /usr/bin/env bash # recipes use [[\n', 'SHELL = $(shell which bash)\n', 'test:\n\tSHELL=x ./t\n', 'SHELL ?= zsh\n']
+    .map(makefileShell), ['/bin/bash', '/usr/bin/env bash', null, null, null], 'the Makefile\'s own top-level SHELL, when it names one without make expanding it');
   assert.deepEqual(goTestArgv({ go: 'go', flags: ['-short'], name: 'TestA', profile: 'p.out', pkgDir: 'shop' }),
     ['go', 'test', '-json', '-count=1', '-run=^TestA$', '-coverprofile=p.out', '-coverpkg=./...', '-short', './shop']);
 });
@@ -185,4 +187,48 @@ test('make test on fixtures/trace-c builds with coverage and runs sandboxed; gco
   assertGolden('trace-c', { granularity: t.granularity, ran: Object.keys(t.ran), byUnit: Object.fromEntries(Object.entries(t.byUnit).map(([k, v]) => [k, v.ran.join(', ')])), byTest: Object.fromEntries(Object.entries(t.byTest).map(([k, v]) => [k, `${v.status}: ${v.direct.observed}/${v.direct.total}`])),
     directLinksPerTest: t.summary.directLinksPerTest, functionsRan: t.summary.functionsRan });
   cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+/* the trace-c fixture with a Makefile of the test's own: its sources, built as fixtures/trace-c's Makefile builds them */
+const C_RULES = 'tests/test_cart: tests/test_cart.c src/cart.c src/cart.h\n\t$(CC) -O0 -g -o $@ tests/test_cart.c src/cart.c\n\n'
+  + 'tests/test_net: tests/test_net.c src/net.c src/net.h\n\t$(CC) -O0 -g -o $@ tests/test_net.c src/net.c\n\n.PHONY: test\n';
+const cRepo = (makefile, files = {}) => {
+  const repo = gitRepo(join(FIXTURES, 'trace-c'));
+  writeFileSync(join(repo, 'Makefile'), makefile);
+  for (const [f, [text, mode]] of Object.entries(files)) writeFileSync(join(repo, f), text, { mode });
+  return repo;
+};
+
+test('make test: a recipe line that runs two test binaries and fails gives their tests no status of their own (unknown)', { skip: skipFor(['cc', 'make', 'gcov']) }, () => {
+  const repo = cRepo(`test: tests/test_cart tests/test_net\n\t./tests/test_cart && ./tests/test_net\n\n${C_RULES}`), out = mineFixture(repo);
+  const r = trace(out, 'make test');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(Object.keys(t.byUnit), ['./tests/test_cart && ./tests/test_net']);
+  assert.deepEqual(Object.fromEntries(Object.entries(t.byTest).map(([k, v]) => [k, v.status])),
+    { 'tests/test_cart.c:test_total': 'unknown', 'tests/test_cart.c:test_discount': 'unknown', 'tests/test_net.c:test_ping': 'unknown' });
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+test('make test runs recipe lines under the shell the Makefile names', { skip: skipFor(['cc', 'make', 'gcov']) }, () => {
+  const repo = cRepo(`SHELL := ./mysh\n\ntest: tests/test_cart\n\ttest "$$VIA_MYSH" = 1 && ./tests/test_cart\n\n${C_RULES}`,
+    { mysh: ['#!/bin/sh\nVIA_MYSH=1 exec /bin/sh "$@"\n', 0o755] });
+  const out = mineFixture(repo), r = trace(out, 'make test');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.equal(t.byTest['tests/test_cart.c:test_total'].status, 'passed');
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+test('make test: a symlink the run plants where the trace reads its counters is never written through', { skip: skipFor(['cc', 'make', 'gcov']) }, () => {
+  const victim = join(scratch(), 'victim.txt');
+  writeFileSync(victim, 'untouched\n');
+  const plant = 'd="$$FM_TRACE_UNITS/line-planted/gcda$$(pwd -P)"; mkdir -p "$$d" && printf x > "$$d/a.gcda" && printf payload > a.gcno'
+    + ` && ln -s ${JSON.stringify(victim)} "$$d/a.gcno" && echo "$$FM_TRACE_UNITS/line-planted" >> "$$FM_TRACE_UNITS/order"`;
+  const repo = cRepo(`test: tests/test_cart\n\t./tests/test_cart\n\t${plant}\n\n${C_RULES}`), out = mineFixture(repo);
+  const r = trace(out, 'make test');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.equal(readFileSync(victim, 'utf8'), 'untouched\n');
+  assert.equal(read(out, 'trace.json').byTest['tests/test_cart.c:test_total'].status, 'passed');
+  cleanup(dirname(victim)); cleanup(dirname(repo)); cleanup(join(out, '..'));
 });

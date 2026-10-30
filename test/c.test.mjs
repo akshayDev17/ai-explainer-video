@@ -67,6 +67,19 @@ test('c resolver: a static function is seen only from its own file and the files
   cleanup(dirname(repo));
 });
 
+test('c resolver: a static function is seen through an include of an include, and through an included .c file', () => {
+  const repo = repoOf({
+    'src/util.h': 'static inline int clamp(int x) { return x < 0 ? 0 : x; }\n',
+    'src/common.h': '#include "util.h"\n',
+    'src/d.c': '#include "common.h"\nint use_d(void) { return clamp(-1); }\n',
+    'src/cart.c': 'static int discount(int t) { return t / 10; }\n',
+    'tests/test_cart.c': '#include "../src/cart.c"\nint test_discount(void) { return discount(200) == 20; }\n' });
+  const m = mine(repo).codemap;
+  assert.deepEqual(calls(m, 'src/d.c:use_d'), ['src/util.h:clamp static']);
+  assert.deepEqual(calls(m, 'tests/test_cart.c:test_discount'), ['src/cart.c:discount static']);
+  cleanup(dirname(repo));
+});
+
 test('c++ resolver: an out-of-line definition qualified by a namespace, not a class, is a function in that namespace', () => {
   const repo = repoOf({
     'src/geo.h': 'namespace geo {\nint area(int w);\n}\n',

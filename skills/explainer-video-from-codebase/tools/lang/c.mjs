@@ -10,7 +10,7 @@
    Resolution rules (design rev3 §3.14, C and C++ rows):
    - C linkage is global: a bare call names a function defined in the same file (a `static` one included), else the
      one non-static definition of that name in the repo, preferring the files the caller's includes name (a header and
-     the source file beside it); a quoted `#include` resolves beside the including file (as graphify does), else to
+     the source file beside it); a `static` one elsewhere is seen only from the files whose includes reach it; a quoted `#include` resolves beside the including file (as graphify does), else to
      the one repo file whose path ends with it (an `-I` directory); a system include is external;
    - C++ names: the enclosing class's members (an implicit `this->`), then the enclosing namespaces outward, `using
      namespace` directives, then the global namespace; `ns::f()` and `K::m()` are qualified;
@@ -449,23 +449,29 @@ export function cResolverFor(cm, { files }) {
     return bySuffix.get(spec);
   };
   // the files a module's includes name, and the sources beside them (`cart.h` -> `cart.c` / `cart.cpp`)
-  const near = new Map();
+  const near = new Map(), included = new Map();
   for (const M of modules.values()) {
-    const set = new Set([M.file]);
+    const set = new Set([M.file]), inc1 = [];
+    included.set(M.file, inc1);
     for (const inc of M.includes) if (!inc.system) {
       const f = resolveInclude(inc.path, M.file);
       if (!f) { cm.unresolvedIncludes.push({ from: M.file, include: inc.path, line: inc.line }); continue; }
-      set.add(f); const stem = f.replace(/\.(h|hh|hpp|hxx)$/, ''); for (const e of ['.c', '.cc', '.cpp', '.cxx']) if (fileSet.has(stem + e)) set.add(stem + e);
+      inc1.push(f); set.add(f); const stem = f.replace(/\.(h|hh|hpp|hxx)$/, ''); for (const e of ['.c', '.cc', '.cpp', '.cxx']) if (fileSet.has(stem + e)) set.add(stem + e);
     }
     near.set(M.file, set);
   }
   // classes by qualified and short name
   const classByQual = new Map(), classByName = new Map();
   for (const k of classes.values()) { (classByQual.get(k.qual) || classByQual.set(k.qual, []).get(k.qual)).push(k.id); (classByName.get(k.name) || classByName.set(k.name, []).get(k.name)).push(k.id); }
+  // the files a module reaches by #include, directly or through another included file
+  const reached = new Map();
+  const reachOf = f => { if (!reached.has(f)) { const out = new Set([f]), todo = [f];
+    while (todo.length) for (const g of included.get(todo.pop()) || []) if (!out.has(g)) { out.add(g); todo.push(g); }
+    reached.set(f, out); } return reached.get(f); };
   // the definition of a C function / class nearest the caller: its own file, then what it includes, then the only one;
-  // a `static` one only from its own file or a header the caller includes
+  // a `static` one only from its own file or a file the caller's includes reach
   const visible = (id, module) => { const s = symbols.get(id);
-    return !s || s.file === module || !(s.decos || []).includes('static') || (near.get(module)?.has(s.file) && /\.(h|hh|hpp|hxx)$/.test(s.file)); };
+    return !s || !(s.decos || []).includes('static') || reachOf(module).has(s.file); };
   const pick = (all, module) => { const ids = (all || []).filter(id => visible(id, module)); if (!ids.length) return null; if (ids.length === 1) return ids[0];
     const own = ids.filter(id => symbols.get(id).file === module); if (own.length) return own[0];
     const pub = ids.filter(id => !(symbols.get(id).decos || []).includes('static'));

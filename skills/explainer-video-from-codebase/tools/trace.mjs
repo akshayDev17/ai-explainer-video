@@ -43,7 +43,7 @@
          partial trace is kept and marked)
    ========================================================================== */
 import { readFileSync, writeFileSync, existsSync, realpathSync, mkdtempSync, mkdirSync, rmSync, readdirSync, lstatSync,
-  copyFileSync, symlinkSync, readlinkSync, chmodSync } from 'node:fs';
+  copyFileSync, symlinkSync, readlinkSync, chmodSync, constants as fsConstants } from 'node:fs';
 import { join, resolve, dirname, sep, relative, basename, isAbsolute, posix } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
@@ -55,7 +55,7 @@ import { observe } from './lib/observe.mjs';
 import { observeV8, parseTap, parseJestJson } from './lib/observe-v8.mjs';
 import { recogniseJs, jsTestFiles, passThrough, runnerPackage, nodeModulesDirs, nodeModulesLinks, fileArgv } from './lib/trace-js.mjs';
 import { recogniseGo, goModuleDir, goTestsToRun, goTestArgv, parseGoTestJson, parseCoverProfile, GO_NETWORK } from './lib/trace-go.mjs';
-import { recogniseMake, makeArgv, parseGcov, parseCTestOutput, C_NETWORK } from './lib/trace-c.mjs';
+import { recogniseMake, makeArgv, makefileShell, parseGcov, parseCTestOutput, C_NETWORK } from './lib/trace-c.mjs';
 import { observeCoverage, symbolsRan, linesToBlocks } from './lib/observe-coverage.mjs';
 
 const fail = (code, msg) => { console.error(`[trace] ${msg}`); process.exit(code); };
@@ -440,42 +440,52 @@ async function runGo({ copied, changedFiles, shown }) {
 /* ---------------- C / C++: the make target once, with coverage per test binary, read by gcov ---------------- */
 async function runC({ copied, changedFiles, shown }) {
   const dir = makeCmd.dir;
-  if (!['Makefile', 'makefile', 'GNUmakefile'].some(f => existsSync(join(COPY, dir, f)))) { console.error(`[trace] refused: no Makefile in ${dir || 'the repo root'}`); return 1; }
-  const shell = join(SCRATCH, 'trace', 'fmtrace-sh'), UNITS = join(TRACE_OUT, 'units');
+  const own = p => { try { return lstatSync(p).isFile() ? readFileSync(p, 'utf8') : null; } catch { return null; } };
+  const makefile = ['GNUmakefile', 'makefile', 'Makefile'].find(f => existsSync(join(COPY, dir, f)));
+  if (!makefile) { console.error(`[trace] refused: no Makefile in ${dir || 'the repo root'}`); return 1; }
+  const shell = join(SCRATCH, 'trace', 'fmtrace-sh'), UNITS = join(TRACE_OUT, 'units'), recipeShell = makefileShell(own(join(COPY, dir, makefile)) || '');
   copyFileSync(C_SHELL, shell); chmodSync(shell, 0o755); mkdirSync(UNITS);
-  const env = { HOME: join(SCRATCH, 'home'), TMPDIR: join(SCRATCH, 'tmp'), PATH: [...new Set([dirname(exe), '/usr/local/bin', '/usr/bin', '/bin'])].join(':'), FM_TRACE_UNITS: UNITS };
+  const env = { HOME: join(SCRATCH, 'home'), TMPDIR: join(SCRATCH, 'tmp'), PATH: [...new Set([dirname(exe), '/usr/local/bin', '/usr/bin', '/bin'])].join(':'), FM_TRACE_UNITS: UNITS,
+    ...(recipeShell ? { FM_TRACE_SHELL: recipeShell } : {}) };
   const argv = makeArgv({ make: exe, dir, target: makeCmd.target, shell });
   console.log(`[trace] ${SANDBOX_LABEL[box.kind]} · ${copied} files copied to scratch · running: ${argv.join(' ')}, coverage per test binary (limit ${timeoutSec}s)`);
   const t0 = Date.now();
   const run = await runSandboxed(argv, env, { box: box.kind, readOnly: shown, limitMs: timeoutSec * 1000 });
   // each recipe line fmtrace-sh ran, in order: its command, exit status, output and the counters it wrote. The run
   // wrote these files, so only plain files inside its own line dirs are read
-  const own = p => { try { return lstatSync(p).isFile() ? readFileSync(p, 'utf8') : null; } catch { return null; } };
   const gcdasIn = d => { const out = []; (function walk(p) { let st; try { st = lstatSync(p); } catch { return; }
     if (st.isDirectory()) for (const n of readdirSync(p)) walk(join(p, n)); else if (st.isFile() && p.endsWith('.gcda')) out.push(p); })(d); return out; };
   const lines = [...new Set((own(join(UNITS, 'order')) || '').split('\n').map(l => basename(l.trim())).filter(n => /^line-\w+$/.test(n)))]
     .filter(n => lstatSync(join(UNITS, n), { throwIfNoEntry: false })?.isDirectory())
     .map(n => { const d = join(UNITS, n), st = own(join(d, 'status'));
       return { dir: d, command: own(join(d, 'command')) ?? '', status: st == null ? null : Number(st.trim()), output: own(join(d, 'output')) || '', gcdas: gcdasIn(join(d, 'gcda')) }; });
-  // gcov reads each counter file inside the same sandbox, beside a copy of the notes file the compiler wrote in the
-  // copy; a source is named as the compiler saw it, from the make dir
+  // gcov reads each counter file inside the same sandbox, copied with the notes file the compiler wrote in the copy
+  // into a dir made after the run, outside scratch, where nothing the run left behind can be written through; a source
+  // is named as the compiler saw it, from the make dir
   const cFiles = new Set((m.files || []).filter(f => f.lang === 'c' || f.lang === 'cpp').map(f => f.path));
   const toRepo = src => { const a = src.startsWith('/') ? (src.startsWith(COPY + '/') ? src.slice(COPY.length + 1) : null) : posix.normalize(posix.join(dir, src));
     if (a && cFiles.has(a)) return a; const hits = [...cFiles].filter(f => f.endsWith('/' + src.replace(/^(\.\.?\/)+/, ''))); return hits.length === 1 ? hits[0] : null; };
-  const units = [], seen = new Map();
-  for (const l of lines.filter(x => x.gcdas.length)) {
-    const counts = new Map();
-    for (const g of l.gcdas) {
-      const orig = g.slice(join(l.dir, 'gcda').length);
-      let gcno; try { gcno = join(realpathSync(dirname(orig)), basename(orig).replace(/\.gcda$/, '.gcno')); } catch { continue; }
-      if (!gcno.startsWith(COPY + sep) || !lstatSync(gcno, { throwIfNoEntry: false })?.isFile()) continue;
-      copyFileSync(gcno, g.replace(/\.gcda$/, '.gcno'));
-      const r = await runSandboxed([gcov, '-t', '-o', dirname(g), g], env, { box: box.kind, readOnly: shown, limitMs: 60000, cwd: join(COPY, dir) });
-      for (const [src, ls] of parseGcov(r.stdout)) { const f = toRepo(src); if (f) (counts.get(f) || counts.set(f, []).get(f)).push(...linesToBlocks(ls)); }
+  const mains = new Set(m.symbols.filter(x => x.name === 'main' && cFiles.has(x.file)).map(x => x.id));
+  const units = [], seen = new Map(), notes = realpathSync(mkdtempSync(join(tmpdir(), 'fmtrace-gcov-')));
+  try {
+    let k = 0;
+    for (const l of lines.filter(x => x.gcdas.length)) {
+      const counts = new Map();
+      for (const g of l.gcdas) {
+        const orig = g.slice(join(l.dir, 'gcda').length);
+        let gcno; try { gcno = join(realpathSync(dirname(orig)), basename(orig).replace(/\.gcda$/, '.gcno')); } catch { continue; }
+        if (!gcno.startsWith(COPY + sep) || !lstatSync(gcno, { throwIfNoEntry: false })?.isFile()) continue;
+        const d = join(notes, String(k++)), at = join(d, basename(g));
+        mkdirSync(d);
+        copyFileSync(g, at, fsConstants.COPYFILE_EXCL); copyFileSync(gcno, at.replace(/\.gcda$/, '.gcno'), fsConstants.COPYFILE_EXCL);
+        const r = await runSandboxed([gcov, '-t', '-o', d, at], env, { box: box.kind, readOnly: [...shown, notes], limitMs: 60000, cwd: join(COPY, dir) });
+        for (const [src, ls] of parseGcov(r.stdout)) { const f = toRepo(src); if (f) (counts.get(f) || counts.set(f, []).get(f)).push(...linesToBlocks(ls)); }
+      }
+      const n = (seen.get(l.command) || 0) + 1; seen.set(l.command, n);
+      const ran = symbolsRan(m, counts);
+      units.push({ key: n > 1 ? `${l.command} #${n}` : l.command, line: l, tests: [], ran, programs: [...ran].filter(id => mains.has(id)).length });
     }
-    const n = (seen.get(l.command) || 0) + 1; seen.set(l.command, n);
-    units.push({ key: n > 1 ? `${l.command} #${n}` : l.command, line: l, tests: [], ran: symbolsRan(m, counts) });
-  }
+  } finally { rmSync(notes, { recursive: true, force: true }); }
   const durationMs = Date.now() - t0;
   const logText = redactSecrets(run.log.toString('utf8'));
   writeFileSync(join(OUT, 'trace.log'), logText);
@@ -485,16 +495,16 @@ async function runC({ copied, changedFiles, shown }) {
     console.error(`[trace] the run wrote no coverage counters (${run.timedOut ? 'timed out' : `exit ${run.status ?? run.signal}`}): the target built nothing with $(CC) / $(CXX), or ran no test; its output is in ${join(OUT, 'trace.log')}`);
     return 2;
   }
-  // a test belongs to the first binary its own lines ran in; it passed or failed as that binary did, unless it printed
-  // a status of its own
+  // a test belongs to the first binary its own lines ran in; it passed or failed as that binary's recipe line did
+  // (unknown when that line ran more than one program and failed), unless it printed a status of its own
   const printed = parseCTestOutput(logText);
   const tests = (m.tests || []).filter(t => cFiles.has(t.file) && (!dir || t.file.startsWith(dir + '/')));
   const results = new Map();
   for (const t of tests) {
     const s = m.symbols.find(x => x.id === t.id), name = s?.name || t.id.split(':').pop(), u = units.find(x => x.ran.has(t.id));
     if (u) u.tests.push(t.id);
-    const status = printed.get(name) || (!u ? 'not run' : u.line.status === 0 ? 'passed' : 'failed');
-    results.set(t.id, { status, message: status === 'failed' ? (u?.line.output.trim() || tail) : '', nodeid: `${t.file}::${name}` });
+    const status = printed.get(name) || (!u ? 'not run' : u.line.status === 0 ? 'passed' : u.programs > 1 ? 'unknown' : 'failed');
+    results.set(t.id, { status, message: status === 'failed' || status === 'unknown' ? (u?.line.output.trim() || tail) : '', nodeid: `${t.file}::${name}` });
   }
   const failures = [...results].filter(([, r]) => r.status === 'failed').map(([id, r]) => ({ test: id, nodeid: r.nodeid, status: 'failed', phase: 'call', message: r.message }));
   const failedLine = lines.find(l => l.status);
