@@ -205,20 +205,32 @@ Written only after the user said yes to one exact test command (`--i-ran-this-by
 (exit 1) without that flag; refuses (exit 3) anything but `pytest`, `py.test`, `python -m pytest` or `python -m
 unittest` (python, python3 or python3.N, by name or path; a bare name is found in the repo's `.venv/bin` or
 `venv/bin`, then on PATH), with any shell syntax (`;`, `&&`, `|`, redirects, `$`, backticks) or a wrapper (`uv run`,
-`env`); and refuses (exit 4) where no OS sandbox starts, or with `--sandbox none`. It never runs unsandboxed.
+`env`); and refuses (exit 4) on a platform with no OS sandbox, or where this platform's sandbox does not start
+(`sandbox-exec` on macOS, `bwrap` on Linux, always chosen by platform; there is no option to pick or skip one). It
+never runs unsandboxed.
 
 The run: the repo's git-tracked and unignored files (every file but `.git` and virtualenvs, outside a git work tree)
 are copied to a scratch dir, and the command runs there with the repo's own interpreter, in place and read-only,
-inside the sandbox:
+inside the sandbox. The sandbox hides the user's home folder and the original repo: the run reads only the copy, the
+interpreter's prefix, its virtualenv (even one inside the repo) and the prefix that virtualenv was made from; a
+prefix that would expose a hidden path whole (an interpreter installed straight into the home folder) is not exposed,
+and the run says so.
 
-- **macOS**: `sandbox-exec` with `tools/trace/sandbox/macos-nonet.sb`: IP traffic denied (localhost included), unix
-  socket connects denied (so no DNS resolver), every write outside scratch denied;
+- **macOS**: `sandbox-exec` with `tools/trace/sandbox/macos-nonet.sb` plus read rules `lib/sandbox.mjs` adds per run:
+  IP traffic denied (localhost included), unix socket connects denied (so no DNS resolver), every write outside
+  scratch denied, every read under the home folder and the original repo denied except the exposed paths (and the
+  metadata, not the contents, of the dirs above them);
 - **Linux**: `bwrap` through `tools/trace/sandbox/linux-bwrap.sh`: new network, user, pid, ipc and uts namespaces;
-  `/` read-only with `/run`, `/tmp`, `/var/tmp` and home dirs replaced by empty tmpfs mounts (the repo and the
-  interpreter mounted back read-only); scratch the only writable path; a seccomp filter failing `socket(AF_UNIX)`
-  with EPERM. A new network namespace has its own loopback, so a test may reach a server it started itself, which
-  the macOS profile denies;
+  `/` read-only with `/run`, `/tmp`, `/var/tmp`, home dirs, the user's home folder and the original repo replaced by
+  empty tmpfs mounts (the exposed paths mounted back read-only); scratch the only writable path; a seccomp filter
+  failing `socket(AF_UNIX)` with EPERM. A new network namespace has its own loopback, so a test may reach a server it
+  started itself, which the macOS profile denies;
 - an empty environment: `HOME` and `TMPDIR` in scratch, `PYTHONDONTWRITEBYTECODE=1`, pytest's `-p no:cacheprovider`;
+- an editable install that points into the original repo (a `.pth` path line, a setuptools finder's mapping, an
+  `editables` redirect) is sent to the copy by the collector, since the original is hidden;
+- credential-shaped strings (private-key blocks, AWS access key ids, bearer and basic auth values, known token
+  formats, JWTs, a URL's password, the value of a key that names a secret) are redacted from `trace.log`, the output
+  tail trace.mjs prints and the failure messages in `trace.json`;
 - a time limit (`--timeout`, 900 s): the process group gets SIGTERM, then SIGKILL; what the collector wrote by then
   is kept, `timedOut: true`, exit 5.
 
@@ -241,7 +253,7 @@ virtualenv.
 | `codemap` | the code map's file, sha256, `commit`, `treeHash`, and `changedFiles`: mined files that differ in the copy (mine again first) |
 | `outcome` | `collected`, `passed`, `failed`, `errors` (collection and setup errors, failed teardowns), `skipped`, `xfailed`, `xpassed` |
 | `failures[]` | `test` (code-map id, or null), `nodeid`, `status`, `phase` (`collect`, `setup`, `call`, `teardown`), `message` |
-| `deniedBySandbox[]` | failing tests that attempted a network connect or failed on a permission error: `network` (the attempts), `permission`. They need a service the sandbox refused; never retried |
+| `deniedBySandbox[]` | failing tests that attempted a network connect, or failed on a permission error or on a hidden path not found (bwrap hides a path by mounting an empty dir over it): `network` (the attempts), `permission`. They need a service or a file the sandbox refused; never retried |
 | `pairs[]` | `{from, to, n, tests}`: distinct in-repo caller → callee pairs, with calls and how many tests they ran under |
 | `edges[]` | the code-map edges that fired as a pair: `from`, `to`, `kind`, `rule?`, `passedBy?`, `n`, `tests` (ids). The overlay: an edge not listed is not observed, never removed |
 | `noStaticEdge[]` | pairs no code-map edge of any kind explains, with a `category`: `test-side`, `validator`, `property`, `dunder`, `init`, `other` |

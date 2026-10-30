@@ -1,16 +1,18 @@
 // trace.mjs: the opt-in test-suite trace. Its refusals (exit 1 without the opt-in flag, 3 for anything but a test
-// runner, 4 without a sandbox) are checked everywhere; the sandbox itself and the end-to-end run on fixtures/trace
-// only where that platform's sandbox starts (sandbox-exec on macOS, bwrap on Linux) and python3 has pytest. Set
-// FM_TRACE_REQUIRE_SANDBOX=1 to fail instead of skipping (the CI trace job does).
+// runner, 4 without a sandbox) and the redaction are checked everywhere; the sandbox itself and the end-to-end run on
+// fixtures/trace only where that platform's sandbox starts (sandbox-exec on macOS, bwrap on Linux) and python3 has
+// pytest. Set FM_TRACE_REQUIRE_SANDBOX=1 to fail instead of skipping (the CI trace job does).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, cpSync, realpathSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { join } from 'node:path';
-import { FIXTURES, SKILL, scratch, cleanup, tool, assertGolden } from './helpers.mjs';
+import { join, dirname } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { FIXTURES, SKILL, scratch, cleanup, tool, gitRepo, assertGolden } from './helpers.mjs';
 import { sandboxArgv, sandboxWorks } from '../skills/explainer-video-from-codebase/tools/lib/sandbox.mjs';
 import { observe } from '../skills/explainer-video-from-codebase/tools/lib/observe.mjs';
+import { redactSecrets } from '../skills/explainer-video-from-codebase/tools/lib/redact.mjs';
 
 const REPO = join(FIXTURES, 'trace');
 const OPT_IN = '--i-ran-this-by-the-user';
@@ -37,6 +39,7 @@ test('exit 1: without --i-ran-this-by-the-user nothing runs and nothing is writt
 
 test('exit 1: an unknown flag or a missing command is a usage error', () => {
   assert.equal(tool('trace.mjs', '--codemap', 'x.json', '--test-command', 'pytest', OPT_IN, '--sandbox-off').status, 1);
+  assert.equal(tool('trace.mjs', '--codemap', 'x.json', '--test-command', 'pytest', OPT_IN, '--sandbox', 'none').status, 1, 'the sandbox is not a choice');
   assert.equal(tool('trace.mjs', '--codemap', 'x.json', OPT_IN).status, 1);
   assert.equal(tool('trace.mjs', '--codemap', 'x.json', '--test-command', 'pytest', OPT_IN, '--timeout', '0').status, 1);
 });
@@ -51,14 +54,52 @@ test('exit 3: only a recognised test runner is traced, never a server, a wrapper
   }
 });
 
-test('exit 4: --sandbox none and another platform\'s sandbox are refused, never run unsandboxed', () => {
-  const none = tool('trace.mjs', '--codemap', 'x.json', '--test-command', 'python3 -m pytest', OPT_IN, '--sandbox', 'none');
-  assert.equal(none.status, 4, none.stderr);
-  assert.match(none.stderr, /never runs unsandboxed/);
-  const other = process.platform === 'darwin' ? 'bwrap' : 'macos';
-  const r = tool('trace.mjs', '--codemap', 'x.json', '--test-command', 'python3 -m pytest', OPT_IN, '--sandbox', other);
+// trace.mjs run with a module preloaded first (to stand in for another platform), or under a wrapper command
+function traceWith({ preload, wrap = [] }, ...args) {
+  const dir = scratch(), pre = preload && join(dir, 'preload.mjs');
+  if (pre) writeFileSync(pre, preload);
+  const node = [process.execPath, ...(pre ? ['--import', pathToFileURL(pre).href] : []), join(SKILL, 'tools', 'trace.mjs'), ...args];
+  const [cmd, ...rest] = [...wrap, ...node];
+  const r = spawnSync(cmd, rest, { cwd: dir, encoding: 'utf8' });
+  cleanup(dir);
+  return r;
+}
+
+test('exit 4: on a platform with no OS sandbox, tracing is refused, never run unsandboxed', () => {
+  const r = traceWith({ preload: "Object.defineProperty(process, 'platform', { value: 'freebsd' });" },
+    '--codemap', 'x.json', '--test-command', 'python3 -m pytest', OPT_IN);
   assert.equal(r.status, 4, r.stderr);
-  assert.match(r.stderr, /exists only on/);
+  assert.match(r.stderr, /refused: no OS sandbox is supported on freebsd/);
+  assert.equal(r.stdout, '');
+});
+
+// sandbox-exec cannot start inside another sandbox: the same refusal when this platform's sandbox does not start
+test('exit 4: where the sandbox does not start, tracing is refused', { skip: process.platform !== 'darwin' ? 'needs macOS (a sandbox-exec inside another)' : !works.ok ? works.why : false }, () => {
+  const r = traceWith({ wrap: ['/usr/bin/sandbox-exec', '-p', '(version 1)(allow default)'] },
+    '--codemap', 'x.json', '--test-command', 'python3 -m pytest', OPT_IN);
+  assert.equal(r.status, 4, r.stderr);
+  assert.match(r.stderr, /refused: the macos sandbox does not start here/);
+});
+
+/* ---------------- redaction: every platform ---------------- */
+
+test('redaction: credential-shaped strings are replaced, their labels and ordinary output kept', () => {
+  const cases = [
+    ['aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY', 'aws_secret_access_key = [REDACTED]'],
+    ['key AKIAIOSFODNN7EXAMPLE here', 'key [REDACTED] here'],
+    ['Authorization: Bearer abcdef123456.xyz', 'Authorization: Bearer [REDACTED]'],
+    ["assert {'password': 'hunter2', 'user': 'bob'} == {}", "assert {'password': '[REDACTED]', 'user': 'bob'} == {}"],
+    ['DATABASE_URL=postgres://bob:s3cret@db:5432/x', 'DATABASE_URL=postgres://bob:[REDACTED]@db:5432/x'],
+    [`printed ghp_${'a'.repeat(36)}`, 'printed [REDACTED]'],
+    ['-----BEGIN RSA PRIVATE KEY-----\nMIIEow\nabc\n-----END RSA PRIVATE KEY-----\nafter', '-----BEGIN RSA PRIVATE KEY----- [REDACTED]\nafter'],
+    ['-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blbn', '-----BEGIN OPENSSH PRIVATE KEY----- [REDACTED]'],
+    ['eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpM', '[REDACTED]'],
+    ['api_key: "sk-ant-abcdefghijklmnopqrstuvwxyz"', 'api_key: "[REDACTED]"'],
+  ];
+  for (const [text, want] of cases) assert.equal(redactSecrets(text), want, text);
+  for (const kept of ['FAILED tests/test_auth.py::test_login - AssertionError: assert 1 == 2', 'tests/test_tokenizer.py::test_x PASSED',
+    'author: Jane', '5 passed, 1 failed in 0.12s'])
+    assert.equal(redactSecrets(kept), kept);
 });
 
 /* ---------------- the mapping onto static edges: every platform ---------------- */
@@ -126,10 +167,13 @@ test('observe: pytest\'s counting, and only failing tests with a network attempt
 /* ---------------- the sandboxes: their own platform only ---------------- */
 
 // what the profile must deny and allow, probed from inside it (design Appendix A.6's nettest.py): a TCP listener on
-// the host's localhost and a unix socket outside scratch, both reachable from outside the sandbox
+// the host's localhost and a unix socket outside scratch, both reachable from outside the sandbox; a file in a hidden
+// home folder and in a hidden repo; a read-only path inside the hidden repo (its virtualenv) and outside it
 function probeSandbox(kind) {
-  const dir = realpathSync(scratch()), box = join(dir, 'box'), outside = join(dir, 'outside');
-  mkdirSync(box); mkdirSync(outside);
+  const dir = realpathSync(scratch()), box = join(dir, 'box'), outside = join(dir, 'outside'), home = join(dir, 'home'), origin = join(dir, 'origin');
+  for (const d of [box, outside, join(home, '.ssh'), join(origin, '.venv')]) mkdirSync(d, { recursive: true });
+  writeFileSync(join(home, '.ssh', 'id_ed25519'), 'secret'); writeFileSync(join(origin, '.env'), 'secret');
+  writeFileSync(join(origin, '.venv', 'pyvenv.cfg'), 'ok'); writeFileSync(join(outside, 'r'), 'ok');
   const sock = join(outside, 's.sock');
   const tcp = createServer(c => c.end()).listen(0, '127.0.0.1'), unix = createServer(c => c.end()).listen(sock);
   const listening = s => new Promise(ok => s.listening ? ok() : s.on('listening', ok));
@@ -148,12 +192,17 @@ def dns():
 def write(p):
     try: open(p, "w").write("x"); return "wrote"
     except OSError: return "denied"
+def read(p):
+    try: open(p).read(); return "read"
+    except OSError: return "denied"
 a, b = socket.socketpair()
-print(tcp("127.0.0.1", ${tcp.address().port}), tcp("1.1.1.1", 443), unix(${JSON.stringify(sock)}), dns(), write(${JSON.stringify(join(outside, 'w'))}), write(${JSON.stringify(join(box, 'w'))}), "socketpair")`;
-    // `outside` is exposed read-only, as the repo is: a write there still fails, and so does a connect to its socket
-    const [cmd, ...args] = sandboxArgv(kind, { scratch: box, readOnly: [outside], argv: ['/usr/bin/env', 'python3', '-c', probe] });
+print(tcp("127.0.0.1", ${tcp.address().port}), tcp("1.1.1.1", 443), unix(${JSON.stringify(sock)}), dns(), write(${JSON.stringify(join(outside, 'w'))}), write(${JSON.stringify(join(box, 'w'))}), "socketpair")
+print(read(${JSON.stringify(join(home, '.ssh', 'id_ed25519'))}), read(${JSON.stringify(join(origin, '.env'))}), read(${JSON.stringify(join(origin, '.venv', 'pyvenv.cfg'))}), read(${JSON.stringify(join(outside, 'r'))}))`;
+    // `outside` and the hidden repo's .venv are exposed read-only, as the interpreter is: a write there still fails,
+    // and so does a connect to a socket in it
+    const [cmd, ...args] = sandboxArgv(kind, { scratch: box, hidden: [home, origin], readOnly: [outside, join(origin, '.venv')], argv: ['/usr/bin/env', 'python3', '-c', probe] });
     return new Promise(done => {
-      const child = spawn(cmd, args, { env: { PATH: process.env.PATH, HOME: box } });
+      const child = spawn(cmd, args, { cwd: box, env: { PATH: process.env.PATH, HOME: box } });
       let stdout = '', stderr = '';
       child.stdout.on('data', b => { stdout += b; });
       child.stderr.on('data', b => { stderr += b; });
@@ -164,10 +213,10 @@ print(tcp("127.0.0.1", ${tcp.address().port}), tcp("1.1.1.1", 443), unix(${JSON.
 
 for (const [kind, platform] of [['macos', 'darwin'], ['bwrap', 'linux']]) {
   const why = process.platform !== platform ? `${kind} runs on ${platform} only` : process.env.FM_TRACE_REQUIRE_SANDBOX === '1' ? false : !works.ok ? works.why : false;
-  test(`the ${kind} sandbox denies IP (localhost too), unix-socket and DNS connects and writes outside scratch`, { skip: why }, async () => {
+  test(`the ${kind} sandbox denies IP (localhost too), unix-socket and DNS connects, writes outside scratch and reads of the hidden paths`, { skip: why }, async () => {
     const r = await probeSandbox(kind);
     assert.equal(r.status, 0, r.stderr);
-    assert.equal(r.stdout.trim(), 'denied denied denied denied denied wrote socketpair');
+    assert.equal(r.stdout.trim(), 'denied denied denied denied denied wrote socketpair\ndenied denied read read');
   });
 }
 
@@ -207,6 +256,59 @@ test('the fixture suite runs sandboxed: 4 pass, the socket test fails and is lis
     directLinksPerTest: t.summary.directLinksPerTest, fixtureLinks: t.summary.fixtureLinks,
   });
   cleanup(join(out, '..'));
+});
+
+// a test that reads a credential file in the user's home folder (a fake one: HOME points at it), one that reads the
+// original repo's ignored .env, and one that prints a token: the first two are denied and listed, the token redacted
+test('the run cannot read the home folder or the original repo, and a printed token is redacted', { skip }, () => {
+  const repo = realpathSync(gitRepo(REPO)), home = join(dirname(repo), 'home'), creds = join(home, '.aws', 'credentials');
+  mkdirSync(join(home, '.aws'), { recursive: true });
+  writeFileSync(creds, '[default]\naws_secret_access_key = FAKE-home-secret\n');
+  writeFileSync(join(repo, '.gitignore'), '.env\n');
+  writeFileSync(join(repo, '.env'), 'API_TOKEN=FAKE-env-secret\n');
+  writeFileSync(join(repo, 'tests', 'secret_paths.json'), JSON.stringify({ home: creds, env: join(repo, '.env') }));
+  writeFileSync(join(repo, 'tests', 'test_secrets.py'), [
+    'import json', 'import pathlib', '', 'PATHS = json.loads((pathlib.Path(__file__).parent / "secret_paths.json").read_text())', '', '',
+    'def test_reads_a_home_secret():', '    print(open(PATHS["home"]).read())', '', '',
+    'def test_reads_the_original_repo_env():', '    print(open(PATHS["env"]).read())', '', '',
+    'def test_prints_a_token():', '    print("token=ghp_" + "a" * 36)', '    raise RuntimeError("API_KEY=sk-" + "b" * 24)', ''].join('\n'));
+  const out = mineFixture(repo);
+  const r = spawnSync(process.execPath, [join(SKILL, 'tools', 'trace.mjs'), '--codemap', join(out, 'codemap.json'),
+    '--test-command', 'python3 -m pytest -q tests/test_secrets.py', OPT_IN], { cwd: dirname(out), encoding: 'utf8', env: { ...process.env, HOME: home } });
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json'), log = readFileSync(join(out, 'trace.log'), 'utf8');
+  assert.equal(t.outcome.failed, 3);
+  assert.deepEqual(t.deniedBySandbox.map(d => [d.nodeid, d.permission]),
+    [['tests/test_secrets.py::test_reads_a_home_secret', true], ['tests/test_secrets.py::test_reads_the_original_repo_env', true]]);
+  for (const text of [log, r.stdout, JSON.stringify(t)]) {
+    assert.doesNotMatch(text, /FAKE-(home|env)-secret/, 'no secret was read');
+    assert.doesNotMatch(text, /ghp_a{36}|sk-b{24}/, 'the printed token is redacted');
+  }
+  assert.match(log, /token=\[REDACTED\]/);
+  assert.match(t.failures.find(f => f.nodeid.endsWith('test_prints_a_token')).message, /API_KEY=\[REDACTED\]/);
+  cleanup(dirname(repo)); cleanup(dirname(out));
+});
+
+// the repo's own virtualenv lives in the repo: the sandbox exposes it and nothing else of the original repo, and an
+// editable install in it (a .pth line pointing into the original repo) imports from the copy
+test('a virtualenv inside the repo runs, and an editable install in it imports from the copy', { skip }, () => {
+  const repo = realpathSync(gitRepo(REPO)), venv = join(repo, '.venv');
+  writeFileSync(join(repo, '.gitignore'), '.venv/\n');
+  const made = spawnSync('python3', ['-m', 'venv', '--system-site-packages', '--without-pip', venv], { encoding: 'utf8' });
+  assert.equal(made.status, 0, made.stderr);
+  const lib = join(venv, 'lib', readdirSync(join(venv, 'lib'))[0], 'site-packages');
+  writeFileSync(join(lib, 'fm_editable.pth'), join(repo, 'libsrc') + '\n');
+  mkdirSync(join(repo, 'libsrc'));
+  writeFileSync(join(repo, 'libsrc', 'extra.py'), 'def shout(s):\n    return s.upper()\n');
+  writeFileSync(join(repo, 'tests', 'test_extra.py'), 'from extra import shout\n\n\ndef test_shout():\n    assert shout("a") == "A"\n');
+  const out = mineFixture(repo);
+  const r = trace(out, '.venv/bin/python -m pytest -q tests/test_extra.py');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.equal(t.argv[0], join(venv, 'bin', 'python'));
+  assert.deepEqual([t.outcome.passed, t.outcome.failed, t.outcome.errors], [1, 0, 0], readFileSync(join(out, 'trace.log'), 'utf8'));
+  assert.deepEqual(t.byTest['tests.test_extra:test_shout'].ran, ['libsrc.extra:shout', 'tests.test_extra:test_shout']);
+  cleanup(dirname(repo)); cleanup(dirname(out));
 });
 
 test('python -m unittest is traced too, attributed by test id', { skip }, () => {

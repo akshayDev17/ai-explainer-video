@@ -5,15 +5,26 @@ Loaded through PYTHONPATH from a directory outside the repo, inside trace.mjs's 
 decorator, a framework or the event loop is attributed to the in-repo code that started it. The current test is set by
 fmtrace_plugin (pytest) or by the TestCase.run wrapper below (unittest), so a call a framework makes (a fixture, a DI
 provider, a test client's handler thread) is still attributed to the test it ran under. It also records each test's
-network attempts (audit hooks), so a test that failed on a connect the sandbox denied can be listed as denied.
+network attempts (audit hooks), so a test that failed on a connect the sandbox denied can be listed as denied, as can
+one that failed on reading a path the sandbox hides (the user's home folder, the original repo). Imports an editable
+install points into the original repo are sent to the copy.
 Writes one JSON file per process at exit (or on SIGTERM, when trace.mjs's time limit stops the run). Never imports repo
 code itself.
 
-Environment: FM_TRACE_ROOT (the repo roots, os.pathsep-separated), FM_TRACE_OUT (the output directory),
-FM_TRACE_RUNNER ("pytest" or "unittest")."""
-import atexit, json, os, signal, sys, threading
+Environment: FM_TRACE_ROOT (the scratch copy of the repo), FM_TRACE_OUT (the output directory), FM_TRACE_RUNNER
+("pytest" or "unittest"), FM_TRACE_ORIGIN (where the original repo was) and FM_TRACE_HIDDEN (the paths the sandbox
+hides), both os.pathsep-separated."""
+import atexit, errno, json, os, signal, sys, threading
 
-ROOTS = tuple(os.path.realpath(r) + os.sep for r in os.environ["FM_TRACE_ROOT"].split(os.pathsep) if r)
+
+def _dirs(var):
+    return tuple(os.path.realpath(r) + os.sep for r in os.environ.get(var, "").split(os.pathsep) if r)
+
+
+ROOTS = _dirs("FM_TRACE_ROOT")
+ORIGINS = tuple(sorted({o for r in os.environ.get("FM_TRACE_ORIGIN", "").split(os.pathsep) if r
+                        for o in (os.path.abspath(r) + os.sep, os.path.realpath(r) + os.sep)}, key=len, reverse=True))
+HIDDEN = _dirs("FM_TRACE_HIDDEN")
 OUT = os.environ["FM_TRACE_OUT"]
 # an interpreter or virtualenv that lives under a repo root is library code, not repo code
 _LIB = tuple({os.path.realpath(p) + os.sep for p in (sys.prefix, sys.base_prefix, sys.exec_prefix)})
@@ -99,6 +110,81 @@ def _dump():
         json.dump(data, fh)
 
 
+def _to_copy(p):
+    # the interpreter's own paths stay: its virtualenv may live in the original repo, and the sandbox exposes it there
+    if isinstance(p, str) and not (os.path.realpath(p) + os.sep).startswith(_LIB):
+        for o in ORIGINS:
+            if p == o[:-1] or p.startswith(o):
+                return ROOTS[0] + p[len(o):]
+    return p
+
+
+def _pth_paths():
+    # the path lines of the site dirs' .pth files: site skipped every one that points into the original repo, since
+    # the sandbox hides it
+    import site
+    for d in site.getsitepackages():
+        try:
+            names = sorted(n for n in os.listdir(d) if n.endswith(".pth"))
+        except OSError:
+            continue
+        for n in names:
+            try:
+                with open(os.path.join(d, n), encoding="utf-8") as fh:
+                    lines = fh.read().splitlines()
+            except (OSError, UnicodeDecodeError):
+                continue
+            for line in lines:
+                line = line.strip()
+                if line and not line.startswith(("#", "import ", "import\t")):
+                    yield os.path.join(d, line)
+
+
+def _redirect_origin():
+    # an editable install points into the original repo, which the sandbox hides: a path entry (a .pth line), a
+    # setuptools finder's MAPPING and NAMESPACES, or an `editables` redirect; each is sent to the copy instead
+    sys.path[:] = [_to_copy(p) for p in sys.path]
+    for p in _pth_paths():
+        moved = _to_copy(p)
+        if moved != p and moved not in sys.path and os.path.isdir(moved):
+            sys.path.append(moved)
+    for name, mod in list(sys.modules.items()):
+        if name.startswith("__editable__"):
+            for k, v in (getattr(mod, "MAPPING", None) or {}).items():
+                mod.MAPPING[k] = _to_copy(v)
+            for k, v in (getattr(mod, "NAMESPACES", None) or {}).items():
+                mod.NAMESPACES[k] = [_to_copy(x) for x in v]
+    for finder in sys.meta_path:
+        redirects = getattr(finder, "_redirections", None)
+        if isinstance(redirects, dict):
+            for k, v in redirects.items():
+                redirects[k] = _to_copy(v)
+
+
+def _hidden(path):
+    return isinstance(path, str) and os.path.realpath(path).startswith(HIDDEN)
+
+
+def denied(exc):
+    """Did this exception (or one it came from) come from the sandbox: a permission error, or a hidden path not found
+    (bwrap hides a path by mounting an empty dir over it, so a read of it fails as missing)."""
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, OSError) and (exc.errno in (errno.EPERM, errno.EACCES) or
+                                         (exc.errno == errno.ENOENT and (_hidden(exc.filename) or _hidden(exc.filename2)))):
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
+def _denied_line(line):
+    # unittest keeps only the formatted traceback: its last line
+    if line.startswith("PermissionError") or "[Errno 1] Operation not permitted" in line or "[Errno 13] Permission denied" in line:
+        return True
+    return line.startswith("FileNotFoundError") and any(h in line or h[:-1] + "'" in line for h in HIDDEN)
+
+
 def _reset_in_child():
     # a forked child starts with a copy of the parent's records; it must write only its own
     _pairs.clear()
@@ -138,8 +224,9 @@ def _wrap_unittest():
                 rec = {"call": outcome}
                 if outcome in ("error", "failed"):
                     tb = getattr(result, grew[0])[-1][1]
-                    rec["message"] = tb.strip().splitlines()[-1][:200] if tb.strip() else ""
-                    rec["permission"] = "PermissionError" in tb
+                    last = tb.strip().splitlines()[-1] if tb.strip() else ""
+                    rec["message"] = last[:200]
+                    rec["permission"] = _denied_line(last)
                 OUTCOMES[key] = rec
 
     unittest.case.TestCase.run = traced_run
@@ -158,6 +245,7 @@ def _run_shadowed_sitecustomize():
 
 
 _run_shadowed_sitecustomize()
+_redirect_origin()
 if os.environ.get("FM_TRACE_RUNNER") == "unittest":
     _wrap_unittest()
 os.register_at_fork(after_in_child=_reset_in_child)

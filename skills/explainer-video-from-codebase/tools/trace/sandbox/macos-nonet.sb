@@ -1,5 +1,7 @@
 ; macos-nonet.sb — trace.mjs's macOS sandbox (sandbox-exec), for running a repo's test command.
-; SCRATCH (passed with -D SCRATCH=<realpath>) is the only place a write may land.
+; SCRATCH (passed with -D SCRATCH=<realpath>) is the only place a write may land. lib/sandbox.mjs appends the read
+; rules for each run: no reads under the user's home folder or the original repo, except scratch, the interpreter
+; and its virtualenv. A later rule overrides an earlier one.
 (version 1)
 (allow default)
 

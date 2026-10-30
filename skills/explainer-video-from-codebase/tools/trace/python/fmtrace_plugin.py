@@ -1,7 +1,7 @@
 """trace.mjs's pytest plugin: tells the collector which test is running, so a call made by a framework (a fixture, a DI
 provider, a route reached through a test client thread) is still attributed to the test it ran under; and records each
-test's outcome per phase, with whether it failed on a PermissionError. Loaded with PYTEST_PLUGINS=fmtrace_plugin."""
-import errno
+test's outcome per phase, with whether the sandbox denied it (a permission error, or a hidden path not found). Loaded
+with PYTEST_PLUGINS=fmtrace_plugin."""
 import os
 
 import pytest
@@ -22,16 +22,6 @@ def _last_line(longrepr):
     return lines[-1][:200] if lines else ""
 
 
-def _denied(exc):
-    seen = set()
-    while exc is not None and id(exc) not in seen:
-        seen.add(id(exc))
-        if isinstance(exc, PermissionError) or (isinstance(exc, OSError) and exc.errno in (errno.EPERM, errno.EACCES)):
-            return True
-        exc = exc.__cause__ or exc.__context__
-    return False
-
-
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item, nextitem):
     fm.CURRENT[0] = _key(item)
@@ -49,7 +39,7 @@ def pytest_runtest_makereport(item, call):
         rec["xfail"] = True
     if rep.failed:
         rec.setdefault("message", _last_line(rep.longrepr))
-        if call.excinfo is not None and _denied(call.excinfo.value):
+        if call.excinfo is not None and fm.denied(call.excinfo.value):
             rec["permission"] = True
 
 

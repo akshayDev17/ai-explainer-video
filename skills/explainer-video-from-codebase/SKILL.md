@@ -64,30 +64,34 @@ per mined commit, and only when both hold:
 
 Ask with exactly this text, filling in the command and the test count from `codemap.md`:
 
-> This repo has a test suite (`<command>`, N tests). I can run it once, in a sandboxed copy with no network and no
-> credentials, under a profiler, to mark which call paths the tests actually exercise. It runs the repo's test code on
-> this machine. Run it?
+> This repo has a test suite (`<command>`, N tests). I can run it once, under a profiler, to mark which call paths
+> the tests actually exercise. It runs the repo's test code on this machine, inside a sandbox, on a copy of the files
+> git does not ignore: no network, no writes outside a scratch folder, no inherited environment variables, and no
+> reads of your home folder or the original repo folder (only the copy, the Python interpreter and its virtualenv). It
+> can still read system files outside those folders. Anything it prints that looks like a credential is redacted from
+> its log. Run it?
 
 A "no" skips the stage with no penalty. **Only on a yes** to that exact command:
 
 ```sh
 node <skill>/tools/trace.mjs --codemap out/<name>/codemap.json --test-command "<command>" --i-ran-this-by-the-user \
-     [--timeout 900] [--sandbox auto|macos|bwrap]
+     [--timeout 900]
 ```
 
 The flag means the user said yes; never pass it otherwise, and a different command needs a new yes. The run happens
-in a scratch copy inside the sandbox: no network of any kind (localhost and unix sockets included), no writes outside
-scratch, an empty environment, no bytecode or cache writes, a time limit. It writes `out/<name>/trace.json`, an overlay
-the code map is never edited for, and `trace.log`, the run's output. Exit 0 is done; 5 is the time limit (the partial
+in a scratch copy inside this platform's sandbox: no network of any kind (localhost and unix sockets included), no
+writes outside scratch, no reads of the home folder or the original repo, an empty environment, no bytecode or cache
+writes, a time limit. It writes `out/<name>/trace.json`, an overlay the code map is never edited for, and
+`trace.log`, the run's output (credential-shaped strings redacted). Exit 0 is done; 5 is the time limit (the partial
 trace is kept and marked); 1, 3 and 4 are refusals (no opt-in flag; not a test command; no sandbox): report them and
 never work around one, least of all by running the tests yourself. Exit 2 means no test ran: show the user
 `trace.log`'s end.
 
 Tell the user the outcome (passed / failed / errors), the static edges observed, the share of direct test links that
 ran under their own test, the callback links it confirmed, the calls that ran with no static edge, and **every test in
-`deniedBySandbox`**: those need a service the sandbox refused (a database, a socket, the network), so they mark code
-the suite cannot exercise offline. Failing tests are data: never retry one, never weaken the sandbox, never install
-anything to make them pass. A trace says what ran under the test configuration; narrate it as "observed in the test
+`deniedBySandbox`**: those need a service or a file the sandbox refused (a database, a socket, the network, a file
+in the home folder or one git ignores), so they mark code the suite cannot exercise offline. Failing tests are data:
+never retry one, never weaken the sandbox, never install anything to make them pass. A trace says what ran under the test configuration; narrate it as "observed in the test
 suite", never as observed in production.
 
 ## Stage 1b — `/flows`: the series proposal

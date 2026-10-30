@@ -1,23 +1,25 @@
 #!/bin/sh
 # linux-bwrap.sh — trace.mjs's Linux sandbox (bubblewrap), for running a repo's test command.
 #
-# Usage: linux-bwrap.sh <scratch> <read-only paths, one per line> <command> [args...]
+# Usage: linux-bwrap.sh <scratch> <hidden paths, one per line> <read-only paths, one per line> <command> [args...]
 #
 # - no network at all: a new network namespace (no route out, and its own empty loopback, so nothing on
 #   the host's localhost is reachable); a seccomp filter makes socket(AF_UNIX, ...) fail with EPERM, so no
 #   unix socket (docker.sock, a database or agent socket) can be connected to, wherever it lives — a
 #   read-only mount does not stop a connect. socketpair() still works, so asyncio does;
 # - no writes outside scratch: / is mounted read-only, the dirs that hold host state (/run, /tmp, /var/tmp,
-#   home dirs) are replaced by empty tmpfs mounts, and <scratch> is the only writable host path;
-# - the read-only paths (the interpreter, the original repo for editable installs) are mounted back over
-#   the hidden dirs; trace.mjs never passes one that contains <scratch>;
+#   home dirs) and the hidden paths (the user's home folder and the original repo) are replaced by empty
+#   tmpfs mounts, so nothing in them can be read, and <scratch> is the only writable host path;
+# - the read-only paths (the interpreter and its virtualenv) are mounted back over the hidden dirs;
+#   lib/sandbox.mjs never passes one that contains <scratch> or a hidden path;
 # - new user, pid, ipc, uts and cgroup namespaces. No --die-with-parent: trace.mjs's time limit signals the whole
 #   process group, and the collector must outlive bwrap long enough to write the partial trace.
 # The caller passes an empty environment; bwrap hands it to the command unchanged.
 set -eu
 scratch=$1
-ro=$2
-shift 2
+hidden=$2
+ro=$3
+shift 3
 
 # the seccomp filter, as the classic-BPF program bwrap --seccomp loads (struct sock_filter, little-endian):
 #   arch is not this one -> kill · x32 syscall -> kill · socket(AF_UNIX, ...) -> EPERM · anything else -> allow
@@ -46,7 +48,7 @@ bpf="$scratch/.fmtrace-seccomp.bpf"
 } > "$bpf"
 
 # the mount options are built back to front (each `set --` prepends), so bwrap applies them in this order:
-# / read-only, /dev, /proc, the hidden dirs, scratch, the read-only paths, then runs the command
+# / read-only, /dev, /proc, the host-state dirs, the hidden paths, scratch, the read-only paths, then runs the command
 set -- -- "$@"
 set -f
 IFS='
@@ -57,6 +59,14 @@ done
 unset IFS
 set +f
 set -- --bind "$scratch" "$scratch" "$@"
+set -f
+IFS='
+'
+for p in $hidden; do
+  set -- --tmpfs "$p" "$@"
+done
+unset IFS
+set +f
 for d in /srv /media /mnt /root /home /var/tmp /tmp /run; do
   if [ -d "$d" ] && [ ! -L "$d" ]; then set -- --tmpfs "$d" "$@"; fi
 done
