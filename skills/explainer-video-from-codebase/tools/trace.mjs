@@ -12,9 +12,11 @@
    yes to this exact command. The boundary, all of it enforced here:
      - only a recognised test runner: pytest, py.test, python -m pytest,
        python -m unittest (no shell syntax, no wrapper such as `uv run`);
-     - only in a scratch copy of the repo (its git-tracked and unignored files),
+     - only in a scratch copy of the repo (its git-tracked and unignored files;
+       a submodule or nested repo by its own git view, never whole),
        inside this platform's OS sandbox: no network of any kind (IP, localhost,
-       unix-socket connects), no writes outside scratch, no reads of the user's
+       unix-socket connects), no writes outside scratch, no program outside the
+       sandbox acting for the run, no reads of the user's
        home folder or the original repo (only the copy, the interpreter and its
        virtualenv), an empty environment (HOME and TMPDIR in scratch), no
        bytecode or cache writes, a time limit;
@@ -33,7 +35,7 @@
          partial trace is kept and marked)
    ========================================================================== */
 import { readFileSync, writeFileSync, existsSync, realpathSync, mkdtempSync, mkdirSync, rmSync, readdirSync, lstatSync,
-  copyFileSync, symlinkSync, readlinkSync, cpSync } from 'node:fs';
+  copyFileSync, symlinkSync, readlinkSync } from 'node:fs';
 import { join, resolve, dirname, sep, relative, basename, isAbsolute } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
@@ -137,26 +139,38 @@ function readOnlyPaths() {
 // ignored .env, other untracked files)
 const HIDDEN = [...new Set([homedir(), ROOT].filter(p => p && existsSync(p)).map(p => realpathSync(p)))];
 
-// copy the repo: git's view of it when it is a work tree (tracked plus untracked-but-not-ignored files, so no .git,
-// no ignored .env, no virtualenv), else every file but .git and virtualenvs
-function copyRepo(dest) {
-  const g = spawnSync('git', ['-C', ROOT, 'ls-files', '-z', '-co', '--exclude-standard'], { encoding: 'utf8', maxBuffer: 1 << 30 });
+// the files to copy under dir, relative to it: git's view when dir is in a work tree (tracked plus untracked-but-not-
+// ignored files, so no .git, no ignored .env, no virtualenv), else every file but .git and virtualenvs. A submodule
+// or a nested repo is listed by its own git view, never copied whole, so nothing its own .gitignore ignores is copied
+function repoFiles(dir) {
   const files = [];
-  if (g.status === 0) files.push(...g.stdout.split('\0').filter(Boolean));
+  const nested = rel => existsSync(join(dir, rel, '.git')) ? repoFiles(join(dir, rel)).map(f => `${rel}/${f}`) : [];
+  const g = spawnSync('git', ['-C', dir, 'ls-files', '-z', '-co', '--exclude-standard'], { encoding: 'utf8', maxBuffer: 1 << 30 });
+  if (g.status === 0) for (const f of g.stdout.split('\0').filter(Boolean)) {
+    const rel = f.replace(/\/$/, '');
+    let st; try { st = lstatSync(join(dir, rel)); } catch { continue; }
+    files.push(...(st.isDirectory() ? nested(rel) : [rel]));
+  }
   else (function walk(rel) {
-    for (const name of readdirSync(join(ROOT, rel))) {
-      const r = rel ? `${rel}/${name}` : name, st = lstatSync(join(ROOT, r));
-      if (st.isDirectory()) { if (name !== '.git' && !existsSync(join(ROOT, r, 'pyvenv.cfg'))) walk(r); }
-      else files.push(r);
+    for (const name of readdirSync(join(dir, rel))) {
+      const r = rel ? `${rel}/${name}` : name, st = lstatSync(join(dir, r));
+      if (!st.isDirectory()) files.push(r);
+      else if (existsSync(join(dir, r, '.git'))) files.push(...nested(r));
+      else if (name !== '.git' && !existsSync(join(dir, r, 'pyvenv.cfg'))) walk(r);
     }
   })('');
+  return files;
+}
+
+// copy the repo's files (repoFiles) into dest
+function copyRepo(dest) {
+  const files = repoFiles(ROOT);
   for (const f of files) {
     const src = join(ROOT, f), dst = join(dest, f);
     let st; try { st = lstatSync(src); } catch { continue; }
     mkdirSync(dirname(dst), { recursive: true });
     if (st.isSymbolicLink()) symlinkSync(readlinkSync(src), dst);
     else if (st.isFile()) copyFileSync(src, dst);
-    else if (st.isDirectory()) cpSync(src, dst, { recursive: true, filter: s => basename(s) !== '.git' });
   }
   return files.length;
 }

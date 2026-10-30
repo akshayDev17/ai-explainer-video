@@ -5,11 +5,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, cpSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, cpSync, realpathSync, chmodSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
 import { join, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { FIXTURES, SKILL, scratch, cleanup, tool, gitRepo, assertGolden } from './helpers.mjs';
+import { FIXTURES, SKILL, scratch, cleanup, tool, git, gitRepo, assertGolden } from './helpers.mjs';
 import { sandboxArgv, sandboxWorks } from '../skills/explainer-video-from-codebase/tools/lib/sandbox.mjs';
 import { observe } from '../skills/explainer-video-from-codebase/tools/lib/observe.mjs';
 import { redactSecrets } from '../skills/explainer-video-from-codebase/tools/lib/redact.mjs';
@@ -220,6 +221,83 @@ for (const [kind, platform] of [['macos', 'darwin'], ['bwrap', 'linux']]) {
   });
 }
 
+// the macOS profile starts from (allow default), so a program outside the sandbox must not be made to act for the run:
+// each escape below, had it got through, leaves a marker outside scratch (a file it touches, or a request to a
+// localhost server this test runs outside the sandbox). Each is tried with the tool (open, osascript, launchctl) and,
+// for LaunchServices and Apple Events, with the library call the run could make itself (ctypes), so the tools' exec
+// denial is not the only wall
+function probeEscapes() {
+  const dir = realpathSync(scratch()), box = join(dir, 'box'), marks = join(dir, 'marks'), home = join(dir, 'home');
+  for (const d of [box, marks, home]) mkdirSync(d, { recursive: true });
+  const command = name => { const f = join(box, `${name}.command`); writeFileSync(f, `#!/bin/sh\ntouch ${JSON.stringify(join(marks, name))}\n`); chmodSync(f, 0o755); return f; };
+  const label = `fmtrace.escape.${process.pid}`, hits = [];
+  const http = createHttpServer((req, res) => { hits.push(req.url); res.end(); }).listen(0, '127.0.0.1');
+  return new Promise(ok => http.on('listening', ok)).then(() => {
+    const url = path => `http://127.0.0.1:${http.address().port}/${path}`, mark = name => JSON.stringify(join(marks, name));
+    const probe = `
+import ctypes, subprocess
+from ctypes import c_void_p, c_char_p, c_long, c_uint32, c_int, byref
+def tool(*argv):
+    try: return "ran" if subprocess.run(argv, capture_output=True, timeout=20).returncode == 0 else "denied"
+    except (OSError, subprocess.TimeoutExpired): return "denied"
+CF = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+CS = ctypes.CDLL("/System/Library/Frameworks/CoreServices.framework/CoreServices")
+CF.CFURLCreateWithBytes.restype = c_void_p
+CF.CFURLCreateWithBytes.argtypes = [c_void_p, c_char_p, c_long, c_uint32, c_void_p]
+CS.LSOpenCFURLRef.restype = c_int
+CS.LSOpenCFURLRef.argtypes = [c_void_p, c_void_p]
+def lsopen(u):
+    b = u.encode()
+    return "ran" if CS.LSOpenCFURLRef(CF.CFURLCreateWithBytes(None, b, len(b), 0x08000100, None), None) == 0 else "denied"
+objc = ctypes.CDLL("/usr/lib/libobjc.A.dylib")
+ctypes.CDLL("/System/Library/Frameworks/Foundation.framework/Foundation")
+objc.objc_getClass.restype = objc.sel_registerName.restype = c_void_p
+def msg(o, sel, *args):
+    f = ctypes.cast(objc.objc_msgSend, ctypes.CFUNCTYPE(c_void_p, c_void_p, c_void_p, *[c_void_p] * len(args)))
+    return f(o, objc.sel_registerName(sel.encode()), *args)
+def applescript(src):
+    s = msg(objc.objc_getClass(b"NSString"), "stringWithUTF8String:", c_char_p(src.encode()))
+    err = c_void_p()
+    return "ran" if msg(msg(msg(objc.objc_getClass(b"NSAppleScript"), "alloc"), "initWithSource:", s), "executeAndReturnError:", ctypes.addressof(err)) else "denied"
+for name, result in [
+    ("open-url", tool("/usr/bin/open", ${JSON.stringify(url('open'))})),
+    ("open-terminal", tool("/usr/bin/open", "-a", "Terminal", ${JSON.stringify(command('open-terminal'))})),
+    ("launchctl-submit", tool("/bin/launchctl", "submit", "-l", ${JSON.stringify(label)}, "--", "/usr/bin/touch", ${JSON.stringify(join(marks, 'launchctl-submit'))})),
+    ("osascript-do-shell-script", tool("/usr/bin/osascript", "-e", 'do shell script "touch " & quoted form of ' + ${JSON.stringify(mark('osascript-do-shell-script'))})),
+    ("osascript-terminal", tool("/usr/bin/osascript", "-e", 'tell application "Terminal" to do script "touch " & quoted form of ' + ${JSON.stringify(mark('osascript-terminal'))})),
+    ("lsopen-url", lsopen(${JSON.stringify(url('lsopen'))})),
+    ("lsopen-command", lsopen("file://" + ${JSON.stringify(command('lsopen-command'))})),
+    ("appleevent-terminal", applescript('tell application "Terminal" to do script "touch " & quoted form of ' + ${JSON.stringify(mark('appleevent-terminal'))})),
+]:
+    print(name, result)`;
+    const [cmd, ...args] = sandboxArgv('macos', { scratch: box, hidden: [home], argv: ['/usr/bin/env', 'python3', '-c', probe] });
+    return new Promise(done => {
+      const child = spawn(cmd, args, { cwd: box, env: { PATH: process.env.PATH, HOME: box } });
+      let stdout = '', stderr = '';
+      child.stdout.on('data', b => { stdout += b; });
+      child.stderr.on('data', b => { stderr += b; });
+      // an app or a job launched by an escape runs after the call returns: give it time to leave its marker
+      child.on('close', status => setTimeout(() => {
+        const left = readdirSync(marks);
+        spawnSync('/bin/launchctl', ['remove', label]);
+        http.close(); cleanup(dir);
+        done({ status, stdout, stderr, marks: left, hits: [...hits] });
+      }, 3000));
+    });
+  });
+}
+
+test('the macos sandbox lets no program outside it act for the run: no open, no Apple Events, no launchd job', {
+  skip: process.platform !== 'darwin' ? 'macos runs on darwin only' : process.env.FM_TRACE_REQUIRE_SANDBOX === '1' ? false : !works.ok ? works.why : false,
+}, async () => {
+  const r = await probeEscapes();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.stdout.trim().split('\n'), ['open-url', 'open-terminal', 'launchctl-submit', 'osascript-do-shell-script', 'osascript-terminal',
+    'lsopen-url', 'lsopen-command', 'appleevent-terminal'].map(n => `${n} denied`));
+  assert.deepEqual(r.marks, [], 'no escape left a marker outside scratch');
+  assert.deepEqual(r.hits, [], 'no URL was fetched from outside the sandbox');
+});
+
 /* ---------------- end to end on fixtures/trace ---------------- */
 
 const mineFixture = repo => {
@@ -311,6 +389,35 @@ test('a virtualenv inside the repo runs, and an editable install in it imports f
   cleanup(dirname(repo)); cleanup(dirname(out));
 });
 
+// a submodule and an untracked nested repo are copied by their own git view: what their .gitignore ignores (and their
+// .git) never reaches scratch, their other files do
+test('a submodule or a nested repo is copied without the files its own .gitignore ignores', { skip }, () => {
+  const repo = realpathSync(gitRepo(REPO)), sub = join(repo, 'vendor', 'sub'), nested = join(repo, 'nested');
+  for (const [d, ignored] of [[sub, '.env'], [nested, 'secret.txt']]) {
+    mkdirSync(d, { recursive: true });
+    git(d, 'init', '-q');
+    writeFileSync(join(d, '.gitignore'), `${ignored}\n`);
+    writeFileSync(join(d, ignored), 'FAKE-nested-secret\n');
+    writeFileSync(join(d, 'kept.txt'), 'kept\n');
+  }
+  git(sub, 'add', '-A');
+  git(sub, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'sub');
+  const head = spawnSync('git', ['-C', sub, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
+  git(repo, 'update-index', '--add', '--cacheinfo', `160000,${head},vendor/sub`);
+  writeFileSync(join(sub, 'untracked.txt'), 'untracked\n');
+  writeFileSync(join(repo, 'tests', 'test_copy.py'), [
+    'import os', '', '',
+    'def test_copied():', '    assert [os.path.exists(p) for p in ["vendor/sub/kept.txt", "vendor/sub/untracked.txt", "nested/kept.txt"]] == [True] * 3', '', '',
+    'def test_not_copied():', '    assert [p for p in ["vendor/sub/.env", "nested/secret.txt", "vendor/sub/.git", "nested/.git"] if os.path.lexists(p)] == []', ''].join('\n'));
+  const out = mineFixture(repo);
+  const r = trace(out, 'python3 -m pytest -q tests/test_copy.py');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(t.failures, []);
+  assert.deepEqual([t.outcome.passed, t.outcome.failed], [2, 0]);
+  cleanup(dirname(repo)); cleanup(dirname(out));
+});
+
 test('python -m unittest is traced too, attributed by test id', { skip }, () => {
   const out = mineFixture(REPO);
   const r = trace(out, 'python3 -m unittest');
@@ -332,6 +439,8 @@ test('exit 5: the time limit stops the run and keeps the partial trace, marked',
   const t = read(out, 'trace.json');
   assert.equal(t.timedOut, true);
   assert.ok(t.byTest['tests.test_slow:test_slow'].ran.includes('shop.cart:discount_for'), 'what ran before the limit is kept');
+  assert.equal(t.byTest['tests.test_slow:test_slow'].status, 'error', 'a test the limit cut off did not pass');
+  assert.deepEqual([t.outcome.passed, t.outcome.errors], [0, 1]);
   cleanup(join(repo, '..')); cleanup(join(out, '..'));
 });
 

@@ -209,8 +209,8 @@ unittest` (python, python3 or python3.N, by name or path; a bare name is found i
 (`sandbox-exec` on macOS, `bwrap` on Linux, always chosen by platform; there is no option to pick or skip one). It
 never runs unsandboxed.
 
-The run: the repo's git-tracked and unignored files (every file but `.git` and virtualenvs, outside a git work tree)
-are copied to a scratch dir, and the command runs there with the repo's own interpreter, in place and read-only,
+The run: the repo's git-tracked and unignored files (every file but `.git` and virtualenvs, outside a git work tree;
+a submodule or a nested repo by its own git view, never whole, so nothing its own `.gitignore` ignores) are copied to a scratch dir, and the command runs there with the repo's own interpreter, in place and read-only,
 inside the sandbox. The sandbox hides the user's home folder and the original repo: the run reads only the copy, the
 interpreter's prefix, its virtualenv (even one inside the repo) and the prefix that virtualenv was made from; a
 prefix that would expose a hidden path whole (an interpreter installed straight into the home folder) is not exposed,
@@ -219,7 +219,9 @@ and the run says so.
 - **macOS**: `sandbox-exec` with `tools/trace/sandbox/macos-nonet.sb` plus read rules `lib/sandbox.mjs` adds per run:
   IP traffic denied (localhost included), unix socket connects denied (so no DNS resolver), every write outside
   scratch denied, every read under the home folder and the original repo denied except the exposed paths (and the
-  metadata, not the contents, of the dirs above them);
+  metadata, not the contents, of the dirs above them); no program outside the sandbox acting for the run: opening a
+  URL, file or app through LaunchServices, Apple Events and launchd job submission denied (the services behind them
+  too), and `open`, `osascript` and `launchctl` not executable;
 - **Linux**: `bwrap` through `tools/trace/sandbox/linux-bwrap.sh`: new network, user, pid, ipc and uts namespaces;
   `/` read-only with `/run`, `/tmp`, `/var/tmp`, home dirs, the user's home folder and the original repo replaced by
   empty tmpfs mounts (the exposed paths mounted back read-only); scratch the only writable path; a seccomp filter
@@ -251,7 +253,7 @@ virtualenv.
 | `sandbox`, `runner`, `argv` | `macos-sandbox-exec:macos-nonet.sb` or `linux-bwrap:linux-bwrap.sh`; `pytest` or `unittest`; the command as run |
 | `timeoutSec`, `timedOut`, `exitCode`, `durationMs` | the limit and how the run ended |
 | `codemap` | the code map's file, sha256, `commit`, `treeHash`, and `changedFiles`: mined files that differ in the copy (mine again first) |
-| `outcome` | `collected`, `passed`, `failed`, `errors` (collection and setup errors, failed teardowns), `skipped`, `xfailed`, `xpassed` |
+| `outcome` | `collected`, `passed`, `failed`, `errors` (collection and setup errors, failed teardowns, a test the time limit cut off), `skipped`, `xfailed`, `xpassed` |
 | `failures[]` | `test` (code-map id, or null), `nodeid`, `status`, `phase` (`collect`, `setup`, `call`, `teardown`), `message` |
 | `deniedBySandbox[]` | failing tests that attempted a network connect, or failed on a permission error or on a hidden path not found (bwrap hides a path by mounting an empty dir over it): `network` (the attempts), `permission`. They need a service or a file the sandbox refused; never retried |
 | `pairs[]` | `{from, to, n, tests}`: distinct in-repo caller → callee pairs, with calls and how many tests they ran under |

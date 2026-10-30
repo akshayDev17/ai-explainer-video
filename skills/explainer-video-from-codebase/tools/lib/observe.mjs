@@ -13,14 +13,15 @@ const idOf = ([rel, q]) => `${modOf(rel)}:${q}`;
 const byStr = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 const pairKey = (a, b) => a + '|' + b;
 
-// a test's outcome from its phases: pytest's counting (a failed setup is an error, a failed teardown adds one)
+// a test's outcome from its phases: pytest's counting (a failed setup is an error, a failed teardown adds one); a
+// test with no call report was cut off mid-call (the time limit) and is an error
 function statusOf(rec) {
   if (rec.call === 'error' || rec.setup === 'failed') return 'error';
   if (rec.setup === 'skipped' || rec.call === 'skipped') return rec.xfail ? 'xfailed' : 'skipped';
   if (rec.call === 'failed') return 'failed';
   if (rec.call === 'xfailed' || rec.call === 'xpassed') return rec.call;
   if (rec.call === 'passed') return rec.xfail ? 'xpassed' : 'passed';
-  return rec.setup === 'passed' ? 'passed' : 'error';
+  return 'error';
 }
 
 function category(sym, grp, a, b) {

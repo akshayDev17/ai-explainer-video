@@ -66,8 +66,8 @@ Ask with exactly this text, filling in the command and the test count from `code
 
 > This repo has a test suite (`<command>`, N tests). I can run it once, under a profiler, to mark which call paths
 > the tests actually exercise. It runs the repo's test code on this machine, inside a sandbox, on a copy of the files
-> git does not ignore: no network, no writes outside a scratch folder, no inherited environment variables, and no
-> reads of your home folder or the original repo folder (only the copy, the Python interpreter and its virtualenv). It
+> git does not ignore: no network, no writes outside a scratch folder, no inherited environment variables, no
+> handing work to a program outside the sandbox (opening a URL or an app, scripting another app), and no reads of your home folder or the original repo folder (only the copy, the Python interpreter and its virtualenv). It
 > can still read system files outside those folders. Anything it prints that looks like a credential is redacted from
 > its log. Run it?
 
@@ -80,7 +80,8 @@ node <skill>/tools/trace.mjs --codemap out/<name>/codemap.json --test-command "<
 
 The flag means the user said yes; never pass it otherwise, and a different command needs a new yes. The run happens
 in a scratch copy inside this platform's sandbox: no network of any kind (localhost and unix sockets included), no
-writes outside scratch, no reads of the home folder or the original repo, an empty environment, no bytecode or cache
+writes outside scratch, no program outside the sandbox acting for it, no reads of the home folder or the original
+repo, an empty environment, no bytecode or cache
 writes, a time limit. It writes `out/<name>/trace.json`, an overlay the code map is never edited for, and
 `trace.log`, the run's output (credential-shaped strings redacted). Exit 0 is done; 5 is the time limit (the partial
 trace is kept and marked); 1, 3 and 4 are refusals (no opt-in flag; not a test command; no sandbox): report them and
