@@ -10,5 +10,10 @@ def run_search_eval(shelf):
     return score(r.json())
 
 
+def run_stock_eval(isbn):
+    r = httpx.get(f"http://localhost:8081/api/v1/stock/{isbn}")
+    return r.json() >= 0
+
+
 if __name__ == "__main__":
-    print(run_search_eval("demo"))
+    print(run_search_eval("demo"), run_stock_eval("123"))

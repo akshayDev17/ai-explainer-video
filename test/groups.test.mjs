@@ -9,11 +9,14 @@ import { globToRegExp, classifyFile, parseOverrides } from '../skills/explainer-
 
 const POLYGLOT = join(FIXTURES, 'polyglot');
 const EXPECTED = {
-  prod: ['backend/app.py', 'backend/imports.py', 'backend/search.py', 'cmd/server/main.go', 'frontend/src/App.tsx', 'frontend/src/api/catalog.ts',
-    'frontend/src/pages/ImportPage.tsx', 'frontend/src/pages/JobPage.tsx', 'frontend/src/pages/SearchPage.tsx', 'frontend/src/routes.tsx'],
+  prod: ['backend/app.py', 'backend/imports.py', 'backend/search.py', 'frontend/src/App.tsx', 'frontend/src/api/catalog.ts', 'frontend/src/api/stock.ts',
+    'frontend/src/pages/ImportPage.tsx', 'frontend/src/pages/JobPage.tsx', 'frontend/src/pages/SearchPage.tsx', 'frontend/src/pages/StockPage.tsx', 'frontend/src/routes.tsx',
+    'native/isbn/src/cli.c', 'native/isbn/src/isbn.c', 'native/isbn/src/isbn.h', 'services/inventory/api/server.go', 'services/inventory/cmd/inventory/main.go',
+    'services/inventory/stock/store.go'],
   test: ['backend/conftest.py', 'backend/selfcheck.py', 'backend/test/legacy.py', 'backend/test_app.py', 'backend/test_utils.py', 'backend/tests/helpers.py',
-    'backend/thing_test.py', 'backend/verification/test_connections.py', 'cmd/server/main_test.go', 'frontend/src/App.test.tsx', 'frontend/src/__tests__/util.ts',
-    'frontend/src/api/catalog.test.ts', 'frontend/src/pages/ImportPage.test.tsx'],
+    'backend/thing_test.py', 'backend/verification/test_connections.py', 'frontend/src/App.test.tsx', 'frontend/src/__tests__/util.ts',
+    'frontend/src/api/catalog.test.ts', 'frontend/src/pages/ImportPage.test.tsx', 'native/isbn/tests/test_isbn.c', 'services/inventory/api/server_test.go',
+    'services/inventory/stock/store_test.go'],
   eval: ['backend/bench/quick.py', 'backend/benchmarks/bench_search.py', 'backend/evals/run_eval.py', 'backend/evals_data/load.py',
     'backend/evaluation/score.py', 'backend/finetune.py', 'backend/rag_quality.py', 'backend/search_evals/case.py'],
   dev: ['backend/alembic/env.py', 'backend/db/migration_controller.py', 'backend/debug/dump.py', 'backend/debug_cache.py', 'backend/dev/tool.py',
@@ -42,10 +45,29 @@ test('content signals reclassify only files the path rules left in prod', () => 
   assert.equal(ruleOf['backend/app.py'], 'prod: everything else');
 });
 
-test('Go files are grouped and listed but not mined yet; TypeScript is mined', () => {
-  assert.deepEqual(r.codemap.unsupported, { files: 2, byExt: { '.go': 2 } });
-  assert.equal(r.codemap.symbols.filter(s => s.file.endsWith('.go')).length, 0);
-  assert.deepEqual(r.codemap.languages.typescript, { files: 10, parseErrors: 0 });
+test('Go and C files are mined by their own adapters beside Python and TypeScript; nothing is left unsupported', () => {
+  assert.deepEqual(r.codemap.unsupported, { files: 0, byExt: {} });
+  assert.deepEqual(r.codemap.languages.typescript, { files: 12, parseErrors: 0 });
+  assert.deepEqual(r.codemap.languages.go, { files: 5, parseErrors: 0 });
+  assert.deepEqual(r.codemap.languages.c, { files: 4, parseErrors: 0 });
+  const go = r.codemap.files.filter(f => f.lang === 'go');
+  assert.deepEqual(go.filter(f => f.group === 'test').map(f => f.path).sort(), ['services/inventory/api/server_test.go', 'services/inventory/stock/store_test.go']);
+  assert.deepEqual(r.codemap.files.filter(f => f.lang === 'c' && f.group === 'test').map(f => [f.path, f.rule.split(':')[0]]), [['native/isbn/tests/test_isbn.c', 'test']]);
+});
+
+test('a .h header is read as C++ when it holds C++, else as C; a C/C++ file that includes a test framework and defines tests is a test file', () => {
+  const repo = gitRepo();
+  writeFileSync(join(repo, 'plain.h'), 'int add(int a, int b);\n');
+  writeFileSync(join(repo, 'shapes.h'), 'namespace geo {\nclass Shape { public: virtual double area() const = 0; };\n}\n');
+  writeFileSync(join(repo, 'checks.cc'), '#include <gtest/gtest.h>\nTEST(Add, Works) { EXPECT_EQ(1, 1); }\n');
+  writeFileSync(join(repo, 'tool.cc'), '#include <string>\nint main() { return 0; }\n');
+  const m = mine(repo).codemap;
+  const f = p => m.files.find(x => x.path === p);
+  assert.deepEqual([f('plain.h').lang, f('shapes.h').lang], ['c', 'cpp']);
+  assert.deepEqual([f('checks.cc').group, f('checks.cc').rule], ['test', 'content: includes gtest/gmock/Catch2/Unity/cmocka/check and defines tests or mocks']);
+  assert.equal(f('tool.cc').group, 'prod');
+  assert.equal(m.files.some(x => x.parseError), false);
+  cleanup(dirname(repo));
 });
 
 test('an entry that lands in the test group is reported with the override that would move it', () => {

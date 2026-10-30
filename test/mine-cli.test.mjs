@@ -27,7 +27,7 @@ test('exit 1: no repo, no --out, an unknown flag, a missing directory', () => {
 test('exit 1: a repo with no supported source files', () => {
   const repo = out();
   mkdirSync(repo);
-  writeFileSync(join(repo, 'main.go'), 'package main\n');
+  writeFileSync(join(repo, 'main.rs'), 'fn main() {}\n');
   const r = run(repo, '--out', out());
   assert.equal(r.status, 1);
   assert.match(r.stderr, /no supported source files/);
@@ -52,21 +52,22 @@ test('exit 1: refuses an --out that reaches the repo through a symlink', () => {
 
 test('exit 1: a bad --group or an unmined --lang', () => {
   assert.equal(run(RESOLVER, '--out', out(), '--group', 'x/**=staging').status, 1);
-  assert.match(run(RESOLVER, '--out', out(), '--lang', 'go').stderr, /mined languages are python and typescript/);
+  assert.match(run(RESOLVER, '--out', out(), '--lang', 'rust').stderr, /mined languages are python, typescript, go, c, cpp/);
 });
 
-test('--lang takes python and typescript (which covers JavaScript), each mining only its own files; no other spelling', () => {
+test('--lang takes python, typescript (which covers JavaScript), go, c and cpp, each mining only its own files; no other spelling', () => {
   const polyglot = join(FIXTURES, 'polyglot');
-  const py = mine(polyglot, '--lang', 'python'), tsx = mine(polyglot, '--lang', 'typescript');
-  assert.equal(py.status, 0, py.stderr);
-  assert.equal(tsx.status, 0, tsx.stderr);
   const files = m => [...new Set(m.symbols.map(s => s.file.slice(s.file.lastIndexOf('.'))))].sort();
-  assert.deepEqual(files(py.codemap), ['.py']);
-  assert.deepEqual(files(tsx.codemap), ['.ts', '.tsx']);
-  for (const alias of ['py', 'ts', 'javascript', 'js']) {
+  for (const [lang, repo, exts] of [['python', polyglot, ['.py']], ['typescript', polyglot, ['.ts', '.tsx']], ['go', polyglot, ['.go']], ['c', polyglot, ['.c']],
+    ['cpp', join(FIXTURES, 'cpp-resolver'), ['.cpp', '.h']]]) {
+    const r = mine(repo, '--lang', lang);
+    assert.equal(r.status, 0, `${lang}: ${r.stderr}`);
+    assert.deepEqual(files(r.codemap), exts, lang);
+  }
+  for (const alias of ['py', 'ts', 'javascript', 'js', 'golang', 'c++', 'cxx']) {
     const r = run(polyglot, '--out', out(), '--lang', alias);
     assert.equal(r.status, 1, alias);
-    assert.match(r.stderr, new RegExp(`--lang ${alias}: mined languages are python and typescript`));
+    assert.match(r.stderr, new RegExp(`--lang ${alias.replace(/\+/g, '\\+')}: mined languages are python, typescript, go, c, cpp`));
   }
 });
 

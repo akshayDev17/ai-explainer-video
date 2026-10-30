@@ -1,0 +1,19 @@
+{
+  "entries": [],
+  "links": [
+    "cart/cart_test.go:TestDiscount -> cart/cart_test.go:TestMain framework go.test-main",
+    "cart/cart_test.go:TestTotal -> cart/cart_test.go:TestMain framework go.test-main",
+    "cart/store_test.go:TestDBStorePrice -> cart/cart_test.go:TestMain framework go.test-main",
+    "cart/store_test.go:TestWithMock -> cart/cart_test.go:TestMain framework go.test-main"
+  ],
+  "tests": [
+    "cart/cart_test.go:TestTotal asserts 24 | mocked cart/dbstore.go:DBStore.Price | direct cart/cart.go:Cart.Add/body,cart/cart.go:Cart.Total/body,cart/cart.go:New/helper",
+    "cart/cart_test.go:TestDiscount asserts 40,46 | mocked  | direct cart/cart.go:Discount/body | subtests <tc.name>,zero | table cases:3",
+    "cart/store_test.go:TestDBStorePrice asserts 16 | mocked  | direct cart/dbstore.go:DBStore.Price/body",
+    "cart/store_test.go:TestWithMock asserts 25,26 | mocked cart/dbstore.go:DBStore.Price | direct cart/cart.go:New/body,cart/cart.go:Cart.Add/body,cart/cart.go:Cart.Total/body"
+  ],
+  "mocks": [
+    "cart/cart_test.go:newCart go.fake fakeStore (for Store.Price) -> cart/dbstore.go:DBStore.Price",
+    "cart/store_test.go:TestWithMock testify.mock mockStore (for Store.Price) -> cart/dbstore.go:DBStore.Price"
+  ]
+}

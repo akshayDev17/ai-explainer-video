@@ -1,0 +1,22 @@
+{
+  "entries": [
+    "command src/commands.c:cmd_add add",
+    "command src/commands.c:cmd_list list",
+    "command src/commands.c:cmd_remove remove",
+    "command src/router.cpp:health health",
+    "command src/router.cpp:list_items GET /items",
+    "command src/router.cpp:routes[\"POST /items\"] POST /items",
+    "main src/main.c:main",
+    "signal src/main.c:on_sigint SIGINT"
+  ],
+  "links": [
+    "src/commands.c:dispatch -> src/commands.c:cmd_add dispatch c.handler-table",
+    "src/commands.c:dispatch -> src/commands.c:cmd_list dispatch c.handler-table",
+    "src/commands.c:dispatch -> src/commands.c:cmd_remove dispatch c.handler-table",
+    "src/router.cpp:Router.handle -> src/router.cpp:list_items dispatch c.handler-table",
+    "src/router.cpp:Router.handle -> src/router.cpp:routes[\"POST /items\"] dispatch c.handler-table",
+    "src/router.cpp:Router.handle_extra -> src/router.cpp:health dispatch c.handler-table",
+    "src/store.c:store_put -> src/store.c:file_put dispatch c.fn-pointer",
+    "src/store.c:store_put -> src/store.c:mem_put dispatch c.fn-pointer"
+  ]
+}
