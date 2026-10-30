@@ -37,7 +37,7 @@ def _key(item):
     # item a plugin parents at the session (its path is the root) is `::<name>`
     path = _path(item)
     rel = next((path[len(r):] for r in fm.ROOTS if _in_copy(path, r)), "")
-    rest = item.nodeid.split("::", 1)[1] if "::" in item.nodeid else "" if rel else item.nodeid
+    rest = item.nodeid.split("::", 1)[1] if "::" in item.nodeid else ""
     return rel + "::" + rest
 
 
