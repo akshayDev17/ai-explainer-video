@@ -2,7 +2,8 @@
    apply-flows' estimate in the approval table. WPM and EXPANSION are measured on coursework (imported from its
    model.mjs). FRAME, HOP_BASE, WPL, BRANCH and TEST are calibrated on one narrated pilot code video (CALIBRATION:
    8 hops with 96 narrated lines spoken in 609 words, 2 taught branches in 135, 3 cited tests in 134, the frame in
-   154; 1032 words in all, 381.6 s of speech). BOUNDARY is still an estimate: the pilot crossed no boundary.
+   154; 1032 words in all, 381.6 s of speech). BOUNDARY and OVERVIEW are still estimates: the pilot crossed no
+   boundary and made no overview.
 
      words(video) = FRAME + Σ_hops (HOP_BASE + WPL × narrated(h)) + Σ_crossings BOUNDARY + Σ_taught branches BRANCH
                   + min(MAX_TESTS, cited tests) × TEST
@@ -20,7 +21,7 @@ export const CALIBRATION = { videos: 1, segments: 18, hops: 8, narratedLines: 96
   citedTests: 3, testWords: 134, frameWords: 154, crossings: 0, pausePrompts: 0, words: 1032, speechSeconds: 381.6 };
 
 export const MODEL = { wpm: WPM, expansion: EXPANSION, frame: 150, hopBase: 5, wpl: 6, lineCap: 22, narrate: 0.5, boundary: 60, branch: 70,
-  prompt: 12, test: 45, maxTests: 3, overview: 1000, calibrated: true, uncalibrated: ['boundary'], basis: CALIBRATION };
+  prompt: 12, test: 45, maxTests: 3, overview: 1000, calibrated: true, uncalibrated: ['boundary', 'overview'], basis: CALIBRATION };
 
 export const narratedLines = h => h.lines ? h.lines.reduce((a, [x, y]) => a + y - x + 1, 0) : Math.min(MODEL.lineCap, Math.ceil(MODEL.narrate * (h.end - h.start + 1)));
 const hopWords = h => MODEL.hopBase + MODEL.wpl * narratedLines(h);

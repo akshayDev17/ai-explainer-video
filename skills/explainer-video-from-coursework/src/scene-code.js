@@ -22,7 +22,7 @@
      • `segment: <key>`: the acts are timed from that segment's window (scene time
        = line time + lead, as lines.json and excerpt-check measure it), so the host
        subtracts the window's start from the video time render passes; such a scene
-       draws no progress bar unless it sets `progress: true`
+       draws no progress bar
 
    Contract: window.CodeScenes.create({ root, config }) -> { renderAt(t) }
    ========================================================================== */
@@ -162,7 +162,7 @@
     const W = (cfg.meta && cfg.meta.width) || 1920;
     const H = (cfg.meta && cfg.meta.height) || 1080;
     const TOTAL = cfg.total;
-    const PROGRESS = cfg.segment == null || cfg.progress === true;
+    const PROGRESS = cfg.segment == null;
 
     root.innerHTML = '';
 

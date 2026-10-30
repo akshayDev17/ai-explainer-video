@@ -457,7 +457,7 @@ Scene-code reads `numbers[]` for the number column and styles the `elided[]` lin
 narration}`), and a window that starts as the previous one ends keeps the dim; a coursework panel keeps its single
 focus act. A `{op: "pause", from, to, text?}` act shows the pause badge. A scene with `segment: "<key>"` is
 timed from that segment's window: the host (opened with `?work=`) reads the window from `timeline.js` and plays
-the scene at video time minus the window's start, and draws no progress bar unless `progress: true`; a named
+the scene at video time minus the window's start, and draws no progress bar; a named
 segment with no window throws. A coursework scene, with no `segment`, keeps the video clock and its own `total`.
 
 ## `excerpt-check.mjs` (C6)

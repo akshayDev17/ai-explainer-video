@@ -185,7 +185,9 @@ test('focus exits 3: a code scene that names no segment, or another one, would p
   assert.equal(r.status, 3);
   assert.match(r.stdout, /hop2: the scene names no segment \(set `segment: "hop2"`\)/);
   const other = goodScene(); other.segment = 'hop3';
-  assert.match(check(work(other)).stdout, /hop2: the scene names segment "hop3"/);
+  const ro = check(work(other));
+  assert.equal(ro.status, 3);
+  assert.match(ro.stdout, /hop2: the scene names segment "hop3"/);
 });
 
 test('a pause segment may show a whole block unfocused, with its badge; at most three per video', () => {

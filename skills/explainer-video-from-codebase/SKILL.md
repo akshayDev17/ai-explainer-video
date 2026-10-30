@@ -179,7 +179,7 @@ one `focus` act per sentence that names the narration line it is synced to (`"na
 also gets a `pause` act over its spoken prompt (the on-screen badge). Every code scene names its segment
 (`segment: "<key>"`): its acts are timed from that segment's window (line time + `lead`), and the code host
 subtracts the window's start, read from the work dir's `timeline.js`, from the video time assembly renders at.
-Such a scene draws no progress bar unless it sets `progress: true`.
+Such a scene draws no progress bar.
 
 ```sh
 node <skill>/tools/excerpt-check.mjs --work out/<name>/<NN> --repo <repo> --script out/<name>/scripts/<NN>-*.json

@@ -74,6 +74,21 @@ test('clock: a coursework scene keeps the video clock and its own total; a scene
   assert.throws(() => CodeScenes.clockOf({ total: 45, segment: 'hop2' }, undefined), /no window for it/);
 });
 
+test('progress bar: a coursework scene draws and fills it; a scene naming its segment draws none', () => {
+  // the smallest DOM create() touches for a scene with no panels: a root that finds ids in its children's markup
+  const el = () => ({ style: {}, innerHTML: '', textContent: '', children: [], setAttribute() {}, appendChild(c) { this.children.push(c); return c; } });
+  const stage = () => {
+    const root = el(), found = {};
+    root.querySelector = sel => root.children.some(c => c.innerHTML.includes(`id="${sel.slice(1)}"`)) ? (found[sel] ||= el()) : null;
+    return { root, found };
+  };
+  const doc = { createElement: el, createElementNS: el };
+  const scene = cfg => { const s = stage(); load('scene-code.js', { document: doc }).CodeScenes.create({ root: s.root, config: cfg }).renderAt(4); return s.found; };
+  assert.equal(scene({ total: 8 })['#progFill'].style.width, '960.0px', 'a coursework scene fills the bar on its own total');
+  assert.equal(scene({ total: 8, segment: 'hop2' })['#progFill'], undefined);
+  assert.equal(scene({ total: 8, segment: 'hop2', progress: true })['#progFill'], undefined, 'no flag brings the bar back');
+});
+
 /* ---------------- scene-core: primitives.sequence ---------------- */
 // the smallest DOM the SVG helpers touch: elements record their attributes, children and text
 const node = tag => ({ tag, attrs: {}, children: [], textContent: '', setAttribute(k, v) { this.attrs[k] = String(v); }, appendChild(c) { this.children.push(c); return c; } });

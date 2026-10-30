@@ -108,7 +108,7 @@ test('the plan: an overview, then each series item in order, split at a break', 
   assert.deepEqual(p.forms, ['overview', 'flow', 'core']);
   assert.equal(p.model.maxVideoMin, 25);
   assert.equal(p.model.calibrated, true);
-  assert.deepEqual(p.model.uncalibrated, ['boundary'], 'the pilot crossed no boundary');
+  assert.deepEqual(p.model.uncalibrated, ['boundary', 'overview'], 'the pilot crossed no boundary and made no overview');
   assert.equal(p.model.basis.narratedLines, 96);
   assert.equal(p.approval.by, 'user');
   assert.equal(p.approval.flowsHash, json(join(dir, 'flows.approved.json')).flowsHash);
