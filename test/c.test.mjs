@@ -3,8 +3,9 @@
 // factory narrowing, function-pointer fields, build and config guards) and gtest / Catch2 / C test evidence.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
-import { FIXTURES, mine, ruleView, assertGolden, edgesFrom, short } from './helpers.mjs';
+import { join, dirname } from 'node:path';
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { FIXTURES, mine, ruleView, assertGolden, edgesFrom, short, gitRepo, cleanup } from './helpers.mjs';
 
 const pack = name => {
   const r = mine(join(FIXTURES, 'rules', name));
@@ -46,4 +47,34 @@ test('c++ resolver: namespaces and using-directives, out-of-line members, virtua
   assert.equal(m.symbols.find(s => s.id === 'src/shapes.cpp:geo.Circle.area').cls, 'include/shapes.h:geo.Circle', 'an out-of-line member joins its class');
   assert.deepEqual(m.selfCheck.c.unresolvedIncludes, [], '"shapes.h" from src/ is include/shapes.h, as an -I directory would find it');
   assert.ok(m.symbols.find(s => s.id === 'include/shapes.h:geo.Shape.area').decos.includes('abstractmethod'), 'a pure virtual method is abstract');
+});
+
+const repoOf = files => { const repo = gitRepo();
+  for (const [f, text] of Object.entries(files)) { mkdirSync(dirname(join(repo, f)), { recursive: true }); writeFileSync(join(repo, f), text); }
+  return repo; };
+const calls = (m, from) => edgesFrom(m, from).map(e => `${e.to} ${e.kind}`);
+
+test('c resolver: a static function is seen only from its own file and the files that include its header', () => {
+  const repo = repoOf({
+    'src/a.c': 'static int min(int a, int b) { return a < b ? a : b; }\nint use_a(void) { return min(1, 2); }\n',
+    'src/b.c': 'int use_b(void) { return min(3, 4); }\n',
+    'src/util.h': 'static inline int clamp(int x) { return x < 0 ? 0 : x; }\n',
+    'src/c.c': '#include "util.h"\nint use_c(void) { return clamp(-1); }\n' });
+  const m = mine(repo).codemap;
+  assert.deepEqual(calls(m, 'src/a.c:use_a'), ['src/a.c:min static']);
+  assert.deepEqual(calls(m, 'src/b.c:use_b'), [], 'another file\'s static min is not the one b.c calls');
+  assert.deepEqual(calls(m, 'src/c.c:use_c'), ['src/util.h:clamp static'], 'a static inline in an included header is');
+  cleanup(dirname(repo));
+});
+
+test('c++ resolver: an out-of-line definition qualified by a namespace, not a class, is a function in that namespace', () => {
+  const repo = repoOf({
+    'src/geo.h': 'namespace geo {\nint area(int w);\n}\n',
+    'src/geo.cpp': '#include "geo.h"\nint geo::area(int w) { return w * w; }\n',
+    'src/report.cpp': '#include "geo.h"\nint run() { return geo::area(2); }\nnamespace geo {\nint twice() { return area(3) * 2; }\n}\n' });
+  const m = mine(repo).codemap;
+  assert.equal(m.symbols.find(s => s.id === 'src/geo.cpp:geo.area').kind, 'function');
+  assert.deepEqual(calls(m, 'src/report.cpp:run'), ['src/geo.cpp:geo.area static']);
+  assert.deepEqual(calls(m, 'src/report.cpp:geo.twice'), ['src/geo.cpp:geo.area static']);
+  cleanup(dirname(repo));
 });

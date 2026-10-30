@@ -360,7 +360,7 @@ functions that matched no symbol), `anonymousCallbacks`, `directLinksPerTest` an
 | Field | What it holds |
 |---|---|
 | `optIn` | `{by: "user", at, command}`: who opted in, when, and the exact command |
-| `granularity`, `byUnit`, `ran` | coverage runners only: `test-file` (JS), `test` (Go) or `suite` (make); what ran in each unit, and per symbol the units it ran in |
+| `granularity`, `byUnit`, `ran` | coverage runners only: `test-file` (JS), `test` (Go) or `binary` (make); what ran in each unit, and per symbol the units it ran in |
 | `sandbox`, `runner`, `argv` | `macos-sandbox-exec:macos-nonet.sb` or `linux-bwrap:linux-bwrap.sh`; `pytest`, `unittest`, `node-test`, `jest`, `vitest`, `go-test` or `make`; the command as run (for a JS runner, one file's command with `<test file>`; for Go, one test's with `<TestName>`) |
 | `timeoutSec`, `timedOut`, `exitCode`, `durationMs` | the limit and how the run ended |
 | `codemap` | the code map's file, sha256, `commit`, `treeHash`, and `changedFiles`: mined files that differ in the copy (mine again first) |
@@ -376,22 +376,30 @@ functions that matched no symbol), `anonymousCallbacks`, `directLinksPerTest` an
 
 `go test` runs once per code-map test (`-run ^TestXxx$`, intersected with a `-run` the command gave) in the module
 `-C` names, else the repo root's, else the code map's one module (two or more without `-C` are refused, exit 1), with
-`-json -count=1 -coverprofile -coverpkg=./...`, in the sandbox, with the go the command names (its `GOROOT` and the
-user's module cache exposed read-only; `GOCACHE` and `GOPATH` in scratch; `GOPROXY=off`, `GOTOOLCHAIN=local`,
-`CGO_ENABLED=0`, so nothing is downloaded). A symbol ran under a test when a counted block of its profile sits inside
+`-json -count=1 -coverprofile -coverpkg=./...`, in the sandbox, with the go the command names, run from inside its
+`GOROOT`. The run may read exactly two dirs the home folder would otherwise hide, read-only: the `GOROOT` and
+`GOMODCACHE` that go's `go env` reports (the default module cache is `$HOME/go/pkg/mod`), never anything else of the
+home folder; a `GOROOT` or `GOMODCACHE` that is the home folder or holds it, or a go in the home folder outside its
+`GOROOT`, is refused (exit 1). `GOCACHE` and `GOPATH` are in scratch; `GOPROXY=off`, `GOTOOLCHAIN=local`,
+`CGO_ENABLED=0`, so nothing is downloaded: a dependency comes from the module cache or the build fails. A test in a Go
+module nested inside the one the run uses (a `go.mod` further down) is that module's, and is left out, as `go test
+./...` leaves it. A symbol ran under a test when a counted block of its profile sits inside
 it (the innermost symbol holding the block): `granularity: "test"`, one unit per test. go test does not instrument
 `_test.go` files, so test-side code (helpers, fakes, `TestMain`) is never observed. A failure whose output shows a
 dial, socket or lookup error is in `deniedBySandbox`.
 
 `make` builds and runs its target once with `CC="cc --coverage" CXX="c++ --coverage"` (a command-line variable wins
 over the Makefile's own and reaches compiling and linking; a Makefile that calls a compiler by another name writes no
-counters, exit 2), then reads every `.gcda` the run wrote with `gcov -t`, inside the same sandbox. A binary that aborts
-writes no counters. make runs every test binary in one go and their counters for a shared source add up, so what ran
-is attributed to the whole run: `granularity: "suite"`, one unit. A test ran when its own lines ran; its status comes
-from GoogleTest (`[ OK ]`, `[ FAILED ]`) or Unity (`file:line:test:PASS`) output, else the run's exit code (`unknown`
-when the run failed and the test printed no status of its own; `not run` when its lines never ran). Network errors in
-the log (`connect: Operation not permitted`) put the run in `deniedBySandbox`. Neither runner records a caller → callee
-pair, so `pairs`, `edges`, `noStaticEdge` and `callbacks` are empty, and `outcome` adds `unknown` and `notRun`.
+counters, exit 2) and `SHELL` set to `tools/trace/c/fmtrace-sh`, which runs each recipe line under `/bin/sh` with
+`GCOV_PREFIX` pointing at a dir of its own, so the counters each test binary writes land apart, beside the line's exit
+status and output. Each recipe line that wrote counters is one unit, keyed by the line (`./tests/test_cart`):
+`granularity: "binary"`; its `.gcda` files are read with `gcov -t`, inside the same sandbox. A binary that aborts
+writes no counters. A test belongs to the first binary its own lines ran in, and its direct links are judged against
+that binary's coverage; its status comes from GoogleTest (`[ OK ]`, `[ FAILED ]`) or Unity (`file:line:test:PASS`)
+output, else its binary's exit status (`passed` or `failed`; `not run` when its lines never ran). Network errors in a
+binary's output (`connect: Operation not permitted`) put its failing test in `deniedBySandbox`. Neither runner records
+a caller → callee pair, so `pairs`, `edges`, `noStaticEdge` and `callbacks` are empty, and `outcome` adds `unknown` and
+`notRun`.
 
 A fixture, a FastAPI `Depends` provider or a queue consumer has no in-repo caller frame, so those links are never
 observed as pairs; a fixture link is observed by attribution (the fixture ran under its test). The trace is one

@@ -1,14 +1,16 @@
 /* trace.mjs's C / C++ runner (design §3.14 C and C++ rows, §3.17): the repo's own `make` test target, built with
-   coverage and read with gcov.
+   coverage and read with gcov, per test binary.
    - accepted: `make test`, `make check` and `make -C <dir> test|check` (the make on PATH); no variables, no other
-     target, no other flag: the trace sets CC and CXX itself;
-   - the run builds and runs the target once with `CC="cc --coverage"` and `CXX="c++ --coverage"` (a command-line
-     variable wins over the Makefile's own, and the flag reaches both compiling and linking); every .gcda the run
-     wrote is then read with `gcov -t`, inside the same sandbox, for the line counts of each source it covers;
-   - what ran is attributed to the whole run (`granularity: suite`): make runs every test binary in one go, and their
-     counters for a shared source add up, so no single test can be credited. A test whose own lines ran counts as run;
-     its status comes from GoogleTest's `[ RUN ]` / `[ OK ]` / `[ FAILED ]` lines or Unity's `file:line:test:PASS`
-     lines, else from the run's exit code. */
+     target, no other flag: the trace sets CC, CXX and SHELL itself;
+   - the run builds and runs the target once with `CC="cc --coverage"`, `CXX="c++ --coverage"` (a command-line
+     variable wins over the Makefile's own, and the flag reaches both compiling and linking) and SHELL set to
+     trace/c/fmtrace-sh, which runs each recipe line under /bin/sh with GCOV_PREFIX pointing at a dir of its own: the
+     counters each line's test binary writes land apart, and its exit status and stderr are kept beside them;
+   - each recipe line that wrote counters is one unit (`granularity: binary`), read with `gcov -t` inside the same
+     sandbox for the line counts of each source it covers. A test whose own lines ran in a unit belongs to that unit
+     (the first, if several), and its direct links are judged against that unit's coverage; its status comes from
+     GoogleTest's `[ RUN ]` / `[ OK ]` / `[ FAILED ]` lines or Unity's `file:line:test:PASS` lines, else from its
+     unit's exit status. */
 import { posix } from 'node:path';
 
 /* -> { runner: 'make', dir, target } or null */
@@ -21,7 +23,7 @@ export function recogniseMake(words) {
   return { runner: 'make', dir: dir.replace(/^\.\/?/, '').replace(/\/$/, ''), target: words[i] };
 }
 
-export const makeArgv = ({ make, dir, target }) => [make, ...(dir ? ['-C', dir] : []), target, 'CC=cc --coverage', 'CXX=c++ --coverage'];
+export const makeArgv = ({ make, dir, target, shell }) => [make, ...(dir ? ['-C', dir] : []), target, 'CC=cc --coverage', 'CXX=c++ --coverage', `SHELL=${shell}`];
 
 /* gcov -t text (one or more files) -> Map(source as compiled -> Map(line -> count)) */
 export function parseGcov(text) {

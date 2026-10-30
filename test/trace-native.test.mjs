@@ -6,9 +6,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync, mkdirSync, cpSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { FIXTURES, scratch, cleanup, tool, gitRepo, assertGolden } from './helpers.mjs';
+import { tmpdir } from 'node:os';
+import { FIXTURES, SKILL, scratch, cleanup, tool, gitRepo, assertGolden } from './helpers.mjs';
 import { sandboxWorks } from '../skills/explainer-video-from-codebase/tools/lib/sandbox.mjs';
 import { recogniseGo, goModuleDir, goTestsToRun, goTestArgv, parseGoTestJson, parseCoverProfile } from '../skills/explainer-video-from-codebase/tools/lib/trace-go.mjs';
 import { recogniseMake, makeArgv, parseGcov, parseCTestOutput } from '../skills/explainer-video-from-codebase/tools/lib/trace-c.mjs';
@@ -36,7 +37,7 @@ test('recognised: go test with the flags that only choose and run tests, go -C <
   const mk = cmd => recogniseMake(cmd.split(' '));
   assert.deepEqual(mk('make test'), { runner: 'make', dir: '', target: 'test' });
   assert.deepEqual(mk('make -C native/isbn check'), { runner: 'make', dir: 'native/isbn', target: 'check' });
-  assert.deepEqual(makeArgv({ make: 'make', dir: 'x', target: 'test' }), ['make', '-C', 'x', 'test', 'CC=cc --coverage', 'CXX=c++ --coverage']);
+  assert.deepEqual(makeArgv({ make: 'make', dir: 'x', target: 'test', shell: '/s/fmtrace-sh' }), ['make', '-C', 'x', 'test', 'CC=cc --coverage', 'CXX=c++ --coverage', 'SHELL=/s/fmtrace-sh']);
   assert.deepEqual(goTestArgv({ go: 'go', flags: ['-short'], name: 'TestA', profile: 'p.out', pkgDir: 'shop' }),
     ['go', 'test', '-json', '-count=1', '-run=^TestA$', '-coverprofile=p.out', '-coverpkg=./...', '-short', './shop']);
 });
@@ -69,6 +70,10 @@ test('the Go module the run uses, and the tests it runs: one alone per run, in t
   assert.deepEqual(names('go test ./...'), ['api:TestGetStock', 'stock:TestMemStoreReserve']);
   assert.deepEqual(names('go test ./stock'), ['stock:TestMemStoreReserve']);
   assert.deepEqual(names('go test -run Stock$ ./...'), ['api:TestGetStock']);
+  const nested = { selfCheck: { go: { modules: [{ dir: '.', module: 'example.com/app' }, { dir: 'tools', module: 'example.com/app/tools' }] } },
+    tests: [{ id: 'app_test.go:TestApp', file: 'app_test.go' }, { id: 'tools/gen/gen_test.go:TestGen', file: 'tools/gen/gen_test.go' }] };
+  assert.deepEqual(goTestsToRun(nested, recogniseGo(['go', 'test', './...']), '').map(t => t.name), ['TestApp'], 'a nested module\'s tests are its own: go test ./... skips them');
+  assert.deepEqual(goTestsToRun(nested, recogniseGo('go -C tools test ./...'.split(' ')), 'tools').map(t => t.name), ['TestGen']);
 });
 
 /* ---------------- reports and coverage onto the code map ---------------- */
@@ -135,16 +140,49 @@ test('go test on fixtures/trace-go runs sandboxed, one run per test: what ran is
   cleanup(dirname(repo)); cleanup(join(out, '..'));
 });
 
+test('go test on fixtures/trace-go-dep builds its dependency from a module cache in the home folder, read-only; the rest of the home folder stays unreadable', { skip: skipFor(['go']) }, () => {
+  const repo = gitRepo(join(FIXTURES, 'trace-go-dep')), home = join(scratch(), 'home'), secret = join(home, 'secret.txt');
+  cpSync(join(FIXTURES, 'go-modcache'), join(home, 'go', 'pkg', 'mod'), { recursive: true });
+  writeFileSync(secret, 'not for the trace\n');
+  writeFileSync(join(repo, 'greet', 'home_test.go'), `package greet\n\nimport (\n\t"os"\n\t"testing"\n)\n\nfunc TestReadsHome(t *testing.T) {\n\tb, err := os.ReadFile(${JSON.stringify(secret)})\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tt.Logf("read %s", b)\n}\n`);
+  const out = mineFixture(repo);
+  // the default module cache: $HOME/go/pkg/mod, as on a fresh install
+  const env = { ...process.env, HOME: home };
+  for (const k of ['GOPATH', 'GOMODCACHE', 'GOFLAGS', 'GOENV', 'GOPROXY', 'XDG_CONFIG_HOME']) delete env[k];
+  const r = spawnSync(process.execPath, [join(SKILL, 'tools', 'trace.mjs'), '--codemap', join(out, 'codemap.json'), '--test-command', 'go test ./...', OPT_IN, '--timeout', '600'], { cwd: tmpdir(), env, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json'), log = readFileSync(join(out, 'trace.log'), 'utf8');
+  assert.equal(t.byTest['greet/greet_test.go:TestWelcome'].status, 'passed', log);
+  assert.deepEqual(t.byUnit['greet/greet_test.go:TestWelcome'].ran, ['greet/greet.go:Welcome']);
+  assert.equal(t.byTest['greet/home_test.go:TestReadsHome'].status, 'failed', 'a file elsewhere in the home folder is not readable');
+  assert.match(t.failures.find(f => f.test === 'greet/home_test.go:TestReadsHome').message, /secret\.txt: (operation not permitted|no such file or directory)/);
+  assert.equal(log.includes('not for the trace') || JSON.stringify(t).includes('not for the trace'), false);
+  cleanup(dirname(repo)); cleanup(dirname(home)); cleanup(join(out, '..'));
+});
+
+test('go test refuses a GOMODCACHE that is the home folder or holds it', { skip: skipFor(['go']) }, () => {
+  const repo = gitRepo(join(FIXTURES, 'trace-go-dep')), out = mineFixture(repo), home = join(scratch(), 'home');
+  mkdirSync(home);
+  for (const modcache of [home, dirname(home)]) {
+    const env = { ...process.env, HOME: home, GOMODCACHE: modcache };
+    const r = spawnSync(process.execPath, [join(SKILL, 'tools', 'trace.mjs'), '--codemap', join(out, 'codemap.json'), '--test-command', 'go test ./...', OPT_IN], { cwd: tmpdir(), env, encoding: 'utf8' });
+    assert.equal(r.status, 1, r.stderr + r.stdout);
+    assert.match(r.stderr, /refused: GOMODCACHE is .* which is or holds your home folder/);
+  }
+  cleanup(dirname(repo)); cleanup(dirname(home)); cleanup(join(out, '..'));
+});
+
 test('make test on fixtures/trace-c builds with coverage and runs sandboxed; gcov reads what ran; the socket test is denied', { skip: skipFor(['cc', 'make', 'gcov']) }, () => {
   const repo = gitRepo(join(FIXTURES, 'trace-c')), out = mineFixture(repo), before = files(repo);
   const r = trace(out, 'make test');
   assert.equal(r.status, 0, r.stderr + r.stdout);
   const t = read(out, 'trace.json');
   assert.deepEqual(files(repo), before, 'nothing is written inside the repo: the build and its counters stay in the copy');
-  assert.deepEqual([t.runner, t.granularity, t.exitCode !== 0], ['make', 'suite', true]);
-  assert.deepEqual(t.deniedBySandbox.map(d => [d.nodeid, d.network.some(x => /connect: Operation not permitted/i.test(x))]), [['make test', true]]);
+  assert.deepEqual([t.runner, t.granularity, t.exitCode !== 0], ['make', 'binary', true]);
+  assert.deepEqual(Object.keys(t.byUnit), ['./tests/test_cart', './tests/test_net'], 'one unit per test binary make ran');
+  assert.deepEqual(t.deniedBySandbox.map(d => [d.nodeid, d.network.some(x => /connect: Operation not permitted/i.test(x))]), [['tests/test_net.c::test_ping', true]]);
   assert.equal(t.ran['src/cart.c:unused'], undefined);
-  assertGolden('trace-c', { granularity: t.granularity, ran: Object.keys(t.ran), byTest: Object.fromEntries(Object.entries(t.byTest).map(([k, v]) => [k, `${v.status}: ${v.direct.observed}/${v.direct.total}`])),
+  assertGolden('trace-c', { granularity: t.granularity, ran: Object.keys(t.ran), byUnit: Object.fromEntries(Object.entries(t.byUnit).map(([k, v]) => [k, v.ran.join(', ')])), byTest: Object.fromEntries(Object.entries(t.byTest).map(([k, v]) => [k, `${v.status}: ${v.direct.observed}/${v.direct.total}`])),
     directLinksPerTest: t.summary.directLinksPerTest, functionsRan: t.summary.functionsRan });
   cleanup(dirname(repo)); cleanup(join(out, '..'));
 });

@@ -17,10 +17,11 @@
    - methods by receiver: `x.M()` where x is typed by a parameter or receiver, a `var x T`, `x := T{}` / `&T{}` /
      `new(T)`, `x := f()` (f's declared result type), a type assertion `x.(T)`, a struct field (`s.store.Get()`), an
      element of a typed slice or map (`range`, `xs[i]`); methods promoted from embedded fields are found through them;
-   - interfaces by method set: a type whose methods (its own and promoted) include every method of an interface
-     implements it; a call through an interface-typed value is a `static` edge to the interface method (abstract) plus
-     a `virtual` edge to each implementation; when the value came from a function whose returns construct concrete
-     types, it is narrowed to those (`dispatch`, with each return's branch guards);
+   - interfaces by method set: a type whose methods (its own and promoted) include every method of an interface, by
+     name with as many parameters and results and no clashing predeclared type (`int` for `string`), implements it; a
+     call through an interface-typed value is a `static` edge to the interface method (abstract) plus a `virtual` edge
+     to each implementation; when the value came from a function whose returns construct concrete types, it is
+     narrowed to those (`dispatch`, with each return's branch guards);
    - a function or method value handed to a call (`sort.Slice(xs, less)`, `go worker()`) runs from there
      (`go.callback`), unless a rule pack claims the call (a route registration hands its handler to the router);
    - a call under an `if` that reads config (`os.Getenv`, `cfg.`, `config.`, flags) carries its guard; a call in a
@@ -440,12 +441,19 @@ export function goResolverFor(go, mods) {
   const embedChain = (id, seen = new Set()) => seen.has(id) ? [] : (seen.add(id), [id, ...(classes.get(id)?.embedIds || []).flatMap(b => embedChain(b, seen))]);
   function lookup(clsId, m) { for (const c of embedChain(clsId)) { const x = classes.get(c)?.methods.get(m); if (x) return x; } return null; }
   function fieldType(clsId, f) { for (const c of embedChain(clsId)) { const k = classes.get(c); if (k?.fields.has(f)) return { t: k.fields.get(f), module: k.module }; } return null; }
-  const methodNames = id => new Set(embedChain(id).flatMap(c => [...(classes.get(c)?.methods.keys() || [])]));
-  // implicit interface satisfaction, by method name: every concrete type whose method set covers the interface's
-  const ifaces = [...classes.values()].filter(k => k.iface).map(k => ({ id: k.id, names: methodNames(k.id) })).filter(i => i.names.size);
+  const methodSet = id => { const out = new Map(); for (const c of embedChain(id)) for (const [n, mid] of classes.get(c)?.methods || []) if (!out.has(n)) out.set(n, mid); return out; };
+  // two parameter or result types that cannot be one type: different predeclared types, or differently built ones
+  const comp = t => t?.k === 'ptr' || t?.k === 'slice' || t?.k === 'map' || t?.k === 'chan', basic = t => t?.k === 'name' && BASIC.has(t.name);
+  const canon = n => n === 'byte' ? 'uint8' : n === 'rune' ? 'int32' : n;
+  const clash = (a, b) => basic(a) && basic(b) ? canon(a.name) !== canon(b.name) : comp(a) && comp(b) ? a.k !== b.k || clash(a.of, b.of) : (basic(a) && comp(b)) || (comp(a) && basic(b));
+  const fits = (impl, want) => { const a = symbols.get(impl), b = symbols.get(want), ap = a?.paramTypes || [], bp = b?.paramTypes || [], ar = a?.results || [], br = b?.results || [];
+    return ap.length === bp.length && ar.length === br.length && ap.every((t, i) => !clash(t, bp[i])) && ar.every((t, i) => !clash(t, br[i])); };
+  // implicit interface satisfaction, by method set: every concrete type that has each of the interface's methods, by
+  // name with as many parameters and results, none of them a clashing type
+  const ifaces = [...classes.values()].filter(k => k.iface).map(k => ({ id: k.id, methods: methodSet(k.id) })).filter(i => i.methods.size);
   for (const k of classes.values()) if (!k.iface) {
-    const have = methodNames(k.id);
-    k.implementsIds = ifaces.filter(i => [...i.names].every(n => have.has(n))).map(i => i.id);
+    const have = methodSet(k.id);
+    k.implementsIds = ifaces.filter(i => [...i.methods].every(([n, mid]) => have.has(n) && fits(have.get(n), mid))).map(i => i.id);
     k.bases = [...k.embedIds, ...k.implementsIds];
   } else { k.implementsIds = []; k.bases = [...k.embedIds]; }
   const implementers = new Map(); for (const k of classes.values()) for (const i of k.implementsIds) (implementers.get(i) || implementers.set(i, []).get(i)).push(k.id);

@@ -53,10 +53,12 @@ export function goModuleDir(m, cmd, hasRootGoMod) {
   return { why: mods.length ? `the repo holds ${mods.length} Go modules (${mods.map(x => x.dir).join(', ')}): name one with go -C <dir> test` : 'no go.mod in the code map' };
 }
 
-/* the code map's tests the command runs: [{ id, name, pkgDir (module-relative) }] */
+/* the code map's tests the command runs: [{ id, name, pkgDir (module-relative) }]; a test in a module nested inside
+   this one is that module's, which go test skips */
 export function goTestsToRun(m, cmd, modDir) {
   let re = null; if (cmd.run) { try { re = new RegExp(cmd.run); } catch { re = null; } }
-  return (m.tests || []).filter(t => t.file.endsWith('_test.go')).map(t => {
+  const nested = (m.selfCheck?.go?.modules || []).map(x => x.dir === '.' ? '' : x.dir).filter(d => d !== modDir && (!modDir || d.startsWith(modDir + '/')));
+  return (m.tests || []).filter(t => t.file.endsWith('_test.go') && !nested.some(d => t.file.startsWith(d + '/'))).map(t => {
     const rel = modDir ? (t.file.startsWith(modDir + '/') ? t.file.slice(modDir.length + 1) : null) : t.file;
     return rel == null ? null : { id: t.id, name: t.id.split(':').pop(), file: t.file, pkgDir: posix.dirname(rel) === '.' ? '' : posix.dirname(rel) };
   }).filter(t => t && cmd.packages.some(p => selects(p, t.pkgDir)) && (!re || re.test(t.name)));

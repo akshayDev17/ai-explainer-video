@@ -67,3 +67,17 @@ test('go: a MockGen-generated file is a test double wherever it lives; --lang go
   assert.equal(m.symbols.some(s => s.file === 'tool.py'), false);
   cleanup(dirname(repo));
 });
+
+test('go: a type implements an interface only with as many parameters and results per method, none of a clashing type', () => {
+  const repo = gitRepo();
+  writeFileSync(join(repo, 'go.mod'), 'module example.com/m\n');
+  writeFileSync(join(repo, 'store.go'), ['package m', 'type Item struct{}', 'type Store interface{ Get(id string) Item }',
+    'type mem struct{}', 'func (m *mem) Get(id string) Item { return Item{} }',
+    'type bytesCache struct{}', 'func (c *bytesCache) Get(key int) []byte { return nil }',
+    'type pairCache struct{}', 'func (c *pairCache) Get(id string, n int) Item { return Item{} }',
+    'func Use(s Store) Item { return s.Get("a") }', ''].join('\n\n'));
+  const m = mine(repo, '--lang', 'go').codemap;
+  assert.deepEqual(m.classes.filter(k => k.bases?.length).map(k => `${short(k.id)} ${k.bases.map(short)}`), ['mem Store']);
+  assert.deepEqual(edgesFrom(m, 'store.go:Use').map(e => `${short(e.to)} ${e.kind}`), ['Store.Get static', 'mem.Get virtual']);
+  cleanup(dirname(repo));
+});

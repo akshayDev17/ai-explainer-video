@@ -76,7 +76,7 @@ Ask with exactly this text, filling in the command and the test count from `code
 > This repo has a test suite (`<command>`, N tests). I can run it once, under a profiler, to mark which call paths
 > the tests actually exercise. It runs the repo's test code on this machine, inside a sandbox, on a copy of the files
 > git does not ignore: no network, no writes outside a scratch folder, no inherited environment variables, no
-> handing work to a program outside the sandbox (opening a URL or an app, scripting another app), and no reads of your home folder or the original repo folder (only the copy, the Python interpreter and its virtualenv, node and the repo's node_modules, or the Go toolchain and its module cache). It
+> handing work to a program outside the sandbox (opening a URL or an app, scripting another app), and no reads of your home folder or the original repo folder (only the copy, the Python interpreter and its virtualenv, node and the repo's node_modules, or, for Go, exactly the two folders `go env` names as GOROOT and GOMODCACHE, read-only, even inside your home folder; never anything else of it). It
 > can still read system files outside those folders. Anything it prints that looks like a credential is redacted from
 > its log. Run it?
 
@@ -93,13 +93,13 @@ writes outside scratch, no program outside the sandbox acting for it, no reads o
 repo, an empty environment, no bytecode or cache
 writes, a time limit. It writes `out/<name>/trace.json`, an overlay the code map is never edited for, and
 `trace.log`, the run's output (credential-shaped strings redacted). Exit 0 is done; 5 is the time limit (the partial
-trace is kept and marked); 1, 3 and 4 are refusals (no opt-in flag, no installed jest / vitest, several Go modules and no `-C`, no Makefile, no gcov; not a test command; no sandbox): report them and
+trace is kept and marked); 1, 3 and 4 are refusals (no opt-in flag, no installed jest / vitest, several Go modules and no `-C`, a GOROOT or GOMODCACHE that is or holds the home folder, no Makefile, no gcov; not a test command; no sandbox): report them and
 never work around one, least of all by running the tests yourself. Exit 2 means no test ran: show the user
 `trace.log`'s end.
 
 Tell the user the outcome (passed / failed / errors), the static edges observed, the share of direct test links that
 ran under their own test (for jest / vitest, go test and make: coverage says what ran in each test file, test or
-whole run, the trace's `granularity`, and no caller → callee pair), the callback links it confirmed, the calls that ran with no static edge, and **every test in
+test binary, the trace's `granularity`, and no caller → callee pair), the callback links it confirmed, the calls that ran with no static edge, and **every test in
 `deniedBySandbox`**: those need a service or a file the sandbox refused (a database, a socket, the network, a file
 in the home folder or one git ignores), so they mark code the suite cannot exercise offline. Failing tests are data:
 never retry one, never weaken the sandbox, never install anything to make them pass. A trace says what ran under the test configuration; narrate it as "observed in the test

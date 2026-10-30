@@ -22,7 +22,7 @@
        unix-socket connects), no writes outside scratch, no program outside the
        sandbox acting for the run, no reads of the user's
        home folder or the original repo (only the copy, the interpreter and its
-       virtualenv), an empty environment (HOME and TMPDIR in scratch), no
+       virtualenv; for Go, exactly its GOROOT and GOMODCACHE), an empty environment (HOME and TMPDIR in scratch), no
        bytecode or cache writes, a time limit;
      - no sandbox, no run: a platform without one, or a sandbox that cannot
        start here, is a refusal, never a fallback.
@@ -31,8 +31,8 @@
    denied), and trace.log (the run's output). A JavaScript / TypeScript runner is
    run once per test file under V8 precise coverage (NODE_V8_COVERAGE): what ran is
    attributed per test file, and no caller -> callee pair is recorded (lib/observe-v8.mjs). `go test` runs once per test
-   under -coverprofile (what ran is attributed to that test); `make` builds and runs its target once with coverage and
-   gcov reads what ran (attributed to the whole run); neither records a caller -> callee pair (lib/observe-coverage.mjs).
+   under -coverprofile (what ran is attributed to that test); `make` builds and runs its target once with coverage, routed per
+   recipe line, and gcov reads what ran (attributed to each test binary); neither records a caller -> callee pair (lib/observe-coverage.mjs).
    Credential-shaped strings are redacted from the log, its tail and the failure messages. The code map is
    never edited and no static edge is ever removed. Failing tests are data:
    never retried.
@@ -43,7 +43,7 @@
          partial trace is kept and marked)
    ========================================================================== */
 import { readFileSync, writeFileSync, existsSync, realpathSync, mkdtempSync, mkdirSync, rmSync, readdirSync, lstatSync,
-  copyFileSync, symlinkSync, readlinkSync } from 'node:fs';
+  copyFileSync, symlinkSync, readlinkSync, chmodSync } from 'node:fs';
 import { join, resolve, dirname, sep, relative, basename, isAbsolute, posix } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
@@ -61,6 +61,7 @@ import { observeCoverage, symbolsRan, linesToBlocks } from './lib/observe-covera
 const fail = (code, msg) => { console.error(`[trace] ${msg}`); process.exit(code); };
 const PAYLOAD = join(dirname(fileURLToPath(import.meta.url)), 'trace', 'python');
 const JS_PAYLOAD = join(dirname(fileURLToPath(import.meta.url)), 'trace', 'js');
+const C_SHELL = join(dirname(fileURLToPath(import.meta.url)), 'trace', 'c', 'fmtrace-sh');
 
 /* ---------------- args ---------------- */
 const argv = process.argv.slice(2);
@@ -140,9 +141,19 @@ const exe = lang === 'js' ? (runner === 'node-test' && words[0].includes('/') ? 
   : lang === 'go' || lang === 'c' ? (words[0].includes('/') ? findExecutable(words[0]) : onPath(words[0])) : findExecutable(words[0]);
 if (!exe) fail(1, lang === 'js' ? 'cannot find node on PATH' : lang === 'go' || lang === 'c' ? `cannot find ${words[0]} on PATH` : `cannot find ${words[0]} (looked in the repo's .venv/bin and venv/bin, then on PATH)`);
 // the Go toolchain's own root and module cache (the repo's dependencies), asked of the go named, outside the sandbox
-const goEnv = lang === 'go' ? (() => { const r = spawnSync(exe, ['env', 'GOROOT', 'GOMODCACHE', 'GOVERSION'], { encoding: 'utf8', env: { ...process.env, GOTOOLCHAIN: 'local' } });
+const goBin = lang === 'go' ? realpathSync(exe) : null;
+const goEnv = lang === 'go' ? (() => { const r = spawnSync(goBin, ['env', 'GOROOT', 'GOMODCACHE', 'GOVERSION'], { encoding: 'utf8', env: { ...process.env, GOTOOLCHAIN: 'local' } });
   const [root, modcache, version] = (r.stdout || '').split('\n'); return r.status === 0 ? { root, modcache, version } : null; })() : null;
 if (lang === 'go' && !goEnv?.root) fail(1, `cannot ask ${exe} for its GOROOT`);
+// the run may read exactly those two dirs of the home folder (the go it runs is the one inside GOROOT), never one that
+// is the home folder or holds it
+if (lang === 'go') {
+  const home = realpathSync(homedir()), within = (p, d) => p === d || p.startsWith(d === '/' ? '/' : d + sep);
+  for (const [k, p] of [['GOROOT', goEnv.root], ['GOMODCACHE', goEnv.modcache]]) if (p && existsSync(p) && within(home, realpathSync(p)))
+    fail(1, `refused: ${k} is ${p}, which is or holds your home folder; the trace exposes only the Go toolchain and its module cache, read-only, never the rest of your home folder: set ${k} to a dir of its own`);
+  if (within(goBin, home) && !within(goBin, realpathSync(goEnv.root)))
+    fail(1, `refused: ${goBin} is in your home folder outside its GOROOT ${goEnv.root}; the trace exposes only the Go toolchain and its module cache: name the go inside GOROOT/bin`);
+}
 const gcov = lang === 'c' ? onPath('gcov') : null;
 if (lang === 'c' && !gcov) fail(1, 'cannot find gcov on PATH: the C / C++ trace reads coverage with it');
 // jest and vitest run from the package that holds them (the repo root, or one below it such as frontend/)
@@ -153,15 +164,16 @@ const jsFiles = lang === 'js' ? jsTestFiles(m, runner, testArgs, PKG) : [];
 if (lang === 'js' && !jsFiles.length) fail(2, `no test file in the code map matches ${runner}'s test-file pattern${passThrough(runner, testArgs).length < testArgs.length ? ' among the files the paths or filters given select' : ''}: nothing to trace`);
 const runArgs = runner === 'pytest' && !testArgs.some((a, i) => a === 'no:cacheprovider' && testArgs[i - 1] === '-p') ? [...testArgs, '-p', 'no:cacheprovider'] : testArgs;
 const testArgv = lang === 'js' ? fileArgv({ runner, node: exe, bin, flags: passThrough(runner, testArgs), file: '<test file>', report: '<report>' })
-  : lang === 'go' ? goTestArgv({ go: exe, flags: goCmd.flags, name: '<TestName>', profile: '<profile>', pkgDir: '<package>' })
-  : lang === 'c' ? makeArgv({ make: exe, dir: makeCmd.dir, target: makeCmd.target })
+  : lang === 'go' ? goTestArgv({ go: goBin, flags: goCmd.flags, name: '<TestName>', profile: '<profile>', pkgDir: '<package>' })
+  : lang === 'c' ? makeArgv({ make: exe, dir: makeCmd.dir, target: makeCmd.target, shell: '<fmtrace-sh>' })
   : /^(pytest|py\.test)$/.test(head) ? [exe, ...runArgs] : [exe, '-m', runner, ...runArgs];
 
 // what the sandbox must still let the run read: the interpreter's prefix, its virtualenv and the prefix that
-// virtualenv was made from. Never the original repo: the run sees only the copy
+// virtualenv was made from; for Go, exactly its GOROOT and GOMODCACHE. Never the original repo: the run sees only the
+// copy
 function readOnlyPaths() {
   const paths = [];
-  if (lang === 'go') return [...new Set([goEnv.root, goEnv.modcache, dirname(exe), dirname(realpathSync(exe))].filter(p => p && existsSync(p)).map(p => realpathSync(p)))];
+  if (lang === 'go') return [...new Set([goEnv.root, goEnv.modcache].filter(p => p && existsSync(p)).map(p => realpathSync(p)))];
   if (lang === 'c') return [...new Set([dirname(exe), dirname(realpathSync(exe)), dirname(gcov), dirname(realpathSync(gcov))].map(p => realpathSync(p)))];
   if (lang === 'js') {   // node's prefix (as named and as installed) and the repo's node_modules, linked into the copy
     for (const prefix of new Set([dirname(dirname(exe)), dirname(dirname(realpathSync(exe)))])) paths.push(realpathSync(prefix));
@@ -377,7 +389,7 @@ async function runGo({ copied, changedFiles, shown }) {
   const modPath = /^\s*module\s+(\S+)/m.exec(readFileSync(join(COPY, mod.dir, 'go.mod'), 'utf8'))?.[1];
   const importDir = p => p === modPath ? mod.dir : p.startsWith(modPath + '/') ? [mod.dir, p.slice(modPath.length + 1)].filter(Boolean).join('/') : null;
   const env = {
-    HOME: join(SCRATCH, 'home'), TMPDIR: join(SCRATCH, 'tmp'), PATH: `${dirname(exe)}:/usr/bin:/bin`,
+    HOME: join(SCRATCH, 'home'), TMPDIR: join(SCRATCH, 'tmp'), PATH: `${dirname(goBin)}:/usr/bin:/bin`,
     GOCACHE: join(SCRATCH, 'gocache'), GOPATH: join(SCRATCH, 'gopath'), ...(goEnv.modcache && existsSync(goEnv.modcache) ? { GOMODCACHE: goEnv.modcache } : {}),
     GOPROXY: 'off', GOSUMDB: 'off', GOTOOLCHAIN: 'local', GOTELEMETRY: 'off', GOENV: 'off', GOFLAGS: '', CGO_ENABLED: '0',
   };
@@ -389,7 +401,7 @@ async function runGo({ copied, changedFiles, shown }) {
     const left = deadline - Date.now();
     if (left <= 0) { timedOut = true; break; }
     const profile = join(TRACE_OUT, `cover-${i}.out`);
-    const argv = goTestArgv({ go: exe, flags: goCmd.flags, name: t.name, profile, pkgDir: t.pkgDir });
+    const argv = goTestArgv({ go: goBin, flags: goCmd.flags, name: t.name, profile, pkgDir: t.pkgDir });
     const run = await runSandboxed(argv, env, { box: box.kind, readOnly: shown, limitMs: left, cwd: join(COPY, mod.dir) });
     // the log keeps what go test printed, not its -json envelopes
     const printed = run.log.toString('utf8').split('\n').map(l => { if (!l.startsWith('{')) return l + '\n'; try { return JSON.parse(l).Output ?? ''; } catch { return l + '\n'; } }).join('');
@@ -425,48 +437,78 @@ async function runGo({ copied, changedFiles, shown }) {
   return reportCoverage(o, { durationMs, tail, changedFiles, timedOut, exitCode: failures.length ? 1 : 0, cwd: mod.dir || '.', ran: tests.length });
 }
 
-/* ---------------- C / C++: the make target once, with coverage, read by gcov ---------------- */
+/* ---------------- C / C++: the make target once, with coverage per test binary, read by gcov ---------------- */
 async function runC({ copied, changedFiles, shown }) {
   const dir = makeCmd.dir;
   if (!['Makefile', 'makefile', 'GNUmakefile'].some(f => existsSync(join(COPY, dir, f)))) { console.error(`[trace] refused: no Makefile in ${dir || 'the repo root'}`); return 1; }
-  const env = { HOME: join(SCRATCH, 'home'), TMPDIR: join(SCRATCH, 'tmp'), PATH: [...new Set([dirname(exe), '/usr/local/bin', '/usr/bin', '/bin'])].join(':') };
-  console.log(`[trace] ${SANDBOX_LABEL[box.kind]} · ${copied} files copied to scratch · running: ${makeArgv({ make: exe, dir, target: makeCmd.target }).join(' ')} (limit ${timeoutSec}s)`);
+  const shell = join(SCRATCH, 'trace', 'fmtrace-sh'), UNITS = join(TRACE_OUT, 'units');
+  copyFileSync(C_SHELL, shell); chmodSync(shell, 0o755); mkdirSync(UNITS);
+  const env = { HOME: join(SCRATCH, 'home'), TMPDIR: join(SCRATCH, 'tmp'), PATH: [...new Set([dirname(exe), '/usr/local/bin', '/usr/bin', '/bin'])].join(':'), FM_TRACE_UNITS: UNITS };
+  const argv = makeArgv({ make: exe, dir, target: makeCmd.target, shell });
+  console.log(`[trace] ${SANDBOX_LABEL[box.kind]} · ${copied} files copied to scratch · running: ${argv.join(' ')}, coverage per test binary (limit ${timeoutSec}s)`);
   const t0 = Date.now();
-  const run = await runSandboxed(makeArgv({ make: exe, dir, target: makeCmd.target }), env, { box: box.kind, readOnly: shown, limitMs: timeoutSec * 1000 });
-  const gcdas = []; (function walk(d) { for (const n of readdirSync(d)) { const p = join(d, n), st = lstatSync(p); if (st.isDirectory()) walk(p); else if (n.endsWith('.gcda')) gcdas.push(p); } })(COPY);
-  // gcov reads each counter file inside the same sandbox; a source is named as the compiler saw it, from the make dir
+  const run = await runSandboxed(argv, env, { box: box.kind, readOnly: shown, limitMs: timeoutSec * 1000 });
+  // each recipe line fmtrace-sh ran, in order: its command, exit status, output and the counters it wrote. The run
+  // wrote these files, so only plain files inside its own line dirs are read
+  const own = p => { try { return lstatSync(p).isFile() ? readFileSync(p, 'utf8') : null; } catch { return null; } };
+  const gcdasIn = d => { const out = []; (function walk(p) { let st; try { st = lstatSync(p); } catch { return; }
+    if (st.isDirectory()) for (const n of readdirSync(p)) walk(join(p, n)); else if (st.isFile() && p.endsWith('.gcda')) out.push(p); })(d); return out; };
+  const lines = [...new Set((own(join(UNITS, 'order')) || '').split('\n').map(l => basename(l.trim())).filter(n => /^line-\w+$/.test(n)))]
+    .filter(n => lstatSync(join(UNITS, n), { throwIfNoEntry: false })?.isDirectory())
+    .map(n => { const d = join(UNITS, n), st = own(join(d, 'status'));
+      return { dir: d, command: own(join(d, 'command')) ?? '', status: st == null ? null : Number(st.trim()), output: own(join(d, 'output')) || '', gcdas: gcdasIn(join(d, 'gcda')) }; });
+  // gcov reads each counter file inside the same sandbox, beside a copy of the notes file the compiler wrote in the
+  // copy; a source is named as the compiler saw it, from the make dir
   const cFiles = new Set((m.files || []).filter(f => f.lang === 'c' || f.lang === 'cpp').map(f => f.path));
   const toRepo = src => { const a = src.startsWith('/') ? (src.startsWith(COPY + '/') ? src.slice(COPY.length + 1) : null) : posix.normalize(posix.join(dir, src));
     if (a && cFiles.has(a)) return a; const hits = [...cFiles].filter(f => f.endsWith('/' + src.replace(/^(\.\.?\/)+/, ''))); return hits.length === 1 ? hits[0] : null; };
-  const counts = new Map();
-  for (const g of gcdas) {
-    const r = await runSandboxed([gcov, '-t', '-o', dirname(g), g], env, { box: box.kind, readOnly: shown, limitMs: 60000, cwd: join(COPY, dir) });
-    for (const [src, lines] of parseGcov(r.stdout)) { const f = toRepo(src); if (f) (counts.get(f) || counts.set(f, []).get(f)).push(...linesToBlocks(lines)); }
+  const units = [], seen = new Map();
+  for (const l of lines.filter(x => x.gcdas.length)) {
+    const counts = new Map();
+    for (const g of l.gcdas) {
+      const orig = g.slice(join(l.dir, 'gcda').length);
+      let gcno; try { gcno = join(realpathSync(dirname(orig)), basename(orig).replace(/\.gcda$/, '.gcno')); } catch { continue; }
+      if (!gcno.startsWith(COPY + sep) || !lstatSync(gcno, { throwIfNoEntry: false })?.isFile()) continue;
+      copyFileSync(gcno, g.replace(/\.gcda$/, '.gcno'));
+      const r = await runSandboxed([gcov, '-t', '-o', dirname(g), g], env, { box: box.kind, readOnly: shown, limitMs: 60000, cwd: join(COPY, dir) });
+      for (const [src, ls] of parseGcov(r.stdout)) { const f = toRepo(src); if (f) (counts.get(f) || counts.set(f, []).get(f)).push(...linesToBlocks(ls)); }
+    }
+    const n = (seen.get(l.command) || 0) + 1; seen.set(l.command, n);
+    units.push({ key: n > 1 ? `${l.command} #${n}` : l.command, line: l, tests: [], ran: symbolsRan(m, counts) });
   }
   const durationMs = Date.now() - t0;
   const logText = redactSecrets(run.log.toString('utf8'));
   writeFileSync(join(OUT, 'trace.log'), logText);
   const tail = logText.trimEnd().split('\n').slice(-12).join('\n');
-  if (!gcdas.length) {
+  if (!units.length) {
     console.error(tail);
     console.error(`[trace] the run wrote no coverage counters (${run.timedOut ? 'timed out' : `exit ${run.status ?? run.signal}`}): the target built nothing with $(CC) / $(CXX), or ran no test; its output is in ${join(OUT, 'trace.log')}`);
     return 2;
   }
-  const ran = symbolsRan(m, counts), printed = parseCTestOutput(logText);
+  // a test belongs to the first binary its own lines ran in; it passed or failed as that binary did, unless it printed
+  // a status of its own
+  const printed = parseCTestOutput(logText);
   const tests = (m.tests || []).filter(t => cFiles.has(t.file) && (!dir || t.file.startsWith(dir + '/')));
   const results = new Map();
   for (const t of tests) {
-    const s = m.symbols.find(x => x.id === t.id), name = s?.name || t.id.split(':').pop();
-    const status = printed.get(name) || (!ran.has(t.id) ? 'not run' : run.status === 0 ? 'passed' : 'unknown');
-    results.set(t.id, { status, message: status === 'failed' || status === 'unknown' ? tail : '', nodeid: `${t.file}::${name}` });
+    const s = m.symbols.find(x => x.id === t.id), name = s?.name || t.id.split(':').pop(), u = units.find(x => x.ran.has(t.id));
+    if (u) u.tests.push(t.id);
+    const status = printed.get(name) || (!u ? 'not run' : u.line.status === 0 ? 'passed' : 'failed');
+    results.set(t.id, { status, message: status === 'failed' ? (u?.line.output.trim() || tail) : '', nodeid: `${t.file}::${name}` });
   }
   const failures = [...results].filter(([, r]) => r.status === 'failed').map(([id, r]) => ({ test: id, nodeid: r.nodeid, status: 'failed', phase: 'call', message: r.message }));
-  if ((run.status || run.timedOut) && !failures.length) failures.push({ test: null, nodeid: `make ${makeCmd.target}`, status: 'error', phase: 'run', message: run.timedOut ? 'cut off by the time limit' : tail });
-  const network = [...new Set([...logText.matchAll(C_NETWORK)].map(x => x[0].trim()))];
-  const denied = network.length || (run.status && /Operation not permitted|Permission denied|Read-only file system/.test(logText))
-    ? [{ test: failures.find(f => f.test)?.test || null, nodeid: failures[0]?.nodeid || `make ${makeCmd.target}`, status: failures[0]?.status || 'failed', network, permission: !network.length, message: tail }] : [];
-  const units = [{ key: 'suite', tests: tests.filter(t => results.get(t.id).status !== 'not run').map(t => t.id), ran }];
-  const o = observeCoverage(m, { units, results, failures, denied, granularity: 'suite', ownFile: f => cFiles.has(f), runtime: {} });
+  const failedLine = lines.find(l => l.status);
+  if ((run.status || run.timedOut) && !failures.length)
+    failures.push({ test: null, nodeid: failedLine?.command || `make ${makeCmd.target}`, status: 'error', phase: 'run', message: run.timedOut ? 'cut off by the time limit' : failedLine?.output.trim() || tail });
+  // a binary whose output shows a refused connect or a permission error was denied by the sandbox
+  const denied = lines.flatMap(l => {
+    const network = [...new Set([...l.output.matchAll(C_NETWORK)].map(x => x[0].trim()))];
+    const permission = !network.length && !!l.status && /Operation not permitted|Permission denied|Read-only file system/.test(l.output);
+    if (!network.length && !permission) return [];
+    const f = failures.find(x => units.find(u => u.line === l)?.tests.includes(x.test)) || failures.find(x => !x.test && x.nodeid === l.command);
+    return [{ test: f?.test || null, nodeid: f?.nodeid || l.command, status: f?.status || (l.status ? 'failed' : 'passed'), network, permission, message: l.output.trim() }];
+  });
+  const o = observeCoverage(m, { units: units.map(u => ({ key: u.key, tests: u.tests, ran: u.ran })), results, failures, denied, granularity: 'binary', ownFile: f => cFiles.has(f), runtime: {} });
   return reportCoverage(o, { durationMs, tail, changedFiles, timedOut: run.timedOut, exitCode: run.status, cwd: dir || '.', ran: tests.length });
 }
 

@@ -459,15 +459,14 @@ export function cResolverFor(cm, { files }) {
     }
     near.set(M.file, set);
   }
-  // functions by qualified name (C linkage: non-static ones are global), classes by qualified and short name
-  const funcs = new Map(), classByQual = new Map(), classByName = new Map();
-  for (const s of symbols.values()) if (s.kind === 'function' && !s.test && !s.id.includes('<locals>')) {
-    const q = [...(s.ns || []), s.name].join('.');
-    (funcs.get(q) || funcs.set(q, []).get(q)).push(s.id);
-  }
+  // classes by qualified and short name
+  const classByQual = new Map(), classByName = new Map();
   for (const k of classes.values()) { (classByQual.get(k.qual) || classByQual.set(k.qual, []).get(k.qual)).push(k.id); (classByName.get(k.name) || classByName.set(k.name, []).get(k.name)).push(k.id); }
-  // the definition of a C function / class nearest the caller: its own file, then what it includes, then the only one
-  const pick = (ids, module) => { if (!ids?.length) return null; if (ids.length === 1) return ids[0];
+  // the definition of a C function / class nearest the caller: its own file, then what it includes, then the only one;
+  // a `static` one only from its own file or a header the caller includes
+  const visible = (id, module) => { const s = symbols.get(id);
+    return !s || s.file === module || !(s.decos || []).includes('static') || (near.get(module)?.has(s.file) && /\.(h|hh|hpp|hxx)$/.test(s.file)); };
+  const pick = (all, module) => { const ids = (all || []).filter(id => visible(id, module)); if (!ids.length) return null; if (ids.length === 1) return ids[0];
     const own = ids.filter(id => symbols.get(id).file === module); if (own.length) return own[0];
     const pub = ids.filter(id => !(symbols.get(id).decos || []).includes('static'));
     const n = pub.filter(id => near.get(module)?.has(symbols.get(id).file)); if (n.length === 1) return n[0];
@@ -479,10 +478,18 @@ export function cResolverFor(cm, { files }) {
     for (const u of modules.get(sc.module)?.usingNs || []) { const hit = pick(classByQual.get(`${u}.${q}`), sc.module); if (hit) return hit; }
     return q.includes('.') ? null : pick(classByName.get(q), sc.module);
   }
-  // out-of-line methods join their class; a class's bases resolve
+  // out-of-line methods join their class; a qualifier that names no class names namespaces (`ns::f() { … }`); a class's
+  // bases resolve
   for (const s of symbols.values()) if (s.clsQual && !s.cls && s.kind !== 'class') {
     const k = classNamed(s.clsQual, { ns: s.ns, module: s.module });
     if (k) { s.cls = k; s.kind = s.test ? 'function' : 'method'; if (!s.test) classes.get(k).methods.set(s.name.split('.').pop(), s.id); }
+    else if (!s.test) { s.ns = [...(s.ns || []), ...s.clsQual.split('.')]; s.name = s.name.split('.').pop(); s.kind = 'function'; s.clsQual = null; }
+  }
+  // functions by qualified name (C linkage: non-static ones are global)
+  const funcs = new Map();
+  for (const s of symbols.values()) if (s.kind === 'function' && !s.test && !s.id.includes('<locals>')) {
+    const q = [...(s.ns || []), s.name].join('.');
+    (funcs.get(q) || funcs.set(q, []).get(q)).push(s.id);
   }
   for (const k of classes.values()) k.bases = k.baseTypes.map(t => classNamed(t.name, { ns: k.ns, module: k.module })).filter(Boolean);
   const subclasses = new Map(); for (const k of classes.values()) for (const b of k.bases) (subclasses.get(b) || subclasses.set(b, []).get(b)).push(k.id);

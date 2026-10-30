@@ -1,7 +1,7 @@
 /* Map a coverage-based test run (Go's -coverprofile, gcov) onto a code map (design §3.14, §3.17). Coverage says which
    lines ran, not who called them, so no edge is marked observed: a symbol ran when a counted line or block inside it
    ran (the innermost symbol holding it), and a direct test link counts as observed when its target ran in the unit
-   its test ran in — the test itself (Go, one run per test) or the whole run (make, `suite`). Nothing is removed or
+   its test ran in — the test itself (Go, one run per test) or its test binary (make, `binary`). Nothing is removed or
    demoted: the result is an overlay beside the code map, which is not edited. */
 const byStr = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 
@@ -25,7 +25,7 @@ export function symbolsRan(m, counts) {
 export const linesToBlocks = lines => [...lines].map(([line, count]) => ({ start: line, end: line, count }));
 
 /* units: [{ key, tests: [test ids], ran: Set }], results: Map(test id -> { status, message, nodeid }), granularity:
-   'test' | 'suite', ownFile: which code-map files this runner measures */
+   'test' | 'binary', ownFile: which code-map files this runner measures */
 export function observeCoverage(m, { units, results, failures, denied, granularity, ownFile, notCollected = [], runtime = {} }) {
   const sym = new Map(m.symbols.map(s => [s.id, s]));
   const grp = id => sym.get(id)?.group || '?';
