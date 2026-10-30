@@ -10,7 +10,8 @@ and `plan.md`, written by `tools/flow-plan.mjs`. Then the on-screen code for a v
 
 `mine`, `propose` and `rank` are pure functions of their input and the tool versions: they never write
 inside the repo, never use the network and never run repo code. Two runs over the same input produce
-byte-identical output (timings go to stdout only).
+byte-identical output (timings go to stdout only). The opt-in `trace.json` (stage 1t, `tools/trace.mjs`) is the one
+artifact made by running repo code: the repo's own test suite, sandboxed.
 
 ## Top level
 
@@ -197,6 +198,77 @@ tables.
 filtered by default (promotable in `flows.json`), the shared table, the continuations, the merged order, and for the
 top prod and eval rows their segment table, dispatch points with the config that selects them, and config-guarded
 branches.
+
+## `trace.json` (`trace.mjs`, opt-in)
+
+Written only after the user said yes to one exact test command (`--i-ran-this-by-the-user`). `trace.mjs` refuses
+(exit 1) without that flag; refuses (exit 3) anything but `pytest`, `py.test`, `python -m pytest` or `python -m
+unittest` (python, python3 or python3.N, by name or path; a bare name is found in the repo's `.venv/bin` or
+`venv/bin`, then on PATH), with any shell syntax (`;`, `&&`, `|`, redirects, `$`, backticks) or a wrapper (`uv run`,
+`env`); and refuses (exit 4) on a platform with no OS sandbox, or where this platform's sandbox does not start
+(`sandbox-exec` on macOS, `bwrap` on Linux, always chosen by platform; there is no option to pick or skip one). It
+never runs unsandboxed.
+
+The run: the repo's git-tracked and unignored files (every file but `.git` and virtualenvs, outside a git work tree;
+a submodule or a nested repo by its own git view, never whole, so nothing its own `.gitignore` ignores) are copied to a scratch dir, and the command runs there with the repo's own interpreter, in place and read-only,
+inside the sandbox. The sandbox hides the user's home folder and the original repo: the run reads only the copy, the
+interpreter's prefix, its virtualenv (even one inside the repo) and the prefix that virtualenv was made from; a
+prefix that would expose a hidden path whole (an interpreter installed straight into the home folder) is not exposed,
+and the run says so.
+
+- **macOS**: `sandbox-exec` with `tools/trace/sandbox/macos-nonet.sb` plus read rules `lib/sandbox.mjs` adds per run:
+  IP traffic denied (localhost included), unix socket connects denied (so no DNS resolver), every write outside
+  scratch denied, every read under the home folder and the original repo denied except the exposed paths (and the
+  metadata, not the contents, of the dirs above them); no program outside the sandbox acting for the run: opening a
+  URL, file or app through LaunchServices, Apple Events and launchd job submission denied (the services behind them
+  too), and `open`, `osascript` and `launchctl` not executable;
+- **Linux**: `bwrap` through `tools/trace/sandbox/linux-bwrap.sh`: new network, user, pid, ipc and uts namespaces;
+  `/` read-only with `/run`, `/tmp`, `/var/tmp`, home dirs, the user's home folder and the original repo replaced by
+  empty tmpfs mounts (the exposed paths mounted back read-only); scratch the only writable path; a seccomp filter
+  failing `socket(AF_UNIX)` with EPERM. A new network namespace has its own loopback, so a test may reach a server it
+  started itself, which the macOS profile denies;
+- an empty environment: `HOME` and `TMPDIR` in scratch, `PYTHONDONTWRITEBYTECODE=1`, pytest's `-p no:cacheprovider`;
+- an editable install that points into the original repo (a `.pth` path line, a setuptools finder's mapping, an
+  `editables` redirect) is sent to the copy by the collector, since the original is hidden;
+- credential-shaped strings (private-key blocks, AWS access key ids, bearer and basic auth values, known token
+  formats, JWTs, a URL's password, the value of a key that names a secret) are redacted from `trace.log`, the output
+  tail trace.mjs prints and the failure messages in `trace.json`;
+- a time limit (`--timeout`, 900 s): the process group gets SIGTERM, then SIGKILL; what the collector wrote by then
+  is kept, `timedOut: true`, exit 5.
+
+The collector (`tools/trace/python/sitecustomize.py`, on `PYTHONPATH`; it runs the interpreter's own
+`sitecustomize` it shadows) records every Python call as (nearest in-repo caller, in-repo callee, current test):
+library frames between the two are skipped; code objects are keyed by identity, since twin bodies in two files
+compare equal; lambdas, comprehensions and generator bodies count as the function holding them; an interpreter or
+virtualenv under the repo is library code. The current test is set around each test's setup, call and teardown by
+`fmtrace_plugin.py` (pytest, via `PYTEST_PLUGINS`) or a `TestCase.run` wrapper (unittest), so a call a framework makes
+(a fixture, a DI provider) is still attributed to its test. Only the repo's own tests count: a run a test starts
+inside itself over tests outside the copy (pytester's tmp dir) or an inner unittest suite records no outcome and leaves
+the outer test current; a pytest process over the copy's own tests (an xdist worker, or a child a test starts) records
+them, and `collected` is never less than the tests recorded. Audit hooks record each test's network attempts. Method
+names come from `co_qualname` (Python 3.11+; older interpreters report bare function names, which miss methods). With
+`HOME` in scratch, packages installed only in the user's site dir (`pip install --user`) are not found: use the repo's
+virtualenv.
+
+| Field | What it holds |
+|---|---|
+| `optIn` | `{by: "user", at, command}`: who opted in, when, and the exact command |
+| `sandbox`, `runner`, `argv` | `macos-sandbox-exec:macos-nonet.sb` or `linux-bwrap:linux-bwrap.sh`; `pytest` or `unittest`; the command as run |
+| `timeoutSec`, `timedOut`, `exitCode`, `durationMs` | the limit and how the run ended |
+| `codemap` | the code map's file, sha256, `commit`, `treeHash`, and `changedFiles`: mined files that differ in the copy (mine again first) |
+| `outcome` | `collected`, `passed`, `failed`, `errors` (collection and setup errors, failed teardowns, a failing unittest class or module fixture, a test the time limit cut off), `skipped`, `xfailed`, `xpassed` |
+| `failures[]` | `test` (code-map id, or null: a collection error, a unittest class or module fixture such as `unittest::setUpClass (pkg.mod.Class)`), `nodeid`, `status`, `phase` (`collect`, `setup`, `call`, `teardown`), `message` |
+| `deniedBySandbox[]` | failing tests that attempted a network connect, or failed on a permission error or on a hidden path not found (bwrap hides a path by mounting an empty dir over it): `network` (the attempts), `permission`. They need a service or a file the sandbox refused; never retried |
+| `pairs[]` | `{from, to, n, tests}`: distinct in-repo caller → callee pairs, with calls and how many tests they ran under |
+| `edges[]` | the code-map edges that fired as a pair: `from`, `to`, `kind`, `rule?`, `passedBy?`, `n`, `tests` (ids). The overlay: an edge not listed is not observed, never removed |
+| `noStaticEdge[]` | pairs no code-map edge of any kind explains, with a `category`: `test-side`, `validator`, `property`, `dunder`, `init`, `other` |
+| `callbacks[]` | the `py.callback` links that fired |
+| `byTest{id}` | per test (parametrized cases merged): `nodeids`, `status`, `ran` (every in-repo function that ran while it was current), `direct` (`total`, `observed`, `missing`: its direct links that did not run under it) |
+| `summary` | records, distinct pairs, functions that ran per group; static edges observed by kind for all edges, production → production and test → non-test; direct links observed per test (and production only); fixture links observed by attribution; no-static-edge counts by category; unmapped records |
+
+A fixture, a FastAPI `Depends` provider or a queue consumer has no in-repo caller frame, so those links are never
+observed as pairs; a fixture link is observed by attribution (the fixture ran under its test). The trace is one
+configuration with one set of mocks: narration says "observed in the test suite", naming the test configuration.
 
 ## `flows.json` (written by the agent)
 

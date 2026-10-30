@@ -1,6 +1,6 @@
 ---
 name: explainer-video-from-codebase
-description: Under construction — will turn the major code flows of a codebase into a narrated explainer-video series. Today its first stages exist: mining a Python repo into a code map (files grouped as prod/test/eval/dev, call graph, entry points, framework links, tests as evidence, config facts), proposing one candidate flow per entry point and ranking them per group as evidence, validating the agent's series proposal (flows.json), recording the user's approval of the flow list, planning the videos in the coursework plan's shape, and the on-screen code tools for a code video's scenes (verified code panels, test panels, diagram skeletons). Use only when the user asks to mine a codebase, rank its candidate flows, propose and plan a code-flow series, or cut code panels for its scenes.
+description: Under construction — will turn the major code flows of a codebase into a narrated explainer-video series. Today its first stages exist: mining a Python repo into a code map (files grouped as prod/test/eval/dev, call graph, entry points, framework links, tests as evidence, config facts), proposing one candidate flow per entry point and ranking them per group as evidence, an opt-in sandboxed trace of the repo's own test suite (Python), validating the agent's series proposal (flows.json), recording the user's approval of the flow list, planning the videos in the coursework plan's shape, and the on-screen code tools for a code video's scenes (verified code panels, test panels, diagram skeletons). Use only when the user asks to mine a codebase, rank its candidate flows, propose and plan a code-flow series, or cut code panels for its scenes.
 ---
 
 # explainer-video-from-codebase — under construction
@@ -9,7 +9,7 @@ The sibling of `explainer-video-from-coursework` for codebases: code proposes ca
 flows per entry point, the agent proposes the series with a reason per flow, the user
 approves the flow list, and a coursework-shaped plan feeds the same per-video stages 3–8.
 It is being built one milestone at a time; **the tools for stages 1 to 1c exist so far** (mine, propose, rank;
-apply-flows, approve-flows, flow-plan), plus the on-screen code tools stage 5 will use (excerpt, excerpt-check,
+the opt-in trace; apply-flows, approve-flows, flow-plan), plus the on-screen code tools stage 5 will use (excerpt, excerpt-check,
 flow-diagram). The code-video scene stage and its skill do not exist yet, so do not promise a video from this
 skill yet.
 
@@ -51,6 +51,49 @@ test's direct links reach. Exit 2 means an entry could not be walked; report it.
 `ranking.md`. Show the user `ranking.md` in full: every row of every group, the shared heavily-tested table, the
 continuations and the merged order. There is no cut line: do not present the top rows as the series, and do not
 drop a row because its gain is small. Choosing the series is stage 1b.
+
+## Stage 1t — `/trace`: the test suite, observed (opt-in)
+
+Tracing runs the repo's own test code on this machine, so it is **never** run without the user's explicit yes, and
+nothing but the test suite is ever traced: not a server, a sample request or an eval harness. Offer it at most once
+per mined commit, and only when both hold:
+
+- the repo has a test command you can name: `pytest`, `python -m pytest` or `python -m unittest`, run with the repo's
+  own interpreter (its `.venv/bin/python` when it has one), plus the arguments its own config or docs use;
+- this platform has a sandbox: macOS (`sandbox-exec`) or Linux with `bwrap` (bubblewrap). Elsewhere, do not offer it.
+
+Ask with exactly this text, filling in the command and the test count from `codemap.md`:
+
+> This repo has a test suite (`<command>`, N tests). I can run it once, under a profiler, to mark which call paths
+> the tests actually exercise. It runs the repo's test code on this machine, inside a sandbox, on a copy of the files
+> git does not ignore: no network, no writes outside a scratch folder, no inherited environment variables, no
+> handing work to a program outside the sandbox (opening a URL or an app, scripting another app), and no reads of your home folder or the original repo folder (only the copy, the Python interpreter and its virtualenv). It
+> can still read system files outside those folders. Anything it prints that looks like a credential is redacted from
+> its log. Run it?
+
+A "no" skips the stage with no penalty. **Only on a yes** to that exact command:
+
+```sh
+node <skill>/tools/trace.mjs --codemap out/<name>/codemap.json --test-command "<command>" --i-ran-this-by-the-user \
+     [--timeout 900]
+```
+
+The flag means the user said yes; never pass it otherwise, and a different command needs a new yes. The run happens
+in a scratch copy inside this platform's sandbox: no network of any kind (localhost and unix sockets included), no
+writes outside scratch, no program outside the sandbox acting for it, no reads of the home folder or the original
+repo, an empty environment, no bytecode or cache
+writes, a time limit. It writes `out/<name>/trace.json`, an overlay the code map is never edited for, and
+`trace.log`, the run's output (credential-shaped strings redacted). Exit 0 is done; 5 is the time limit (the partial
+trace is kept and marked); 1, 3 and 4 are refusals (no opt-in flag; not a test command; no sandbox): report them and
+never work around one, least of all by running the tests yourself. Exit 2 means no test ran: show the user
+`trace.log`'s end.
+
+Tell the user the outcome (passed / failed / errors), the static edges observed, the share of direct test links that
+ran under their own test, the callback links it confirmed, the calls that ran with no static edge, and **every test in
+`deniedBySandbox`**: those need a service or a file the sandbox refused (a database, a socket, the network, a file
+in the home folder or one git ignores), so they mark code the suite cannot exercise offline. Failing tests are data:
+never retry one, never weaken the sandbox, never install anything to make them pass. A trace says what ran under the test configuration; narrate it as "observed in the test
+suite", never as observed in production.
 
 ## Stage 1b — `/flows`: the series proposal
 

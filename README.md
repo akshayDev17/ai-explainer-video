@@ -62,7 +62,7 @@ agy plugin install https://github.com/akshayDev17/ai-explainer-video
 All four commands install the **same** npm package — one package, three manifest surfaces,
 one copy of all twelve skills: the ten video skills, `coursework-author`, the companion
 skill for writing the coursework these videos come from, and `explainer-video-from-codebase`,
-a sibling for codebases that is still being built (only its stage 1 to 1c tools and its on-screen code tools exist so far: mining and ranking candidate flows, validating and approving the flow list, planning the videos, and cutting verified code panels and diagram skeletons for the scenes). How each platform reads it, and how
+a sibling for codebases that is still being built (only its stage 1 to 1c tools and its on-screen code tools exist so far: mining and ranking candidate flows, an opt-in sandboxed trace of the test suite, validating and approving the flow list, planning the videos, and cutting verified code panels and diagram skeletons for the scenes). How each platform reads it, and how
 to publish, is in
 [`DISTRIBUTION.md`](./DISTRIBUTION.md).
 
@@ -107,7 +107,7 @@ cordis.patch.yml + lib/index.js          DSH bundle plugin (serves this package'
 skills/explainer-video-from-coursework/  the main skill: SKILL.md, tools/, src/, scenes/, SETUP.md
 skills/craft-video-<stage>/              the 9 stage skills, separately invocable
 skills/coursework-author/                the companion skill: authoring the coursework (vendored copy)
-skills/explainer-video-from-codebase/    in progress: code-flow videos from a codebase (stages 1–1c, mine to flow-plan, and the stage 5 code tools, so far)
+skills/explainer-video-from-codebase/    in progress: code-flow videos from a codebase (stages 1–1c, mine to flow-plan, the 1t trace, and the stage 5 code tools, so far)
 DISTRIBUTION.md                          publish + install commands
 ```
 

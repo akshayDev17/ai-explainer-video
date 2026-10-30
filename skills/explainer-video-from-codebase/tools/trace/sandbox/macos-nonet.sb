@@ -1,0 +1,41 @@
+; macos-nonet.sb — trace.mjs's macOS sandbox (sandbox-exec), for running a repo's test command.
+; SCRATCH (passed with -D SCRATCH=<realpath>) is the only place a write may land. lib/sandbox.mjs appends the read
+; rules for each run: no reads under the user's home folder or the original repo, except scratch, the interpreter
+; and its virtualenv. A later rule overrides an earlier one.
+(version 1)
+(allow default)
+
+; no network at all: no IP traffic (localhost included), no connects to unix sockets (the DNS resolver,
+; docker.sock, database sockets); socketpair() still works, so asyncio does
+(deny network-outbound (remote ip))
+(deny network-inbound (local ip))
+(deny network-bind (local ip))
+(deny network-outbound (remote unix-socket))
+
+; no handing work to a process outside the sandbox, which would run with none of these rules: no opening a URL, file
+; or app through LaunchServices (open, NSWorkspace), no Apple Events (osascript, `tell application`), no launchd jobs
+; (launchctl submit, SMJobSubmit), neither through the services behind them nor through the tools that use them
+(deny lsopen)
+(deny appleevent-send)
+(deny job-creation)
+(deny mach-lookup
+  (global-name "com.apple.coreservices.launchservicesd")
+  (global-name "com.apple.lsd.open")
+  (global-name "com.apple.lsd.openurl")
+  (global-name "com.apple.lsd.modifydb")
+  (global-name "com.apple.coreservices.appleevents")
+  (global-name "com.apple.xpc.smd"))
+(deny process-exec
+  (literal "/usr/bin/open")
+  (literal "/usr/bin/osascript")
+  (literal "/bin/launchctl"))
+
+; writes only inside the scratch dir (and the null and terminal devices)
+(deny file-write*)
+(allow file-write*
+  (subpath (param "SCRATCH"))
+  (literal "/dev/null")
+  (literal "/dev/zero")
+  (literal "/dev/tty")
+  (literal "/dev/dtracehelper")
+  (regex #"^/dev/fd/"))
