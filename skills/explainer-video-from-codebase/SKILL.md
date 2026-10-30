@@ -15,8 +15,9 @@ scratch root. Stages 1–1c run once over the whole repo:
 
 Stages 2–8 are `explainer-video-from-coursework`'s own stages, run on that plan: retitle once, then per video
 write the narration, synthesize the audio, author the visuals, generate the publishing metadata, render and
-assemble. Two stages differ for code. Stage 3 adds the code-video rules below. Stage 5 uses
-`craft-codeflow-scene`: code panels cut from the repo and diagrams generated from the validated flows.
+assemble. Three places differ for code. Stage 3 adds the code-video rules below, and stages 6–8 add a render and
+a title rule. Stage 5 uses `craft-codeflow-scene`: code panels cut from the repo and diagrams generated from the
+validated flows.
 
 **Paths.** `<skill>` is this skill's folder and `<coursework>` is the sibling `../explainer-video-from-coursework`,
 both resolved against this skill's folder. The tools self-locate everything else, so they run regardless of cwd.
@@ -33,8 +34,11 @@ the **scratch root** that Stage 0 fixes. The scratch root is always **outside th
 > - `craft-codeflow-scene`: stage 5 for code videos.
 >
 > Each is a complete contract for its stage, top-level under `skills/` so any stage can be re-run alone.
-> Stages 2–4b and 6–8 are the coursework `craft-video-<stage>` skills, unchanged. Every `craft-codeflow-*` skill
-> ends with a **Maintenance** note naming its section here. **If you change a stage, update both files.**
+> Stages 2–4b and 6–8 are the coursework `craft-video-<stage>` skills. Stages 2, 4 and 4b are unchanged for code;
+> `craft-video-script` (stage 3) and `craft-video-publish`, `-render` and `-assemble` (stages 6–8) also carry this
+> file's code-video rules for their stage, in a sync block that opens **Code-flow videos only**. Every
+> `craft-codeflow-*` skill ends with a **Maintenance** note naming its section here. **If you change a stage, update
+> both files.**
 > `scripts/check-skill-sync.mjs` (CI) fails when they drift:
 >
 > - a Maintenance note names a section that does not exist;
@@ -104,10 +108,10 @@ what is missing and the install steps from the matching `SETUP.md` section, then
 | 1c | `/plan` | once | `craft-codeflow-plan` | `flow-plan` exits 0 (exit 5 without approval); every video shown with the calibration banner |
 | 2 | `/enrich` | once | `craft-video-enrich` | `apply-enrichment` exits 0; the full list shown |
 | scope | choose | once | — | the user chose the videos by index |
-| 3 | `/script` | per video | `craft-video-script` + the addendum below | `script-check` exits 0 (pause rule included) |
+| 3 | `/script` | per video | `craft-video-script` (its code-flow block, the addendum below) | `script-check` exits 0 (pause rule included) |
 | 4, 4b | `/audio`, `/align` | per video | `craft-video-audio`, `craft-video-align` | unchanged |
 | 5 | `/scene` | per video | **`craft-codeflow-scene`** | `excerpt-check` and `pacing-check` exit 0; the stills looked at |
-| 6–8 | `/publish`, `/render`, `/assemble` | per video | `craft-video-publish`, `-render`, `-assemble` | unchanged |
+| 6–8 | `/publish`, `/render`, `/assemble` | per video | `craft-video-publish`, `-render`, `-assemble` (their code-flow block) | unchanged |
 
 ## Stage 0 — `/inputs`: repo, destination, scratch
 
@@ -470,6 +474,10 @@ node <coursework>/tools/script-check.mjs --script out/<name>/scripts/<NN>-*.json
 ```
 
 <!-- sync:stage3-addendum -->
+**Code-flow videos only.** A code-flow video's plan, `plan.json` or `plan.enriched.json`, carries
+`"kind": "codebase"`, and its `forms` are `overview`, `flow` and `core`. A coursework plan has no `kind`; nothing
+in this block applies to its videos.
+
 A code video's narration is the reading time: a panel shows only the lines being narrated, each highlighted while
 its sentence plays. The script for a code video adds these rules:
 
@@ -585,8 +593,12 @@ node <coursework>/tools/resolve-beats.mjs --work out/<name>/<NN> --script out/<n
 node <coursework>/tools/pacing-check.mjs --scene out/<name>/<NN>/scenes/<key>.js \
      --timeline out/<name>/<NN>/timeline.json --segment <key>
 node <skill>/tools/excerpt-check.mjs --work out/<name>/<NN> --repo <repo> --script out/<name>/scripts/<NN>-*.json
-node <coursework>/tools/render.mjs --shots 6,20,34 --work out/<name>/<NN> --scene "src/scene-code.html?scene=<key>"
+node <coursework>/tools/render.mjs --shots <t1>,<t2>,<t3> --work out/<name>/<NN> --scene "src/scene-code.html?scene=<key>"
 ```
+
+`--shots` takes seconds of video time, and a code scene's acts are timed from its segment's window, so a still
+outside that window shows nothing of the scene. Pick the shot times inside `timeline.json`'s `windows["<key>"]`: a
+few seconds after its `start`, its middle, and just before its `end`.
 
 `excerpt-check` is C6:
 
@@ -611,14 +623,19 @@ node <coursework>/tools/stamp.mjs end --out out/<name> --video <NN> --stage 5
 
 ## Stages 6–8 — `/publish`, `/render`, `/assemble`
 
-Run `craft-video-publish`, `craft-video-render` and `craft-video-assemble` unchanged, with these additions for
-code videos:
+Run `craft-video-publish`, `craft-video-render` and `craft-video-assemble`, each with its code-flow block:
+
+<!-- sync:codeflow-publish-render -->
+**Code-flow videos only.** A code-flow video's plan, `plan.json` or `plan.enriched.json`, carries
+`"kind": "codebase"`, and its `forms` are `overview`, `flow` and `core`. A coursework plan has no `kind`; nothing
+in this block applies to its videos. A code-flow video adds these rules at stages 6–8:
 
 - **Render.** A code segment renders through `src/scene-code.html?scene=<key>`. Pass `--work out/<name>/<NN>` so
   the host reads that video's `timeline.js`; `assemble` passes it for every segment.
 - **Chapters.** Write each chapter title from that chapter's narration, as for any video.
 - **Upload title.** The `youtubeTitle` names the flow in the viewer's terms, such as what a request does or what
   a command runs. Never use a module path.
+<!-- /sync:codeflow-publish-render -->
 
 **Done when:** each stage's own gate holds, ending in `assemble`'s `[done] …<output>.mp4` with `audio ok`, and
 the assembled frames have been looked at.
@@ -632,7 +649,8 @@ Every artifact's fields are in [`FLOWS.md`](./FLOWS.md):
 - `plan.json`;
 - the panel fragment, `excerpt-check`'s rules, and the diagram skeletons.
 
-The worked fixtures are in-repo synthetic code:
+The worked fixtures are synthetic code in `skills/explainer-video-from-codebase/fixtures/` of the source
+repository, https://github.com/akshayDev17/ai-explainer-video, only; the installed package does not include them:
 
 - `fixtures/flows/repo/`, a small lending library with tests and an eval harness;
 - `fixtures/flows/flows.json`, its series proposal;

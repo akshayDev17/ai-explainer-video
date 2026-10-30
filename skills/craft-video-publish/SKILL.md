@@ -60,6 +60,18 @@ the hard checks above already mirror YouTube's rules.
 
 **Done when:** `publish` exits 0 and both files land in `--dest/<NN>-<slug>/` beside the MP4.
 
+<!-- sync:codeflow-publish-render -->
+**Code-flow videos only.** A code-flow video's plan, `plan.json` or `plan.enriched.json`, carries
+`"kind": "codebase"`, and its `forms` are `overview`, `flow` and `core`. A coursework plan has no `kind`; nothing
+in this block applies to its videos. A code-flow video adds these rules at stages 6–8:
+
+- **Render.** A code segment renders through `src/scene-code.html?scene=<key>`. Pass `--work out/<name>/<NN>` so
+  the host reads that video's `timeline.js`; `assemble` passes it for every segment.
+- **Chapters.** Write each chapter title from that chapter's narration, as for any video.
+- **Upload title.** The `youtubeTitle` names the flow in the viewer's terms, such as what a request does or what
+  a command runs. Never use a module path.
+<!-- /sync:codeflow-publish-render -->
+
 ## Maintenance
 
 > If you modify this file, or the user asks to change this stage, tell the user that the

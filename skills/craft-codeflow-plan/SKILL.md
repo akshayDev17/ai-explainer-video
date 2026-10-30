@@ -56,7 +56,7 @@ estimate, not measured audio.
 
 **Next:** run the coursework stages on `out/<name>/plan.json`, starting with `craft-video-enrich`. Its `form`
 is one of the plan's `forms`: `overview`, `flow` or `core`. After the user chooses the scope, run
-`craft-video-script` with the code-video addendum (in the main skill and in `craft-codeflow-scene`).
+`craft-video-script`; its **Code-flow videos only** block holds the code-video script rules.
 
 ## Maintenance
 

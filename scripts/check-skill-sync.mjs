@@ -5,9 +5,9 @@
 //   - a child's Maintenance note names a section that no main skill has, or the main skill never names the child;
 //   - (codebase pipeline) a child invokes a tool or a flag that its sections in the main skill do not, or the
 //     reverse;
-//   - a passage marked <!-- sync:<id> --> … <!-- /sync:<id> --> differs between a child and the main skill
-//     (tool paths normalised: `<skill>/` and `../<main>/` are the same folder), or a main skill's passage is in
-//     no child.
+//   - a passage marked <!-- sync:<id> --> … <!-- /sync:<id> --> differs between a child and the main skill it
+//     comes from (tool paths normalised: `<skill>/` and `../<main>/` are the same folder), or a main skill's
+//     passage is in no child. A coursework stage skill may also carry a codebase passage, for code-flow videos.
 //
 //   node scripts/check-skill-sync.mjs [--root <repo>]
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -18,11 +18,13 @@ const argv = process.argv.slice(2);
 const ROOT = argv[0] === "--root" && argv[1] ? argv[1] : join(dirname(fileURLToPath(import.meta.url)), "..");
 const SKILLS = join(ROOT, "skills");
 const COURSEWORK = "explainer-video-from-coursework";
+const CODEBASE = "explainer-video-from-codebase";
 // `strict`: the main skill names every child, and every tool and flag a child invokes is the one its sections in the
-// main skill invoke (the coursework skill names its children as `craft-video-<stage>` and predates this check)
+// main skill invoke (the coursework skill names its children as `craft-video-<stage>` and predates this check).
+// `blocksFrom`: the main skills a child's sync blocks may come from, its own first.
 const PIPELINES = [
-  { main: "explainer-video-from-codebase", children: /^craft-codeflow-/, strict: true },
-  { main: COURSEWORK, children: /^craft-video-/, strict: false },
+  { main: CODEBASE, children: /^craft-codeflow-/, strict: true, blocksFrom: [CODEBASE] },
+  { main: COURSEWORK, children: /^craft-video-/, strict: false, blocksFrom: [COURSEWORK, CODEBASE] },
 ];
 
 let failures = 0;
@@ -126,12 +128,19 @@ function firstDiff(a, b) {
 }
 
 /* ---------------- check ---------------- */
+// main skill -> {file, text, blocks, used}; a missing main skill is a failure and its pipeline is skipped
+const mains = new Map();
 for (const p of PIPELINES) {
-  const mainFile = `skills/${p.main}/SKILL.md`;
-  const main = read(p.main);
-  if (main == null) { fail(`${mainFile} is missing`); continue; }
-  const mainBlocks = syncBlocks(main, p.main, mainFile);
-  const used = new Set();
+  const file = `skills/${p.main}/SKILL.md`;
+  const text = read(p.main);
+  if (text == null) fail(`${file} is missing`);
+  else mains.set(p.main, { file, text, blocks: syncBlocks(text, p.main, file), used: new Set() });
+}
+
+for (const p of PIPELINES) {
+  if (!mains.has(p.main)) continue;
+  const { file: mainFile, text: main } = mains.get(p.main);
+  const sources = p.blocksFrom.map((m) => mains.get(m)).filter(Boolean);
   const children = readdirSync(SKILLS).filter((d) => p.children.test(d) && existsSync(join(SKILLS, d, "SKILL.md"))).sort();
   if (!children.length) fail(`${p.main}: no child skills match ${p.children}`);
 
@@ -161,14 +170,15 @@ for (const p of PIPELINES) {
     }
 
     for (const [id, block] of syncBlocks(text, child, file)) {
-      used.add(id);
-      if (!mainBlocks.has(id)) fail(`${file}: sync block "${id}" is not in ${mainFile}`);
-      else if (mainBlocks.get(id) !== block) fail(`${file}: sync block "${id}" differs from ${mainFile} (${firstDiff(block, mainBlocks.get(id))})`);
+      const source = sources.find((m) => m.blocks.has(id));
+      if (!source) { fail(`${file}: sync block "${id}" is not in ${sources.map((m) => m.file).join(" or ")}`); continue; }
+      source.used.add(id);
+      if (source.blocks.get(id) !== block) fail(`${file}: sync block "${id}" differs from ${source.file} (${firstDiff(block, source.blocks.get(id))})`);
     }
     if (failures === before) console.log(`✓ ${file} in step with ${mainFile}`);
   }
-  for (const id of mainBlocks.keys()) if (!used.has(id)) fail(`${mainFile}: sync block "${id}" is in no child skill`);
 }
+for (const m of mains.values()) for (const id of m.blocks.keys()) if (!m.used.has(id)) fail(`${m.file}: sync block "${id}" is in no child skill`);
 
 if (failures > 0) {
   console.error(`\n${failures} drift(s) between a main skill and its stage skills: update both files (the dual-file rule).`);

@@ -78,3 +78,16 @@ test('a stage skill the main skill never names fails', () => {
   assert.equal(r.status, 1);
   assert.match(r.stderr, /never names `craft-codeflow-plan`/);
 });
+
+test('a code-flow block in a coursework stage skill is held to the codebase skill', () => {
+  const child = drifted(only('craft-video-script', t => replaceOnce(t, 'never for a `"strength": "reachable"` citation', 'or for a reachable one')));
+  assert.equal(child.status, 1);
+  assert.match(child.stderr, /craft-video-script\/SKILL\.md: sync block "stage3-addendum" differs from skills\/explainer-video-from-codebase\/SKILL\.md/);
+  const main = drifted(only('explainer-video-from-codebase', t => replaceOnce(t, 'Never use a module path.', 'A module path is fine.')));
+  assert.equal(main.status, 1);
+  for (const c of ['publish', 'render', 'assemble'])
+    assert.match(main.stderr, new RegExp(`craft-video-${c}/SKILL\\.md: sync block "codeflow-publish-render" differs`));
+  const dropped = drifted((d, t) => (/^craft-video-(publish|render|assemble)$/.test(d) ? t.replace(/<!-- sync:codeflow-publish-render -->[\s\S]*?<!-- \/sync:codeflow-publish-render -->\n/, '') : t));
+  assert.equal(dropped.status, 1);
+  assert.match(dropped.stderr, /explainer-video-from-codebase\/SKILL\.md: sync block "codeflow-publish-render" is in no child skill/);
+});

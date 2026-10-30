@@ -29,6 +29,10 @@ absent. Relay the step from `../explainer-video-from-coursework/SETUP.md` to the
 already follow the code-video rules. `script-check` enforces the pause rule; you enforce the rest:
 
 <!-- sync:stage3-addendum -->
+**Code-flow videos only.** A code-flow video's plan, `plan.json` or `plan.enriched.json`, carries
+`"kind": "codebase"`, and its `forms` are `overview`, `flow` and `core`. A coursework plan has no `kind`; nothing
+in this block applies to its videos.
+
 A code video's narration is the reading time: a panel shows only the lines being narrated, each highlighted while
 its sentence plays. The script for a code video adds these rules:
 
@@ -132,8 +136,12 @@ node ../explainer-video-from-coursework/tools/resolve-beats.mjs --work out/<name
 node ../explainer-video-from-coursework/tools/pacing-check.mjs --scene out/<name>/<NN>/scenes/<key>.js \
      --timeline out/<name>/<NN>/timeline.json --segment <key>
 node ../explainer-video-from-codebase/tools/excerpt-check.mjs --work out/<name>/<NN> --repo <repo> --script out/<name>/scripts/<NN>-*.json
-node ../explainer-video-from-coursework/tools/render.mjs --shots 6,20,34 --work out/<name>/<NN> --scene "src/scene-code.html?scene=<key>"
+node ../explainer-video-from-coursework/tools/render.mjs --shots <t1>,<t2>,<t3> --work out/<name>/<NN> --scene "src/scene-code.html?scene=<key>"
 ```
+
+`--shots` takes seconds of video time, and a code scene's acts are timed from its segment's window, so a still
+outside that window shows nothing of the scene. Pick the shot times inside `timeline.json`'s `windows["<key>"]`: a
+few seconds after its `start`, its middle, and just before its `end`.
 
 `excerpt-check` is C6:
 
