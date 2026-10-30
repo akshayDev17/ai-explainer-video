@@ -79,7 +79,7 @@ export function observe(m, dumps) {
   }
 
   /* ---- outcome, failures, tests the sandbox denied ---- */
-  const outcome = { collected: collected ?? outcomes.size, passed: 0, failed: 0, errors: collectErrors.size + fixtureErrors.size, skipped: 0, xfailed: 0, xpassed: 0 };
+  const outcome = { collected: Math.max(collected ?? 0, outcomes.size), passed: 0, failed: 0, errors: collectErrors.size + fixtureErrors.size, skipped: 0, xfailed: 0, xpassed: 0 };
   const statusBy = new Map(), failures = [], denied = [];
   for (const [key, rec] of [...outcomes].sort(([a], [b]) => byStr(a, b))) {
     const status = statusOf(rec), name = nameOf(key);

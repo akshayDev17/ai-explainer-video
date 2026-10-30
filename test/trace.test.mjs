@@ -513,8 +513,27 @@ for (const [what, cmd, extra, why] of [
   const t = read(out, 'trace.json'), cart = ['tests.test_cart:test_discount_can_be_mocked', 'tests.test_cart:test_total_applies_discount'];
   assert.deepEqual(t.failures, [], readFileSync(join(out, 'trace.log'), 'utf8'));
   assert.deepEqual(Object.keys(t.byTest).sort(), [...cart, ...extra].sort());
+  assert.equal(t.outcome.collected, cart.length + extra.length);
   for (const id of [...cart, ...extra]) assert.equal(t.byTest[id].status, 'passed', id);
   assert.ok(t.byTest['tests.test_cart:test_total_applies_discount'].ran.includes('shop.cart:Cart.total'), JSON.stringify(t.byTest));
+  cleanup(join(repo, '..')); cleanup(join(out, '..'));
+});
+
+// an item a plugin parents at the session (pytest-mypy's status item, say) has the copy root as its path: it is recorded
+// as `::<name>`, and the run goes on
+test('an item parented at the session is recorded, not an internal error', { skip }, () => {
+  const repo = join(scratch(), 'repo');
+  cpSync(REPO, repo, { recursive: true });
+  writeFileSync(join(repo, 'pytest.ini'), '[pytest]\n');
+  writeFileSync(join(repo, 'conftest.py'), ['import pytest', '', '', 'class SessionItem(pytest.Item):', '    def runtest(self):', '        pass', '', '',
+    'def pytest_collection_modifyitems(session, config, items):', '    items.append(SessionItem.from_parent(session, name="session-check"))', ''].join('\n'));
+  const out = mineFixture(repo);
+  const r = trace(out, 'python3 -m pytest -q tests/test_cart.py');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(t.failures, [], readFileSync(join(out, 'trace.log'), 'utf8'));
+  assert.deepEqual([t.outcome.collected, t.outcome.passed], [3, 3]);
+  assert.equal(t.byTest['::session-check'].status, 'passed');
   cleanup(join(repo, '..')); cleanup(join(out, '..'));
 });
 

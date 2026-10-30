@@ -242,8 +242,10 @@ library frames between the two are skipped; code objects are keyed by identity, 
 compare equal; lambdas, comprehensions and generator bodies count as the function holding them; an interpreter or
 virtualenv under the repo is library code. The current test is set around each test's setup, call and teardown by
 `fmtrace_plugin.py` (pytest, via `PYTEST_PLUGINS`) or a `TestCase.run` wrapper (unittest), so a call a framework makes
-(a fixture, a DI provider) is still attributed to its test. Only the repo's own tests count: a pytest or unittest run a
-test starts inside itself (pytester, an inner suite) records no outcome and leaves the outer test current. Audit hooks record each test's network attempts. Method
+(a fixture, a DI provider) is still attributed to its test. Only the repo's own tests count: a run a test starts
+inside itself over tests outside the copy (pytester's tmp dir) or an inner unittest suite records no outcome and leaves
+the outer test current; a pytest process over the copy's own tests (an xdist worker, or a child a test starts) records
+them, and `collected` is never less than the tests recorded. Audit hooks record each test's network attempts. Method
 names come from `co_qualname` (Python 3.11+; older interpreters report bare function names, which miss methods). With
 `HOME` in scratch, packages installed only in the user's site dir (`pip install --user`) are not found: use the repo's
 virtualenv.

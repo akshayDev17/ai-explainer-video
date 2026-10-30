@@ -23,15 +23,21 @@ def _path(node):
     return os.path.realpath(str(getattr(node, "path", None) or node.fspath))
 
 
+def _in_copy(path, root):
+    return (path + os.sep).startswith(root)
+
+
 def _ours(config, node):
-    return config is _CONFIG[0] and (_path(node) + os.sep).startswith(fm.ROOTS)
+    path = _path(node)
+    return config is _CONFIG[0] and any(_in_copy(path, r) for r in fm.ROOTS)
 
 
 def _key(item):
-    # the test's file relative to the repo root, then the rest of its node id: independent of pytest's rootdir
+    # the test's file relative to the repo root, then the rest of its node id: independent of pytest's rootdir. An
+    # item a plugin parents at the session (its path is the root) is `::<name>`
     path = _path(item)
-    rel = next(path[len(r):] for r in fm.ROOTS if path.startswith(r))
-    rest = item.nodeid.split("::", 1)[1] if "::" in item.nodeid else ""
+    rel = next((path[len(r):] for r in fm.ROOTS if _in_copy(path, r)), "")
+    rest = item.nodeid.split("::", 1)[1] if "::" in item.nodeid else "" if rel else item.nodeid
     return rel + "::" + rest
 
 
