@@ -92,11 +92,14 @@ export function nodeModulesDirs(root, max = 4) {
 
 // the links that put one of those node_modules dirs into the copy: each entry (a scope's entries one by one) to the
 // repo's own, except a workspace package (a symlink into the repo, outside every node_modules dir) to its counterpart
-// in the copy, since the sandbox hides the repo. -> [{ rel, copy }], copy null for the repo's own entry
+// in the copy, since the sandbox hides the repo. vite's caches (which it writes into on every run) are left out, so the
+// run makes its own in the copy. -> [{ rel, copy }], copy null for the repo's own entry
+const VITE_CACHES = new Set(['.vite', '.vite-temp', '.vitest']);
 export function nodeModulesLinks(root, dir, dirs) {
   const out = [];
   (function each(rel) {
     for (const name of readdirSync(join(root, rel)).sort()) {
+      if (rel === dir && VITE_CACHES.has(name)) continue;
       const r = `${rel}/${name}`;
       let st; try { st = lstatSync(join(root, r)); } catch { continue; }
       if (name.startsWith('@') && st.isDirectory()) { each(r); continue; }

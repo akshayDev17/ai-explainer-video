@@ -284,6 +284,80 @@ test('jest-style transformed code (compiled through node:vm with an inline sourc
   cleanup(dirname(repo)); cleanup(join(out, '..'));
 });
 
+// a stand-in for vitest, installed in the repo's node_modules: like vite, it bundles its config into
+// node_modules/.vite-temp (and removes the file, leaving the dir); like vitest --pool=threads, it runs the test file in a
+// worker thread it terminates once the results are in, then writes vitest's json report
+const FAKE_VITEST = `#!/usr/bin/env node
+const fs = require('node:fs'), path = require('node:path'), { Worker } = require('node:worker_threads');
+const argv = process.argv.slice(2), file = path.resolve(argv.at(-1));
+const temp = path.join(process.cwd(), 'node_modules', '.vite-temp'), cfg = path.join(temp, 'vitest.config.mjs.timestamp-1.mjs');
+fs.mkdirSync(temp, { recursive: true }); fs.writeFileSync(cfg, 'export default {};'); fs.rmSync(cfg);
+const worker = new Worker(\`
+const { parentPort, workerData } = require('node:worker_threads');
+const tests = [];
+global.test = (title, fn) => tests.push({ title, fn });
+require(workerData);
+(async () => {
+  const results = [];
+  for (const t of tests) try { await t.fn(); results.push({ ancestorTitles: [], title: t.title, status: 'passed', failureMessages: [] }); }
+    catch (e) { results.push({ ancestorTitles: [], title: t.title, status: 'failed', failureMessages: [String(e)] }); }
+  parentPort.postMessage(results);
+  setInterval(() => {}, 1000);
+})();\`, { eval: true, workerData: file });
+worker.once('message', async results => {
+  await worker.terminate();
+  const failed = results.some(r => r.status === 'failed');
+  fs.writeFileSync(argv.find(a => a.startsWith('--outputFile=')).slice(13), JSON.stringify({ testResults: [{ name: file, status: failed ? 'failed' : 'passed', assertionResults: results }] }));
+  process.exitCode = failed ? 1 : 0;
+});
+`;
+const vitestRepo = (bin, tests) => {
+  const repo = realpathSync(gitRepo());
+  mkdirSync(join(repo, 'src')); mkdirSync(join(repo, 'node_modules', 'vitest'), { recursive: true }); mkdirSync(join(repo, 'node_modules', '.bin'));
+  writeFileSync(join(repo, 'node_modules', 'vitest', 'bin.js'), bin);
+  symlinkSync('../vitest/bin.js', join(repo, 'node_modules', '.bin', 'vitest'));
+  writeFileSync(join(repo, '.gitignore'), 'node_modules\n');
+  writeFileSync(join(repo, 'package.json'), '{ "name": "api", "devDependencies": { "vitest": "3" } }\n');
+  writeFileSync(join(repo, 'src', 'add.js'), 'function add(a, b) { return a + b; }\nmodule.exports = { add };\n');
+  writeFileSync(join(repo, 'src', 'add.test.js'), ["const assert = require('node:assert');", "const { add } = require('./add');", ...tests, ''].join('\n'));
+  git(repo, 'add', '-A');
+  return repo;
+};
+
+test('vitest after an ordinary local run (an empty node_modules/.vite-temp left behind) still runs the tests: vite\'s cache dirs are the copy\'s own, writable', { skip }, () => {
+  const repo = vitestRepo(FAKE_VITEST, ["test('adds', () => { assert.equal(add(1, 2), 3); });"]);
+  mkdirSync(join(repo, 'node_modules', '.vite-temp'));
+  const out = mineFixture(repo);
+  const r = trace(out, 'npx vitest run');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(Object.values(t.byTest).map(v => v.status), ['passed']);
+  assert.deepEqual(t.ran['src/add.js:add'], ['src/add.test.js']);
+  assert.deepEqual(readdirSync(join(repo, 'node_modules', '.vite-temp')), [], 'nothing is written into the repo\'s own cache dir');
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+test('vitest: a fetch the sandbox refuses in a worker thread the runner terminates is listed as denied, with its target', { skip }, () => {
+  const repo = vitestRepo(FAKE_VITEST, ["test('adds', () => { assert.equal(add(1, 2), 3); });", "test('reaches the api', async () => { await fetch('http://127.0.0.1:6379/'); });"]);
+  const out = mineFixture(repo);
+  const r = trace(out, 'npx vitest run');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(Object.fromEntries(Object.entries(t.byTest).map(([k, v]) => [k.split(':').pop(), v.status])), { adds: 'passed', 'reaches the api': 'failed' });
+  assert.deepEqual(t.deniedBySandbox.map(d => [d.nodeid, d.network]), [['src/add.test.js::reaches the api', ['connect 127.0.0.1:6379']]]);
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+test('exit 2: a run in which no test file reported a test (every file failed at startup) is no trace, though V8 wrote coverage', { skip }, () => {
+  const repo = vitestRepo("#!/usr/bin/env node\nconsole.error('Error: EPERM: operation not permitted');\nprocess.exit(1);\n", ["test('adds', () => { assert.equal(add(1, 2), 3); });"]);
+  const out = mineFixture(repo);
+  const r = trace(out, 'npx vitest run');
+  assert.equal(r.status, 2, r.stderr + r.stdout);
+  assert.match(r.stderr, /ran no test/);
+  assert.deepEqual(readdirSync(out).sort(), ['codemap.json', 'codemap.md', 'trace.log']);
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
 test('exit 1: npx jest is refused when the repo has no jest installed; tracing never installs one', { skip }, () => {
   const out = mineFixture(REPO);
   const r = trace(out, 'npx jest');

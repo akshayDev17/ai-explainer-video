@@ -302,7 +302,7 @@ async function runJs({ copied, changedFiles, shown }) {
     const maps = readdirSync(TRACE_OUT).filter(f => /^srcmap-.*\.json$/.test(f)).flatMap(f => { try { return [JSON.parse(readFileSync(join(TRACE_OUT, f), 'utf8'))]; } catch { return []; } finally { rmSync(join(TRACE_OUT, f), { force: true }); } })
       .filter(s => s.file === file);
     for (const d of coverage) for (const s of maps) (d['source-map-cache'] ||= {})[s.url] ??= { lineLengths: s.lineLengths, data: s.data };
-    const network = readdirSync(TRACE_OUT).filter(f => /^net-.*\.json$/.test(f)).flatMap(f => { try { return [JSON.parse(readFileSync(join(TRACE_OUT, f), 'utf8'))]; } catch { return []; } })
+    const network = readdirSync(TRACE_OUT).filter(f => /^net-.*\.json$/.test(f)).sort().flatMap(f => { try { return [JSON.parse(readFileSync(join(TRACE_OUT, f), 'utf8'))]; } catch { return []; } })
       .filter(n => n.file === file).flatMap(n => n.attempts);
     runs.push({ file, outcomes, coverage, network: [...new Set(network)], timedOut: run.timedOut, exitCode: run.status });
     if (run.timedOut) { timedOut = true; break; }
@@ -311,9 +311,10 @@ async function runJs({ copied, changedFiles, shown }) {
   const logText = redactSecrets(logs.join('\n'));
   writeFileSync(join(OUT, 'trace.log'), logText);
   const tail = logText.trimEnd().split('\n').slice(-12).join('\n');
-  if (!runs.some(r => r.coverage.length || r.outcomes.tests.length)) {
+  // V8 writes coverage for a runner that failed at startup too: no test reported in any file is no trace
+  if (!runs.some(r => r.outcomes.tests.length)) {
     console.error(tail);
-    console.error(`[trace] the run produced no coverage and ran no test (${timedOut ? 'timed out' : `exit ${exitCode}`}); its output is in ${join(OUT, 'trace.log')}`);
+    console.error(`[trace] the run ran no test (${timedOut ? 'timed out' : `exit ${exitCode}`}); its output is in ${join(OUT, 'trace.log')}`);
     return 2;
   }
   const o = observeV8(m, runs, { root: COPY, readFile: rel => { try { return readFileSync(join(COPY, rel), 'utf8'); } catch { return null; } }, node: nodeVersion });

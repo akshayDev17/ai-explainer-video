@@ -135,7 +135,7 @@ export function parseTap(text) {
 
 const NETWORK = /\b(ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH)\b|connect E\w+|getaddrinfo E\w+|fetch failed/;
 const PERMISSION = /\b(EPERM|EACCES|EROFS)\b/;
-// the attempts a run recorded, else the target its error names (a worker thread is not hooked by the preload)
+// the attempts a run recorded, else the target its error names (a process or worker the preload did not hook)
 const attempts = (run, message) => run.network.length ? run.network
   : [...new Set([...message.matchAll(/\bconnect E\w+ (\S+?)(?=[\s,)]|$)|\bgetaddrinfo E\w+ (\S+?)(?=[\s,)]|$)/g)].map(x => x[1] ? `connect ${x[1]}` : `getaddrinfo ${x[2]}`))];
 

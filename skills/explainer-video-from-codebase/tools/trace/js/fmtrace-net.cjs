@@ -1,16 +1,22 @@
 // fmtrace-net.cjs — loaded with `node --require` into every Node process of a traced JavaScript / TypeScript test run.
 // It records each outbound connect and DNS lookup the run attempts (the sandbox denies them all), so a test that failed
 // for want of the network is listed as denied by the sandbox. It changes nothing the code sees: every call goes on to
-// the real function. Written at exit to FM_TRACE_OUT, tagged with the test file this process ran (FM_TRACE_FILE).
+// the real function. Written as it happens to FM_TRACE_OUT (a worker thread its runner terminates never reaches its
+// exit), tagged with the test file this process ran (FM_TRACE_FILE).
 'use strict';
 const net = require('node:net');
 const dns = require('node:dns');
 const fs = require('node:fs');
 const path = require('node:path');
+const { threadId } = require('node:worker_threads');
 
 const out = process.env.FM_TRACE_OUT;
 const seen = new Set();
-const note = s => { if (seen.size < 50) seen.add(s); };
+const note = s => {
+  if (seen.has(s) || seen.size >= 50) return;
+  seen.add(s);
+  if (out) try { fs.writeFileSync(path.join(out, `net-${process.pid}-${threadId}-${String(seen.size).padStart(2, '0')}.json`), JSON.stringify({ file: process.env.FM_TRACE_FILE || null, attempts: [s] })); } catch {}
+};
 
 const connect = net.Socket.prototype.connect;
 net.Socket.prototype.connect = function (...args) {
@@ -25,7 +31,3 @@ net.Socket.prototype.connect = function (...args) {
 const lookup = dns.lookup;
 dns.lookup = function (host, ...rest) { note(`getaddrinfo ${host}`); return lookup.call(this, host, ...rest); };
 
-process.on('exit', () => {
-  if (!seen.size || !out) return;
-  try { fs.writeFileSync(path.join(out, `net-${process.pid}-${Date.now()}.json`), JSON.stringify({ file: process.env.FM_TRACE_FILE || null, attempts: [...seen] })); } catch {}
-});

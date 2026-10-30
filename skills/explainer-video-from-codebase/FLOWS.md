@@ -288,7 +288,8 @@ default pattern, selected by the command's positionals as the runner reads them:
 case-insensitive regex over the path for jest, as is jest's `--testPathPattern` (never passed on, since
 `--runTestsByPath` ignores it), a case-insensitive substring of it for vitest), each in its own
 sandboxed process under V8 precise coverage (`NODE_V8_COVERAGE`), on the `node` the command names by path, else the one on PATH, with the repo's
-`node_modules` linked into the copy entry by entry and exposed read-only; a workspace package's link (a symlink into
+`node_modules` linked into the copy entry by entry and exposed read-only (all but vite's caches, `.vite`, `.vite-temp`
+and `.vitest`, which the run writes into, so it makes its own in the copy); a workspace package's link (a symlink into
 the repo, such as `node_modules/@app/shared -> ../../packages/shared`) points at its copy, never at the hidden repo.
 Reports: node --test's TAP on stdout; jest `--json --outputFile --runInBand --watchman=false --passWithNoTests`;
 vitest `run --reporter=json --outputFile --pool=threads --passWithNoTests` (a forked worker is killed before it
@@ -298,7 +299,8 @@ function is matched to a symbol through the script's source map when there is on
 file jest or vitest compiled through `node:vm`, which `tools/trace/js/fmtrace-srcmap.cjs` records), else by position
 when the script V8 ran is the file (plain JavaScript, or TypeScript with its types stripped in place and a comment
 appended), and otherwise by a name only one symbol of that file has. `tools/trace/js/fmtrace-net.cjs` (`NODE_OPTIONS=--require`) records each process's
-connects and DNS lookups; where it cannot (a worker thread), the target is read from the error. Attribution is per
+and worker thread's connects and DNS lookups as they happen (a worker its runner terminates never reaches its exit);
+where it cannot, the target is read from the error. A run in which no test file reported a test is exit 2. Attribution is per
 test file and there are no caller → callee pairs, so `pairs`, `edges`, `noStaticEdge` and `callbacks` are empty;
 `granularity: "test-file"`, `files` / `ranFiles` (the test files, and those run before the time limit), `ran`
 (symbol → the test files it ran under), `byFile` (what ran in each) and `byTest` (`file`, `status`, `direct` counted
