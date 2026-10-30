@@ -1,0 +1,24 @@
+{
+  "entries": [],
+  "links": [
+    "src/__tests__/cart.test.ts:Cart > adds an item at its price -> src/__tests__/cart.test.ts:Cart > beforeEach framework js.test-hook",
+    "src/__tests__/cart.test.ts:Cart > adds an item at its price -> src/setupTests.ts:beforeEach framework js.test-hook",
+    "src/__tests__/cart.test.ts:Cart > adds an item at its price -> test/setup-env.ts:afterAll framework js.test-hook",
+    "src/__tests__/cart.test.ts:Cart > discounts > gives %i a discount of %i -> src/__tests__/cart.test.ts:Cart > beforeEach framework js.test-hook",
+    "src/__tests__/cart.test.ts:Cart > discounts > gives %i a discount of %i -> src/setupTests.ts:beforeEach framework js.test-hook",
+    "src/__tests__/cart.test.ts:Cart > discounts > gives %i a discount of %i -> test/setup-env.ts:afterAll framework js.test-hook",
+    "src/__tests__/cart.test.ts:Cart > totals every item -> src/__tests__/cart.test.ts:Cart > beforeEach framework js.test-hook",
+    "src/__tests__/cart.test.ts:Cart > totals every item -> src/setupTests.ts:beforeEach framework js.test-hook",
+    "src/__tests__/cart.test.ts:Cart > totals every item -> test/setup-env.ts:afterAll framework js.test-hook",
+    "src/checkout.test.ts:checkout > charges the cart total -> src/setupTests.ts:beforeEach framework js.test-hook",
+    "src/checkout.test.ts:checkout > charges the cart total -> test/setup-env.ts:afterAll framework js.test-hook",
+    "test/node.test.mjs:a single item costs ten -> test/setup-env.ts:afterAll framework js.test-hook"
+  ],
+  "tests": [
+    "src/__tests__/cart.test.ts:Cart > adds an item at its price asserts 12 | mocked src/mailer.ts:sendReceipt | direct src/cart.ts:Cart.add/body,src/clock.ts:resetClock/fixture",
+    "src/__tests__/cart.test.ts:Cart > totals every item asserts 18 | mocked src/mailer.ts:sendReceipt | direct src/cart.ts:Cart.add/body,src/cart.ts:Cart.total/body,src/clock.ts:resetClock/fixture",
+    "src/__tests__/cart.test.ts:Cart > discounts > gives %i a discount of %i asserts 24 | mocked src/mailer.ts:sendReceipt,src/pricing.ts:price | direct src/pricing.ts:discount/body,src/clock.ts:resetClock/fixture",
+    "src/checkout.test.ts:checkout > charges the cart total asserts 12 | mocked src/mailer.ts:sendReceipt,src/pricing.ts:discount | direct src/checkout.ts:checkout/body,src/clock.ts:resetClock/fixture",
+    "test/node.test.mjs:a single item costs ten asserts 6 | mocked  | direct src/pricing.ts:price/body,src/clock.ts:resetClock/fixture"
+  ]
+}

@@ -52,7 +52,22 @@ test('exit 1: refuses an --out that reaches the repo through a symlink', () => {
 
 test('exit 1: a bad --group or an unmined --lang', () => {
   assert.equal(run(RESOLVER, '--out', out(), '--group', 'x/**=staging').status, 1);
-  assert.match(run(RESOLVER, '--out', out(), '--lang', 'go').stderr, /only python/);
+  assert.match(run(RESOLVER, '--out', out(), '--lang', 'go').stderr, /mined languages are python and typescript/);
+});
+
+test('--lang takes python and typescript (which covers JavaScript), each mining only its own files; no other spelling', () => {
+  const polyglot = join(FIXTURES, 'polyglot');
+  const py = mine(polyglot, '--lang', 'python'), tsx = mine(polyglot, '--lang', 'typescript');
+  assert.equal(py.status, 0, py.stderr);
+  assert.equal(tsx.status, 0, tsx.stderr);
+  const files = m => [...new Set(m.symbols.map(s => s.file.slice(s.file.lastIndexOf('.'))))].sort();
+  assert.deepEqual(files(py.codemap), ['.py']);
+  assert.deepEqual(files(tsx.codemap), ['.ts', '.tsx']);
+  for (const alias of ['py', 'ts', 'javascript', 'js']) {
+    const r = run(polyglot, '--out', out(), '--lang', alias);
+    assert.equal(r.status, 1, alias);
+    assert.match(r.stderr, new RegExp(`--lang ${alias}: mined languages are python and typescript`));
+  }
 });
 
 test('the repo is never written to, and two runs produce identical code maps', () => {
@@ -83,7 +98,7 @@ test('the self-check passes on every fixture and reports unresolved calls by ori
     assert.equal(status, 0, dir);
     assert.equal(codemap.selfCheck.ok, true, dir);
     assert.equal(codemap.selfCheck.defsExtracted, codemap.selfCheck.defNodes, dir);
-    assert.equal(codemap.symbols.filter(s => s.kind !== 'main').length, codemap.selfCheck.defScopes, `${dir}: one symbol per distinct definition`);
+    assert.equal(codemap.symbols.filter(s => s.kind !== 'main' && s.file.endsWith('.py')).length, codemap.selfCheck.defScopes, `${dir}: one symbol per distinct definition`);
     assert.deepEqual(Object.keys(codemap.selfCheck.unresolvedByOrigin).sort(), ['builtin', 'external', 'inRepo', 'local']);
   }
 });

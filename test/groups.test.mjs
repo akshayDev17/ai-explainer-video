@@ -2,15 +2,18 @@
 // file the path rules left in prod; a --group override wins over everything.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
-import { FIXTURES, mine } from './helpers.mjs';
+import { join, dirname } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { FIXTURES, mine, gitRepo, git, cleanup } from './helpers.mjs';
 import { globToRegExp, classifyFile, parseOverrides } from '../skills/explainer-video-from-codebase/tools/lib/groups.mjs';
 
 const POLYGLOT = join(FIXTURES, 'polyglot');
 const EXPECTED = {
-  prod: ['backend/app.py', 'cmd/server/main.go', 'frontend/src/App.tsx'],
-  test: ['backend/conftest.py', 'backend/selfcheck.py', 'backend/test/legacy.py', 'backend/test_utils.py', 'backend/tests/helpers.py',
-    'backend/thing_test.py', 'backend/verification/test_connections.py', 'cmd/server/main_test.go', 'frontend/src/App.test.tsx', 'frontend/src/__tests__/util.ts'],
+  prod: ['backend/app.py', 'backend/imports.py', 'backend/search.py', 'cmd/server/main.go', 'frontend/src/App.tsx', 'frontend/src/api/catalog.ts',
+    'frontend/src/pages/ImportPage.tsx', 'frontend/src/pages/JobPage.tsx', 'frontend/src/pages/SearchPage.tsx', 'frontend/src/routes.tsx'],
+  test: ['backend/conftest.py', 'backend/selfcheck.py', 'backend/test/legacy.py', 'backend/test_app.py', 'backend/test_utils.py', 'backend/tests/helpers.py',
+    'backend/thing_test.py', 'backend/verification/test_connections.py', 'cmd/server/main_test.go', 'frontend/src/App.test.tsx', 'frontend/src/__tests__/util.ts',
+    'frontend/src/api/catalog.test.ts', 'frontend/src/pages/ImportPage.test.tsx'],
   eval: ['backend/bench/quick.py', 'backend/benchmarks/bench_search.py', 'backend/evals/run_eval.py', 'backend/evals_data/load.py',
     'backend/evaluation/score.py', 'backend/finetune.py', 'backend/rag_quality.py', 'backend/search_evals/case.py'],
   dev: ['backend/alembic/env.py', 'backend/db/migration_controller.py', 'backend/debug/dump.py', 'backend/debug_cache.py', 'backend/dev/tool.py',
@@ -39,13 +42,14 @@ test('content signals reclassify only files the path rules left in prod', () => 
   assert.equal(ruleOf['backend/app.py'], 'prod: everything else');
 });
 
-test('non-Python files are grouped and listed but not mined yet', () => {
-  assert.deepEqual(r.codemap.unsupported, { files: 5, byExt: { '.go': 2, '.tsx': 2, '.ts': 1 } });
-  assert.equal(r.codemap.symbols.filter(s => !s.file.endsWith('.py')).length, 0);
+test('Go files are grouped and listed but not mined yet; TypeScript is mined', () => {
+  assert.deepEqual(r.codemap.unsupported, { files: 2, byExt: { '.go': 2 } });
+  assert.equal(r.codemap.symbols.filter(s => s.file.endsWith('.go')).length, 0);
+  assert.deepEqual(r.codemap.languages.typescript, { files: 10, parseErrors: 0 });
 });
 
 test('an entry that lands in the test group is reported with the override that would move it', () => {
-  assert.deepEqual(r.codemap.entries.map(e => [e.id, e.group]), [['backend.verification.test_connections:<main>', 'test']]);
+  assert.deepEqual(r.codemap.entries.filter(e => e.group === 'test').map(e => [e.id, e.group]), [['backend.verification.test_connections:<main>', 'test']]);
   assert.match(r.md, /Entries in the test group[\s\S]*--group 'backend\/verification\/test_connections.py=dev'/);
 });
 
@@ -53,8 +57,24 @@ test('a --group override wins over every rule and is recorded', () => {
   const o = mine(POLYGLOT, '--group', 'backend/verification/**=dev');
   const f = o.codemap.files.find(x => x.path === 'backend/verification/test_connections.py');
   assert.deepEqual([f.group, f.rule], ['dev', 'override: backend/verification/**=dev']);
-  assert.equal(o.codemap.entries[0].group, 'dev');
+  assert.equal(o.codemap.entries.find(e => e.id === 'backend.verification.test_connections:<main>').group, 'dev');
   assert.deepEqual(o.codemap.groups.overrides, ['backend/verification/**=dev']);
+});
+
+test('a JS/TS file outside any eval dir that imports an eval framework is an eval file; one that imports none stays prod', () => {
+  const repo = gitRepo();
+  mkdirSync(join(repo, 'src'));
+  writeFileSync(join(repo, 'src', 'quality.ts'), "import { evalite } from 'evalite';\nexport const run = () => evalite;\n");
+  writeFileSync(join(repo, 'src', 'scorer.js'), "const { Factuality } = require('autoevals');\nmodule.exports = Factuality;\n");
+  writeFileSync(join(repo, 'src', 'app.ts'), "import express from 'express';\nexport const app = express();\n");
+  git(repo, 'add', '-A');
+  const m = mine(repo);
+  cleanup(dirname(repo));
+  assert.equal(m.status, 0, m.stderr);
+  const by = Object.fromEntries(m.codemap.files.map(f => [f.path, [f.group, f.rule]]));
+  assert.deepEqual(by['src/quality.ts'], ['eval', 'content: imports an eval framework']);
+  assert.deepEqual(by['src/scorer.js'], ['eval', 'content: imports an eval framework']);
+  assert.deepEqual(by['src/app.ts'], ['prod', 'prod: everything else']);
 });
 
 test('globs: ** crosses directories, * does not, a slash-free pattern matches at any depth', () => {

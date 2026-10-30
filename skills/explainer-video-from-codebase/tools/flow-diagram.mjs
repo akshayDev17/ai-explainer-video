@@ -57,7 +57,8 @@ const one = flags.get('--flow');
 if (one != null && !items.has(one)) fail(1, `no flow or core "${one}" in ${VALIDATED} (have: ${[...items.keys()].join(', ')})`);
 
 const moduleOf = sym => sym.split(':')[0];
-const shortName = mod => mod.split('.').slice(-2).join('.');
+// `pkg.mod.leaf` -> `mod.leaf`; a TS/JS module (a path) -> its last two path parts
+const shortName = mod => mod.includes('/') ? mod.split('/').slice(-2).join('/') : mod.split('.').slice(-2).join('.');
 const COLOR = { queue: 'hub', http: 'ok', spawn: 'bad' };
 const CROSS = new Set(Object.keys(COLOR));
 // the call that brings a hop in: the first downward step of its connection (the walk returns up, then calls down)
@@ -119,6 +120,7 @@ function callerLabel(it) {
   const e = it.entry;
   if (!e) return { label: 'caller', sub: it.kind === 'core' ? 'shared code: called from several flows' : null };
   if (e.kind === 'http') return { label: `${e.method} ${e.path}`, sub: 'HTTP request' };
+  if (e.kind === 'ui-route') return { label: e.path, sub: 'page in the browser' };
   if (e.kind === 'queue-consumer' || e.kind === 'scheduled') return { label: e.key, sub: e.kind === 'scheduled' ? 'schedule' : 'queue message' };
   if (e.kind === 'main' || e.kind === 'cli') return { label: e.file, sub: 'command line' };
   return { label: e.kind, sub: e.file };

@@ -19,14 +19,14 @@ artifact made by running repo code: the repo's own test suite, sandboxed.
 |---|---|
 | `schema`, `tool.versions` | `1`; the vendored tree-sitter runtime and grammar versions |
 | `root`, `commit`, `treeHash` | the mined directory, its `git HEAD` (or `null`), a sha256 over every mined and config file |
-| `languages`, `unsupported` | Python files and parse errors; files of other languages, by extension (grouped, not mined yet) |
+| `languages`, `unsupported` | Python, TypeScript and JavaScript files and parse errors; files of other languages (Go, C, C++), by extension (grouped, not mined yet) |
 | `groups` | the ordered group rules, the `--group` overrides, and file / symbol / entry counts per group |
 | `files[]` | every source file: `path`, `group`, the `rule` that placed it, `lang`, `sha256`, `parseError?`, `unsupported?` |
 | `symbols[]` | `id`, `group`, `kind` (`function`, `method`, `class`, `main`), `file`, `start`, `end`, `name`, `module`, `cls`, `decos`, `params`, `async?`, `sha256` of its source span |
 | `classes[]` | `id`, resolved `bases`, raw `baseExprs`, `methods` (name → symbol id), `decos` |
 | `edges[]`, `entries[]` | below |
 | `tests[]`, `fixtures[]`, `fixtureBindings[]`, `mocks[]`, `testSummary` | below |
-| `rules` | per-pack records: Depends links, queue producers, registry tables (with dropped constructors), Haystack pipelines, HTTP client calls (linked or not), spawns, callback count |
+| `rules` | per-pack records: Depends links, queue producers, registry tables (with dropped constructors), Haystack pipelines, HTTP client calls (linked or not), spawns, callback count; with TS/JS files also `jsHttp` (every fetch / axios / ky call: `client`, `method`, folded `url`, `handler` or null, `unlinked` (why, when the method is unknown and the path serves more than one handler), `folded` consts, `env` keys, `match: "suffix"`), `uiRoutes`, Express `mounts`, `nextRoots`, `routeAliases` (a second route to a handler that already has an entry) and `setupFiles` |
 | `dispatchSites[]`, `factories` | every narrowed or CHA dispatch point; every function that can return two or more classes, with branch guards |
 | `config` | git-tracked config files (`group`, `reader`, fact count), the number of `untracked` ones not read, and `notGitWorkTree` (the mined or `--config-root` directories outside a git work tree, whose config is not read at all), settings fields and properties, every fact (`key`, `file:line`, and `value` only for a key a dispatch guard reads), profiles and classified dispatch sites (below) |
 | `frameworksWithoutPack[]` | known frameworks the repo imports that no rule pack covers: their wiring is not linked |
@@ -52,22 +52,40 @@ resolves to an in-repo loose module, namespace directory or nested package (`app
 package roots below the repo root. A call made at module level has `from: pkg.module:<module>`.
 A library target is `ext:<dotted.name>`.
 
+TypeScript / JavaScript ids name the module by its repo-relative path with its extension (`web/src/api.ts:searchBooks`,
+`web/src/store.ts:Store.load`, `…:Page.<locals>.go`, `…:<main>` for an `if (require.main === module)` block), so they
+never meet a Python id. Imports resolve the way graphify resolves them: relative specifiers (a `.js` naming a `.ts`
+file, extensions probed, directory `index` files), the nearest tsconfig.json / jsconfig.json `paths` and `baseUrl`
+(through `extends`), in-repo workspace packages by their package.json `name`, and `@/` as `src/` when no tsconfig
+exists; ESM default, named and namespace imports, re-exports and `export *`, and CommonJS `require` /
+`module.exports` / `exports.x`. A function or class assigned to a variable is named by it, an object literal's
+functions by `obj.member`, an inline route handler by its route (`GET /health`), a test by its describe path
+(`Cart > adds an item`). `selfCheck.typescript` holds its counts, and `unresolvedImports` the relative imports that
+name no file.
+
 ## Groups
 
 Every file is in exactly one group. Ordered path rules, first match wins: **test** (a `tests/`,
-`test/` or `__tests__/` dir; `test_*.py`, `*_test.py`, `conftest.py`) → **dev** by file name
-(`debug_*`, `diagnose_*`, `*migration_controller*`, `dev.py`) → **eval** (`evals/`, `eval/`, `*_evals/`,
+`test/` or `__tests__/` dir; `test_*.py`, `*_test.py`, `conftest.py`; `*.test.*` / `*.spec.*` for JS/TS,
+`setupTests.*`, `jest.setup.*`, `vitest.setup.*`) → **dev** by file name (`debug_*`, `diagnose_*`,
+`*migration_controller*`, `dev.py`; `debug*.[jt]s`, `*.dev.[jt]s`, jest/vitest/vite/webpack/… `.config.[jt]s`) → **eval** (`evals/`, `eval/`, `*_evals/`,
 `evals_*/`, `evaluation(s)/`, `benchmark(s)/`, `bench/`) → **dev** by directory (`migrations/`, `alembic/`,
 `dev_setup/`, `dev/`, `scripts/`, `verification/`, `debug/`) → **prod**. A file the path rules leave in prod
 is moved by content: it imports pytest/unittest and defines tests → test; it imports an eval framework
 (ragas, deepeval, promptfoo, lm_eval, inspect_ai, mteb, beir, trulens, langsmith `evaluate`) or has
-training-loop markers → eval. `--group 'glob=group'` always wins.
+training-loop markers → eval; a JS/TS file that imports vitest, `@jest/globals`, `node:test` or mocha and defines
+tests → test, one that imports promptfoo, evalite, autoevals or braintrust → eval: in every language, an
+eval-framework import puts a file in the eval group (design rev3 §3.15). `--group 'glob=group'` always wins.
 
 ## Entries
 
 `kind` ∈ `http` (`method`, `path` with every `include_router` prefix up the chain and the router's own; only a
 decorator whose receiver is an `APIRouter` or `FastAPI` app makes one), `queue-consumer` / `scheduled` (`key`),
-`cli`, `main`, `registered-callback` (`via`, e.g. `FastAPI(lifespan=…)`). Each carries `group`, `file`,
+`cli`, `main`, `registered-callback` (`via`, e.g. `FastAPI(lifespan=…)`), and from TS/JS: `http` from Express
+(`app`/`router` methods and `.route()` chains, every `app.use(prefix, router)` mount up the chain, `:id` written
+`{id}`) and Next.js route handlers and API routes, and `ui-route` (`path`) from React Router (route objects and
+`<Route>` elements, nested) and Next.js pages, at the component rendered; a handler or component a second route also
+reaches keeps one entry and lists the other routes in `alsoAt`. Each carries `group`, `file`,
 `line` and the `rule` that made it. An entry in the test group is not a flow; `codemap.md` suggests the
 override that moves it.
 
@@ -79,14 +97,15 @@ subclass override reachable by CHA), `dispatch` (one of several narrowed targets
 
 | Field | Meaning |
 |---|---|
-| `rule` | the pack that produced it: `fastapi.Depends`, `taskiq.literal-key`, `taskiq.kiq` / `.delay` / `.apply_async`, `registry`, `haystack.pipeline`, `py.http-client`, `process-spawn`, `pytest.fixture[.autouse]`, `py.callback`; `evidence` says why, with `file:line` |
+| `rule` | the pack that produced it: `fastapi.Depends`, `taskiq.literal-key`, `taskiq.kiq` / `.delay` / `.apply_async`, `registry`, `haystack.pipeline`, `py.http-client`, `process-spawn`, `pytest.fixture[.autouse]`, `py.callback`; from TS/JS `js.http-client` (a frontend call to a route in any language), `express.middleware`, `js.test-hook`, `js.callback` (a function handed to a call or a JSX event prop runs from there); `evidence` says why, with `file:line` |
 | `groups` | `[fromGroup, toGroup]` when the edge crosses groups (labelled, never cut) |
 | `group` | on `registry` and `py.http-client` links: the producer's group (a test that enqueues is test evidence, not a production crossing) |
 | `recvClass`, `site`, `narrowedBy`, `self` | receiver typing: the concrete class, the call site, the factory or `class-attr` that narrowed it, a `self.m()` call |
 | `super`, `passCtx` | a `super().m()` call; the receiver passes through |
 | `selectors`, `order`, `component` | Haystack: the factory guards that select a component, its connect order |
 | `cfg` | the config-reading guards around the call (`settings.…`, `getattr(settings, …)`, `is_prod`, `env_mode`, or a local assigned from one) |
-| `onFailure` | the call sits in an `except` clause: it runs only when the guarded code raised, e.g. `except TimeoutError` |
+| `onFailure` | the call sits in an `except` clause: it runs only when the guarded code raised, e.g. `except TimeoutError` (TS/JS: `catch (e)`) |
+| `jsx` | the edge is a rendered component (`<Page />`): to the function, or to a class's constructor and `render` |
 | `passedBy`, `passedAt` | `py.callback`: the callee runs a callable or coroutine that `passedBy` handed it at `passedAt`. The link is only true for that caller: a walk that reached the callee some other way must not follow it |
 
 ## Tests as evidence
@@ -101,6 +120,15 @@ subclass override reachable by CHA), `dispatch` (one of several narrowed targets
   definition), `how`, and `scope: "session"` plus `conftest` for a patch started in `pytest_configure`,
   `pytest_sessionstart` or at conftest module level: it applies to every test under that conftest.
 - `testSummary`: counts, including production functions with at least one direct link.
+- TS/JS (jest, vitest, node:test, mocha in test-group files): a test is an `it` / `test` call (with `.each` titles kept
+  as written), named by its describe path; `beforeEach` / `beforeAll` / `afterEach` / `afterAll` are autouse
+  fixtures for the tests under their `describe`, and a hook in a setup file (`setupTests.*`, `jest.setup.*`,
+  `vitest.setup.*`, or one a jest / vitest config lists in `setupFiles`) binds every test below it (`covers`: the
+  config's directory for a listed one). `jest.mock('mod')` / `vi.mock('mod')` replace every export of the module the
+  string resolves to, or only the factory's keys when the factory spreads the real module; they are hoisted, so their
+  `fn` is the test file's `<module>`, and in a setup file they are `scope: "session"` mocks. `jest.spyOn` /
+  `vi.spyOn` replaces a method only when a `.mockImplementation` / `.mockReturnValue` / `.mockResolvedValue` /
+  `.mockRejectedValue` follows. One mock record per replaced symbol.
 
 ## Config-aware dispatch (`config.profiles`, `config.sites`)
 
@@ -204,7 +232,15 @@ branches.
 Written only after the user said yes to one exact test command (`--i-ran-this-by-the-user`). `trace.mjs` refuses
 (exit 1) without that flag; refuses (exit 3) anything but `pytest`, `py.test`, `python -m pytest` or `python -m
 unittest` (python, python3 or python3.N, by name or path; a bare name is found in the repo's `.venv/bin` or
-`venv/bin`, then on PATH), with any shell syntax (`;`, `&&`, `|`, redirects, `$`, backticks) or a wrapper (`uv run`,
+`venv/bin`, then on PATH), `node --test` (only `--test-*` and type-stripping flags), `npx jest` or `npx vitest [run]`
+(no npx flags, no watch mode, none of the flags the trace sets itself: reporter, coverage, pool; a flag's value as
+`-t=name` or `-t name`, split only for the jest and vitest flags that take a value, so a word after any other flag is
+a test path or filter), or `jest` / `vitest`
+from the repo's `node_modules/.bin`; refuses (exit 1) a jest or vitest the repo has not installed (nothing is ever
+installed, and `npx` itself is never run). jest and vitest run from the package that holds them: the repo root, else
+the one package below it (a `package.json` beside a `node_modules/.bin` holding the runner, such as `frontend/`) that
+holds the code map's test files, whose test files and the paths given are read relative to it (`cwd` in `trace.json`);
+two such packages holding test files are refused (exit 1). It refuses (exit 3), too, a command with any shell syntax (`;`, `&&`, `|`, redirects, `$`, backticks) or a wrapper (`uv run`,
 `env`); and refuses (exit 4) on a platform with no OS sandbox, or where this platform's sandbox does not start
 (`sandbox-exec` on macOS, `bwrap` on Linux, always chosen by platform; there is no option to pick or skip one). It
 never runs unsandboxed.
@@ -250,10 +286,35 @@ names come from `co_qualname` (Python 3.11+; older interpreters report bare func
 `HOME` in scratch, packages installed only in the user's site dir (`pip install --user`) are not found: use the repo's
 virtualenv.
 
+A JavaScript / TypeScript runner is run once per test file (the code map's test files that match the runner's own
+default pattern, selected by the command's positionals as the runner reads them: a path or directory for node, a
+case-insensitive regex over the path for jest, as is jest's `--testPathPattern` (never passed on, since
+`--runTestsByPath` ignores it), a case-insensitive substring of it for vitest), each in its own
+sandboxed process under V8 precise coverage (`NODE_V8_COVERAGE`), on the `node` the command names by path, else the one on PATH, with the repo's
+`node_modules` linked into the copy entry by entry and exposed read-only (all but vite's caches, `.vite`, `.vite-temp`
+and `.vitest`, which the run writes into, so it makes its own in the copy); a workspace package's link (a symlink into
+the repo, such as `node_modules/@app/shared -> ../../packages/shared`) points at its copy, never at the hidden repo.
+Reports: node --test's TAP on stdout; jest `--json --outputFile --runInBand --watchman=false --passWithNoTests`;
+vitest `run --reporter=json --outputFile --pool=threads --passWithNoTests` (a forked worker is killed before it
+writes its coverage). A file whose run ends cleanly with no test reported (the repo's own runner config does not
+collect it, or it defines none) is listed in `notCollected` (`{file, tests}`: the code map's tests in it), never
+counted as an error; those tests never ran, so they are not in `byTest` or `directLinksPerTest`. A covered
+function is matched to a symbol through the script's source map when there is one (Node's own, or the inline map of a
+file jest or vitest compiled through `node:vm`, which `tools/trace/js/fmtrace-srcmap.cjs` records), else by position
+when the script V8 ran is the file (plain JavaScript, or TypeScript with its types stripped in place and a comment
+appended), and otherwise by a name only one symbol of that file has. `tools/trace/js/fmtrace-net.cjs` (`NODE_OPTIONS=--require`) records each process's
+and worker thread's connects and DNS lookups as they happen (a worker its runner terminates never reaches its exit);
+where it cannot, the target is read from the error. A run in which no test file reported a test is exit 2. Attribution is per
+test file and there are no caller → callee pairs, so `pairs`, `edges`, `noStaticEdge` and `callbacks` are empty;
+`granularity: "test-file"`, `files` / `ranFiles` (the test files, and those run before the time limit), `ran`
+(symbol → the test files it ran under), `byFile` (what ran in each) and `byTest` (`file`, `status`, `direct` counted
+against what ran in that file) take their place, and `summary` has `functionsRan`, `unmappedFunctions` (named
+functions that matched no symbol), `anonymousCallbacks`, `directLinksPerTest` and `fixtureLinks` (hooks that ran).
+
 | Field | What it holds |
 |---|---|
 | `optIn` | `{by: "user", at, command}`: who opted in, when, and the exact command |
-| `sandbox`, `runner`, `argv` | `macos-sandbox-exec:macos-nonet.sb` or `linux-bwrap:linux-bwrap.sh`; `pytest` or `unittest`; the command as run |
+| `sandbox`, `runner`, `argv` | `macos-sandbox-exec:macos-nonet.sb` or `linux-bwrap:linux-bwrap.sh`; `pytest`, `unittest`, `node-test`, `jest` or `vitest`; the command as run (for a JS runner, one file's command with `<test file>`) |
 | `timeoutSec`, `timedOut`, `exitCode`, `durationMs` | the limit and how the run ended |
 | `codemap` | the code map's file, sha256, `commit`, `treeHash`, and `changedFiles`: mined files that differ in the copy (mine again first) |
 | `outcome` | `collected`, `passed`, `failed`, `errors` (collection and setup errors, failed teardowns, a failing unittest class or module fixture, a test the time limit cut off), `skipped`, `xfailed`, `xpassed` |

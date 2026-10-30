@@ -1,0 +1,14 @@
+{
+  "entries": [
+    "http app/api/products/[id]/route.ts:GET GET /api/products/{id}",
+    "http app/api/products/[id]/route.ts:PATCH PATCH /api/products/{id}",
+    "http pages/api/legacy/[slug].ts:handler * /api/legacy/{slug}",
+    "ui-route app/(shop)/products/[id]/page.tsx:ProductPage /products/:id",
+    "ui-route app/page.tsx:Home /",
+    "ui-route pages/about.tsx:About /about"
+  ],
+  "links": [
+    "lib/client.ts:legacyLookup -> pages/api/legacy/[slug].ts:handler http js.http-client [prod]",
+    "lib/client.ts:loadProduct -> app/api/products/[id]/route.ts:GET http js.http-client [prod]"
+  ]
+}

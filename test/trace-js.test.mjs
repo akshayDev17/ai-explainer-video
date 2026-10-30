@@ -1,0 +1,445 @@
+// trace.mjs for JavaScript / TypeScript: which runner commands are recognised, how a run's TAP or jest/vitest JSON
+// report and its V8 coverage map onto the code map (per test file, by position, source map or name), and, where this
+// platform's sandbox starts, node --test on fixtures/trace-js end to end. Set FM_TRACE_REQUIRE_SANDBOX=1 to fail
+// instead of skipping (the CI trace job does).
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, realpathSync, symlinkSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { FIXTURES, scratch, cleanup, tool, git, gitRepo, assertGolden } from './helpers.mjs';
+import { sandboxWorks } from '../skills/explainer-video-from-codebase/tools/lib/sandbox.mjs';
+import { recogniseJs, jsTestFiles, fileArgv, passThrough } from '../skills/explainer-video-from-codebase/tools/lib/trace-js.mjs';
+import { parseTap, parseJestJson, functionsRan, observeV8, decodeMappings } from '../skills/explainer-video-from-codebase/tools/lib/observe-v8.mjs';
+
+const REPO = join(FIXTURES, 'trace-js');
+const OPT_IN = '--i-ran-this-by-the-user';
+const KIND = { darwin: 'macos', linux: 'bwrap' }[process.platform];
+const works = KIND ? sandboxWorks(KIND) : { ok: false, why: `no sandbox on ${process.platform}` };
+const unavailable = !works.ok ? `no OS sandbox here: ${works.why}` : false;
+const skip = process.env.FM_TRACE_REQUIRE_SANDBOX === '1' ? false : unavailable;
+if (process.env.FM_TRACE_REQUIRE_SANDBOX === '1') test('the sandbox is available (FM_TRACE_REQUIRE_SANDBOX=1)', () => assert.equal(unavailable, false, unavailable));
+
+const files = dir => readdirSync(dir, { recursive: true }).map(String).sort();
+
+/* ---------------- recognition and refusals: every platform ---------------- */
+
+test('recognised: node --test, npx jest, npx vitest and the repo\'s own bins, with their arguments', () => {
+  const r = cmd => recogniseJs(cmd.split(' '));
+  assert.deepEqual(r('node --test'), { runner: 'node-test', args: [] });
+  assert.deepEqual(r('node --test --test-name-pattern=cart test/'), { runner: 'node-test', args: ['--test-name-pattern=cart', 'test/'] });
+  assert.deepEqual(r('npx jest src/cart'), { runner: 'jest', args: ['src/cart'] });
+  assert.deepEqual(r('npx vitest run --silent'), { runner: 'vitest', args: ['--silent'] });
+  assert.deepEqual(r('node_modules/.bin/jest'), { runner: 'jest', args: [] });
+  assert.deepEqual(r('vitest'), { runner: 'vitest', args: [] });
+});
+
+test('refused: npx flags (they can install), watch modes, the flags the trace sets itself, any other node program', () => {
+  for (const cmd of ['npx -y jest', 'npx --yes vitest', 'npx jest --watch', 'npx jest --coverage', 'npx vitest watch', 'npx vitest --reporter=dot',
+    'node --test --require ./x.cjs', 'node --test --import ./x.mjs', 'node server.js', 'node -e 1', 'npx mocha', 'npm test', 'yarn jest', 'tools/jest'])
+    assert.equal(recogniseJs(cmd.split(' ')), null, cmd);
+  for (const cmd of ['npx -y jest', 'node server.js', 'npm test', 'node --test; curl example.com', 'npx jest && rm -rf x']) {
+    const r = tool('trace.mjs', '--codemap', 'x.json', '--test-command', cmd, OPT_IN);
+    assert.equal(r.status, 3, `${cmd}: ${r.stderr}`);
+    assert.match(r.stderr, /not a recognised test command/);
+  }
+});
+
+test('each runner runs the code map\'s test files that match its own pattern, under the paths given', () => {
+  const m = { tests: ['test/a.test.mjs', 'src/__tests__/b.ts', 'src/c.spec.tsx', 'tests/d.py', 'test/helper.mjs'].map(file => ({ file })) };
+  assert.deepEqual(jsTestFiles(m, 'node-test', []), ['test/a.test.mjs', 'test/helper.mjs']);
+  assert.deepEqual(jsTestFiles(m, 'jest', []), ['src/__tests__/b.ts', 'src/c.spec.tsx']);
+  assert.deepEqual(jsTestFiles(m, 'vitest', ['src']), ['src/c.spec.tsx']);
+  assert.deepEqual(fileArgv({ runner: 'vitest', node: 'node', bin: { rel: 'node_modules/.bin/vitest', node: true }, flags: [], file: 'a.test.ts', report: 'r.json' }),
+    ['node', 'node_modules/.bin/vitest', 'run', '--passWithNoTests', '--reporter=json', '--outputFile=r.json', '--pool=threads', 'a.test.ts']);
+});
+
+test('a split value of a flag that takes one is joined to it; after a boolean flag a word stays a test path or filter', () => {
+  const r = cmd => recogniseJs(cmd.split(' '));
+  assert.deepEqual(r('npx jest -t=adds'), { runner: 'jest', args: ['-t=adds'] });
+  assert.deepEqual(r('npx jest -t adds'), { runner: 'jest', args: ['-t=adds'] });
+  assert.deepEqual(r('npx jest --testNamePattern adds src'), { runner: 'jest', args: ['--testNamePattern=adds', 'src'] });
+  assert.deepEqual(r('npx vitest run --config vitest.config.ts cart'), { runner: 'vitest', args: ['--config=vitest.config.ts', 'cart'] });
+  assert.deepEqual(r('npx jest --verbose src/cart'), { runner: 'jest', args: ['--verbose', 'src/cart'] });
+  assert.deepEqual(r('npx vitest run --silent src'), { runner: 'vitest', args: ['--silent', 'src'] });
+  assert.deepEqual(passThrough('jest', r('npx jest -t adds src').args), ['-t=adds']);
+  const jestCmd = r('npx jest --testPathPattern src/cart --silent');
+  assert.deepEqual(jestCmd.args, ['--testPathPattern=src/cart', '--silent']);
+  const cartAndMore = { tests: ['src/cart/a.test.ts', 'src/checkout.test.ts', 'src/other.test.ts'].map(file => ({ file })) };
+  assert.deepEqual(jsTestFiles(cartAndMore, 'jest', jestCmd.args), ['src/cart/a.test.ts'], '--testPathPattern selects as a regex over the path');
+  assert.deepEqual(jsTestFiles(cartAndMore, 'jest', ['--testPathPatterns=other', 'checkout']), ['src/checkout.test.ts', 'src/other.test.ts'], 'with positionals, either selects');
+  assert.deepEqual(passThrough('jest', jestCmd.args), ['--silent'], '--runTestsByPath ignores it, so it is never passed on');
+  assert.deepEqual(jsTestFiles({ tests: [{ file: 'src/a.test.ts' }, { file: 'lib/b.test.ts' }] }, 'jest', r('npx jest -t adds src').args), ['src/a.test.ts'], 'the value is no path');
+  assert.deepEqual(r('npx jest --reporters default src').args, ['--reporters=default', 'src']);
+  for (const cmd of ['npx vitest run --reporter dot src', 'npx jest --watch src', 'npm test']) assert.equal(r(cmd), null, cmd);
+  const m = { tests: ['src/cart.test.ts', 'src/cart/totals.test.ts', 'src/checkout.test.ts', 'src/Cart.spec.ts'].map(file => ({ file })) };
+  assert.deepEqual(jsTestFiles(m, 'jest', ['cart']), ['src/Cart.spec.ts', 'src/cart.test.ts', 'src/cart/totals.test.ts'], 'jest: a case-insensitive regex over the path');
+  assert.deepEqual(jsTestFiles(m, 'jest', ['out\\.test']), ['src/checkout.test.ts']);
+  assert.deepEqual(jsTestFiles(m, 'vitest', ['cart']), ['src/Cart.spec.ts', 'src/cart.test.ts', 'src/cart/totals.test.ts'], 'vitest: a case-insensitive substring of the path');
+  assert.deepEqual(jsTestFiles(m, 'node-test', ['cart']), [], 'node: a path or directory');
+  assert.deepEqual(jsTestFiles(m, 'node-test', ['src/cart']), ['src/cart/totals.test.ts']);
+});
+
+/* ---------------- reports ---------------- */
+
+test('parseTap: nested suites give a test its describe path; a suite is no test; a failure keeps its error', () => {
+  const tap = ['TAP version 13', '# Subtest: Cart', '    # Subtest: adds', '    ok 1 - adds', '      ---', "      type: 'test'", '      ...',
+    '    # Subtest: inner', '        # Subtest: fails\\: here', '        not ok 1 - fails\\: here', '          ---', "          type: 'test'",
+    '          error: |-', '            Expected 1 to be 2', '          code: ERR', '          ...', '        # Subtest: later', '        ok 2 - later # SKIP',
+    '        1..2', '    not ok 2 - inner', '      ---', "      type: 'suite'", "      failureType: 'subtestsFailed'", '      ...', '    1..2',
+    'not ok 1 - Cart', '  ---', "  type: 'suite'", "  failureType: 'subtestsFailed'", '  ...', '# Subtest: top', 'ok 2 - top', '1..2'].join('\n');
+  assert.deepEqual(parseTap(tap), { tests: [
+    { titles: ['Cart', 'adds'], status: 'passed', message: '' },
+    { titles: ['Cart', 'inner', 'fails: here'], status: 'failed', message: 'Expected 1 to be 2' },
+    { titles: ['Cart', 'inner', 'later'], status: 'skipped', message: '' },
+    { titles: ['top'], status: 'passed', message: '' }], suiteErrors: [] });
+});
+
+test('parseJestJson: jest and vitest JSON, per assertion; a suite that failed with no failing test is an error', () => {
+  const json = { testResults: [
+    { name: '/s/repo/test/a.test.js', status: 'failed', message: '● ping', assertionResults: [
+      { ancestorTitles: ['Cart'], title: 'totals', status: 'passed', failureMessages: [] },
+      { ancestorTitles: [], title: 'ping', status: 'failed', failureMessages: ['Error: connect ECONNREFUSED 127.0.0.1:6379'] },
+      { ancestorTitles: [], title: 'later', status: 'pending', failureMessages: [] }] },
+    { name: '/s/repo/test/b.test.js', status: 'failed', message: 'Cannot find module ./gone', assertionResults: [] }] };
+  assert.deepEqual(parseJestJson(json, '/s/repo'), {
+    tests: [{ file: 'test/a.test.js', titles: ['Cart', 'totals'], status: 'passed', message: '' },
+      { file: 'test/a.test.js', titles: ['ping'], status: 'failed', message: 'Error: connect ECONNREFUSED 127.0.0.1:6379' },
+      { file: 'test/a.test.js', titles: ['later'], status: 'skipped', message: '' }],
+    suiteErrors: [{ file: 'test/b.test.js', message: 'Cannot find module ./gone' }] });
+});
+
+/* ---------------- coverage onto the code map ---------------- */
+
+const TEXT = 'export function a() {\n  return 1;\n}\nexport const b = () => a();\nexport class K {\n  constructor() {}\n  m() { return b(); }\n}\n';
+const SYMS = [{ id: 'f.mjs:a', name: 'a', kind: 'function', file: 'f.mjs', start: 1 }, { id: 'f.mjs:b', name: 'b', kind: 'function', file: 'f.mjs', start: 4 },
+  { id: 'f.mjs:K', name: 'K', kind: 'class', file: 'f.mjs', start: 5 }, { id: 'f.mjs:K.constructor', name: 'constructor', kind: 'method', file: 'f.mjs', start: 6, cls: 'f.mjs:K' },
+  { id: 'f.mjs:K.m', name: 'm', kind: 'method', file: 'f.mjs', start: 7, cls: 'f.mjs:K' }];
+const fn = (functionName, startOffset, endOffset, count = 1) => ({ functionName, ranges: [{ startOffset, endOffset, count }] });
+const dumpOf = (len, functions, extra = {}) => ({ result: [{ url: 'file:///r/f.mjs', functions: [fn('', 0, len), ...functions] }], ...extra });
+const at = s => TEXT.indexOf(s);
+
+test('functionsRan: by position when the script is the file, or the file plus an appended comment; a constructor runs under its class name', () => {
+  const m = { symbols: SYMS };
+  const fns = [fn('a', at('function a'), at('}\nexport const')), fn('b', at('() => a()'), at(';\nexport class')), fn('K', at('constructor'), at('\n  m()')),
+    fn('m', at('m()'), at('\n}\n') + 1, 0), fn('', at('() => a()'), at(';\nexport class'))];
+  assert.deepEqual([...functionsRan(m, dumpOf(TEXT.length, fns), '/r', () => TEXT).ran].sort(), ['f.mjs:K.constructor', 'f.mjs:a', 'f.mjs:b'], 'm never ran (count 0)');
+  assert.deepEqual([...functionsRan(m, dumpOf(TEXT.length + 90, fns), '/r', () => TEXT).ran].sort(), ['f.mjs:K.constructor', 'f.mjs:a', 'f.mjs:b'], 'types stripped in place, a sourceURL appended');
+});
+
+test('functionsRan: in transformed code, by a name only one symbol of the file has; through a source map when Node recorded one', () => {
+  const m = { symbols: SYMS };
+  const r = functionsRan(m, dumpOf(900, [fn('a', 400, 420), fn('m', 500, 520), fn('', 600, 620), fn('_helper', 700, 720)]), '/r', () => TEXT);
+  assert.deepEqual([[...r.ran].sort(), r.unmapped, r.anonymous], [['f.mjs:K.m', 'f.mjs:a'], 1, 1]);
+  // generated line 0 col 0 -> source line 4 (index 3); generated line 1 col 2 -> source line 7 (index 6)
+  assert.deepEqual(decodeMappings('AAGA;EAGA'), [[[0, 0, 3, 0]], [[2, 0, 6, 0]]]);
+  const smc = { 'file:///r/f.mjs': { lineLengths: [30, 30], data: { version: 3, sources: ['f.mjs'], mappings: 'AAGA;EAGA' } } };
+  const s = functionsRan(m, dumpOf(61, [fn('', 1, 10), fn('', 33, 50)], { 'source-map-cache': smc }), '/r', () => TEXT);
+  assert.deepEqual([...s.ran].sort(), ['f.mjs:K.m', 'f.mjs:b'], 'anonymous functions placed by their source lines');
+});
+
+test('observeV8: what ran is attributed to its test file; direct links count as observed when their target ran there; a network failure is denied', () => {
+  const m = { symbols: [...SYMS, { id: 't.test.mjs:adds', name: 'adds', kind: 'function', file: 't.test.mjs', start: 1, group: 'test' }].map(s => ({ group: 'prod', ...s })),
+    tests: [{ id: 't.test.mjs:adds', file: 't.test.mjs', direct: [{ to: 'f.mjs:a' }, { to: 'f.mjs:K.m' }] }, { id: 't.test.mjs:pings', file: 't.test.mjs', direct: [] }],
+    fixtureBindings: [] };
+  const runs = [{ file: 't.test.mjs', exitCode: 1, timedOut: false, network: ['connect 127.0.0.1:6379'],
+    outcomes: { tests: [{ titles: ['adds'], status: 'passed', message: '' }, { titles: ['pings'], status: 'failed', message: 'Error: connect EPERM 127.0.0.1:6379' }], suiteErrors: [] },
+    coverage: [dumpOf(TEXT.length, [fn('a', at('function a'), at('}\nexport const'))])] }];
+  const o = observeV8(m, runs, { root: '/r', readFile: () => TEXT, node: 'v22' });
+  assert.equal(o.granularity, 'test-file');
+  assert.deepEqual(o.outcome, { collected: 2, passed: 1, failed: 1, errors: 0, skipped: 0, xfailed: 0, xpassed: 0 });
+  assert.deepEqual(o.byTest['t.test.mjs:adds'].direct, { total: 2, observed: 1, missing: ['f.mjs:K.m'] });
+  assert.deepEqual(o.ran, { 'f.mjs:a': ['t.test.mjs'] });
+  assert.deepEqual(o.deniedBySandbox.map(d => [d.test, d.network, d.permission]), [['t.test.mjs:pings', ['connect 127.0.0.1:6379'], false]]);
+  assert.deepEqual([o.pairs, o.edges], [[], []], 'coverage has no caller -> callee pairs: no edge is marked observed');
+});
+
+test('observeV8: a file whose run ended cleanly but reported no test is not collected, never an error', () => {
+  const m = { symbols: SYMS.map(s => ({ group: 'prod', ...s })), tests: [{ id: 'e2e/login.spec.ts:logs in', file: 'e2e/login.spec.ts', direct: [] }], fixtureBindings: [] };
+  const runs = [{ file: 'e2e/login.spec.ts', exitCode: 0, timedOut: false, network: [], outcomes: { tests: [], suiteErrors: [] }, coverage: [] },
+    { file: 'src/a.test.ts', exitCode: 1, timedOut: false, network: [], outcomes: { tests: [], suiteErrors: [] }, coverage: [] }];
+  const o = observeV8(m, runs, { root: '/r', readFile: () => TEXT, node: 'v22' });
+  assert.deepEqual(o.notCollected, [{ file: 'e2e/login.spec.ts', tests: 1 }]);
+  assert.deepEqual([o.summary.directLinksPerTest.tests, o.byTest['e2e/login.spec.ts:logs in']], [0, undefined], 'its tests never ran: out of the share');
+  assert.equal(o.outcome.errors, 1, 'a run that failed with no report is still an error');
+  assert.deepEqual(o.failures.map(f => f.nodeid), ['src/a.test.ts']);
+});
+
+/* ---------------- end to end on fixtures/trace-js ---------------- */
+
+const mineFixture = repo => {
+  const out = join(scratch(), 'out');
+  const r = tool('mine.mjs', repo, '--out', out);
+  assert.equal(r.status, 0, r.stderr);
+  return out;
+};
+const read = (out, f) => JSON.parse(readFileSync(join(out, f), 'utf8'));
+const trace = (out, cmd, ...flags) => tool('trace.mjs', '--codemap', join(out, 'codemap.json'), '--test-command', cmd, OPT_IN, ...flags);
+
+test('node --test on the fixture runs sandboxed, one run per test file: 4 pass, the socket test is denied', { skip }, () => {
+  const repo = gitRepo(REPO), out = mineFixture(repo), before = files(repo), codemap = readFileSync(join(out, 'codemap.json'), 'utf8');
+  const r = trace(out, 'node --test');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(files(repo), before, 'nothing is written inside the repo');
+  assert.equal(readFileSync(join(out, 'codemap.json'), 'utf8'), codemap, 'the code map is never edited');
+  assert.equal(t.optIn.command, 'node --test');
+  assert.equal(t.runner, 'node-test');
+  assert.deepEqual(t.ranFiles, t.files);
+  assert.deepEqual(t.deniedBySandbox.map(d => [d.nodeid, d.network]), [['test/net.test.mjs::ping reaches the cache', ['connect 127.0.0.1:6379']]]);
+  assert.equal(t.summary.unmappedFunctions, 0, 'every named function that ran is a code-map symbol');
+  assertGolden('trace-js', { granularity: t.granularity, outcome: t.outcome, byFile: Object.fromEntries(Object.entries(t.byFile).map(([f, v]) => [f, v.ran.join(', ')])),
+    byTest: Object.fromEntries(Object.entries(t.byTest).map(([k, v]) => [k, `${v.status}: ${v.direct.observed}/${v.direct.total}`])),
+    directLinksPerTest: t.summary.directLinksPerTest, fixtureLinks: t.summary.fixtureLinks, functionsRan: t.summary.functionsRan });
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+test('the repo\'s node_modules is linked into the copy read-only: a test can import from it but not write to it', { skip }, () => {
+  const repo = realpathSync(gitRepo(REPO));
+  mkdirSync(join(repo, 'node_modules', 'pad'), { recursive: true });
+  writeFileSync(join(repo, 'node_modules', 'pad', 'package.json'), '{ "name": "pad", "main": "index.js" }');
+  writeFileSync(join(repo, 'node_modules', 'pad', 'index.js'), "module.exports = s => '[' + s + ']';\n");
+  writeFileSync(join(repo, '.gitignore'), 'node_modules\n');
+  writeFileSync(join(repo, 'test', 'pad.test.mjs'), ["import { test } from 'node:test';", "import assert from 'node:assert/strict';", "import { writeFileSync } from 'node:fs';",
+    "import pad from 'pad';", '', "test('pads from node_modules', () => { assert.equal(pad('x'), '[x]'); });", '',
+    "test('cannot write into node_modules', () => { writeFileSync(new URL('../node_modules/pad/evil.js', import.meta.url), 'x'); });", ''].join('\n'));
+  git(repo, 'add', '-A');
+  const out = mineFixture(repo);
+  const r = trace(out, 'node --test test/pad.test.mjs');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(Object.fromEntries(Object.entries(t.byTest).map(([k, v]) => [k.split(':').pop(), v.status])), { 'pads from node_modules': 'passed', 'cannot write into node_modules': 'failed' });
+  assert.deepEqual(t.deniedBySandbox.map(d => [d.nodeid.split('::').pop(), d.permission]), [['cannot write into node_modules', true]]);
+  assert.deepEqual(readdirSync(join(repo, 'node_modules', 'pad')).sort(), ['index.js', 'package.json']);
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+test('a workspace package linked from node_modules into the repo is imported from the copy, not the hidden repo', { skip }, () => {
+  const repo = realpathSync(gitRepo(REPO));
+  mkdirSync(join(repo, 'packages', 'shared'), { recursive: true });
+  writeFileSync(join(repo, 'packages', 'shared', 'package.json'), '{ "name": "@app/shared", "main": "index.js" }');
+  writeFileSync(join(repo, 'packages', 'shared', 'index.js'), "function shout(s) { return s + '!'; }\nmodule.exports = shout;\n");
+  mkdirSync(join(repo, 'node_modules', '@app'), { recursive: true });
+  symlinkSync('../../packages/shared', join(repo, 'node_modules', '@app', 'shared'));
+  writeFileSync(join(repo, '.gitignore'), 'node_modules\n');
+  writeFileSync(join(repo, 'test', 'ws.test.mjs'), ["import { test } from 'node:test';", "import assert from 'node:assert/strict';", "import shout from '@app/shared';", '',
+    "test('imports a workspace package', () => { assert.equal(shout('x'), 'x!'); });", ''].join('\n'));
+  git(repo, 'add', '-A');
+  const out = mineFixture(repo);
+  const r = trace(out, 'node --test test/ws.test.mjs');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(Object.values(t.byTest).map(v => v.status), ['passed']);
+  assert.deepEqual(t.deniedBySandbox, []);
+  assert.deepEqual(t.ran['packages/shared/index.js:shout'], ['test/ws.test.mjs'], 'the package ran from the copy, so it maps onto the code map');
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+// a stand-in for jest, installed in the repo's node_modules: like jest (and vitest), it compiles each file it loads through
+// node:vm with an inline source map, in jest's module wrapper (`Object.<anonymous>`, opened on the file's first line and
+// closed after the map), then writes jest's --json report
+const FAKE_JEST = `#!/usr/bin/env node
+const vm = require('node:vm'), fs = require('node:fs'), path = require('node:path');
+const argv = process.argv.slice(2), file = path.resolve(argv[argv.indexOf('--runTestsByPath') + 1]);
+const load = f => {
+  const src = fs.readFileSync(f, 'utf8');
+  const map = { version: 3, sources: [f], names: [], mappings: 'AAAA' + ';AACA'.repeat(src.split('\\n').length - 1) };
+  const code = '({"Object.<anonymous>":function(module,exports,require){' + src
+    + '\\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,' + Buffer.from(JSON.stringify(map)).toString('base64') + '\\n}});';
+  const module = { exports: {} };
+  new vm.Script(code, { filename: f }).runInThisContext()['Object.<anonymous>'](module, module.exports,
+    r => r.startsWith('.') ? load(path.resolve(path.dirname(f), r.endsWith('.js') ? r : r + '.js')) : require(r));
+  return module.exports;
+};
+const tests = [], stack = [];
+global.describe = (title, fn) => { stack.push({ title, hooks: [] }); fn(); stack.pop(); };
+global.beforeEach = fn => stack.at(-1).hooks.push(fn);
+global.it = (title, fn) => tests.push({ titles: stack.map(s => s.title), title, hooks: stack.flatMap(s => s.hooks), fn });
+global.it.skip = title => tests.push({ titles: stack.map(s => s.title), title, skip: true });
+load(file);
+const results = tests.map(t => { if (t.skip) return { ancestorTitles: t.titles, title: t.title, status: 'pending', failureMessages: [] }; try { t.hooks.forEach(h => h()); t.fn(); return { ancestorTitles: t.titles, title: t.title, status: 'passed', failureMessages: [] }; }
+  catch (e) { return { ancestorTitles: t.titles, title: t.title, status: 'failed', failureMessages: [String(e)] }; } });
+const failed = results.some(r => r.status === 'failed');
+fs.writeFileSync(argv.find(a => a.startsWith('--outputFile=')).slice(13), JSON.stringify({ testResults: [{ name: file, status: failed ? 'failed' : 'passed', assertionResults: results }] }));
+process.exitCode = failed ? 1 : 0;
+`;
+
+const jestRepo = () => {
+  const repo = realpathSync(gitRepo());
+  mkdirSync(join(repo, 'src')); mkdirSync(join(repo, 'node_modules', 'jest'), { recursive: true }); mkdirSync(join(repo, 'node_modules', '.bin'));
+  writeFileSync(join(repo, 'node_modules', 'jest', 'bin.js'), FAKE_JEST);
+  symlinkSync('../jest/bin.js', join(repo, 'node_modules', '.bin', 'jest'));
+  writeFileSync(join(repo, '.gitignore'), 'node_modules\n');
+  writeFileSync(join(repo, 'package.json'), '{ "name": "shapes", "devDependencies": { "jest": "29" } }\n');
+  return repo;
+};
+
+test('jest-style transformed code (compiled through node:vm with an inline source map) is placed through that map: a method whose name its file shares, an anonymous hook', { skip }, () => {
+  const repo = jestRepo();
+  writeFileSync(join(repo, 'src', 'shapes.js'), ['class Square {', '  constructor(s) { this.s = s; }', '  area() { return this.s * this.s; }', '}',
+    'class Circle {', '  constructor(r) { this.r = r; }', '  area() { return 3 * this.r * this.r; }', '}', 'module.exports = { Square, Circle };', ''].join('\n'));
+  writeFileSync(join(repo, 'src', 'shapes.test.js'), ["const assert = require('node:assert');", "const { Square } = require('./shapes');", "describe('Square', () => {", '  let sq;',
+    '  beforeEach(() => { sq = new Square(2); });', "  it('has an area', () => { assert.equal(sq.area(), 4); });", "  it('keeps its side', () => { assert.equal(sq.s, 2); });", '});', ''].join('\n'));
+  git(repo, 'add', '-A');
+  const out = mineFixture(repo);
+  const r = trace(out, 'npx jest');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(Object.values(t.byTest).map(v => v.status), ['passed', 'passed']);
+  assert.deepEqual(t.byTest['src/shapes.test.js:Square > has an area'].direct.missing, [], 'Square.area ran, though Circle has an area too');
+  assert.equal(t.ran['src/shapes.js:Circle.area'], undefined, 'the other area never ran');
+  assert.deepEqual(t.summary.fixtureLinks, { observed: 2, total: 2 }, 'the anonymous beforeEach ran for both tests');
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+test('a frontend with its own package.json and node_modules (frontend/) is traced from that package: its runner, its paths', { skip }, () => {
+  const repo = realpathSync(gitRepo());
+  const fe = join(repo, 'frontend');
+  mkdirSync(join(fe, 'src'), { recursive: true }); mkdirSync(join(fe, 'node_modules', 'jest'), { recursive: true }); mkdirSync(join(fe, 'node_modules', '.bin'));
+  writeFileSync(join(fe, 'node_modules', 'jest', 'bin.js'), FAKE_JEST);
+  symlinkSync('../jest/bin.js', join(fe, 'node_modules', '.bin', 'jest'));
+  writeFileSync(join(repo, '.gitignore'), 'node_modules\n');
+  writeFileSync(join(fe, 'package.json'), '{ "name": "frontend", "devDependencies": { "jest": "29" } }\n');
+  writeFileSync(join(fe, 'src', 'price.js'), 'function withTax(p) { return p * 2; }\nfunction round(p) { return Math.round(p); }\nmodule.exports = { withTax, round };\n');
+  writeFileSync(join(fe, 'src', 'price.test.js'), ["const assert = require('node:assert');", "const { withTax } = require('./price');", "it('adds tax', () => { assert.equal(withTax(2), 4); });", ''].join('\n'));
+  writeFileSync(join(fe, 'src', 'round.test.js'), ["const assert = require('node:assert');", "const { round } = require('./price');", "it('rounds', () => { assert.equal(round(1.2), 1); });", ''].join('\n'));
+  git(repo, 'add', '-A');
+  const out = mineFixture(repo);
+  let r = trace(out, 'npx jest');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  let t = read(out, 'trace.json');
+  assert.deepEqual(t.files, ['frontend/src/price.test.js', 'frontend/src/round.test.js']);
+  assert.deepEqual(Object.fromEntries(Object.entries(t.byTest).map(([k, v]) => [k, v.status])), { 'frontend/src/price.test.js:adds tax': 'passed', 'frontend/src/round.test.js:rounds': 'passed' });
+  assert.deepEqual(t.ran['frontend/src/price.js:withTax'], ['frontend/src/price.test.js']);
+  r = trace(out, 'npx jest src/price');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  t = read(out, 'trace.json');
+  assert.deepEqual(t.files, ['frontend/src/price.test.js'], 'a path is read from the package, as jest run there reads it');
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+test('jest\'s module wrapper, which runs once per file, is no function of the file: a class on line 1 constructed only in a skipped test never ran', { skip }, () => {
+  const repo = jestRepo();
+  writeFileSync(join(repo, 'src', 'units.js'), ['class Pound {', '  constructor(lb) { this.lb = lb; }', '}', 'function kilos(lb) { return lb * 0.45; }', 'module.exports = { Pound, kilos };', ''].join('\n'));
+  writeFileSync(join(repo, 'src', 'units.test.js'), ["const assert = require('node:assert');", "const { Pound, kilos } = require('./units');", "describe('units', () => {",
+    "  it('converts', () => { assert.equal(kilos(2), 0.9); });", "  it.skip('makes a pound', () => { assert.equal(new Pound(1).lb, 1); });", '});', ''].join('\n'));
+  git(repo, 'add', '-A');
+  const out = mineFixture(repo);
+  const r = trace(out, 'npx jest');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(Object.values(t.byTest).map(v => v.status).sort(), ['passed', 'skipped']);
+  assert.deepEqual(t.ran['src/units.js:kilos'], ['src/units.test.js']);
+  assert.equal(t.ran['src/units.js:Pound.constructor'], undefined, 'no Pound was ever built');
+  assert.deepEqual(t.byTest['src/units.test.js:units > makes a pound'].direct.missing, ['src/units.js:Pound.constructor']);
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+// a stand-in for vitest, installed in the repo's node_modules: like vite, it bundles its config into
+// node_modules/.vite-temp (and removes the file, leaving the dir); like vitest --pool=threads, it runs the test file in a
+// worker thread it terminates once the results are in, then writes vitest's json report
+const FAKE_VITEST = `#!/usr/bin/env node
+const fs = require('node:fs'), path = require('node:path'), { Worker } = require('node:worker_threads');
+const argv = process.argv.slice(2), file = path.resolve(argv.at(-1));
+const temp = path.join(process.cwd(), 'node_modules', '.vite-temp'), cfg = path.join(temp, 'vitest.config.mjs.timestamp-1.mjs');
+fs.mkdirSync(temp, { recursive: true }); fs.writeFileSync(cfg, 'export default {};'); fs.rmSync(cfg);
+const worker = new Worker(\`
+const { parentPort, workerData } = require('node:worker_threads');
+const tests = [];
+global.test = (title, fn) => tests.push({ title, fn });
+require(workerData);
+(async () => {
+  const results = [];
+  for (const t of tests) try { await t.fn(); results.push({ ancestorTitles: [], title: t.title, status: 'passed', failureMessages: [] }); }
+    catch (e) { results.push({ ancestorTitles: [], title: t.title, status: 'failed', failureMessages: [String(e)] }); }
+  parentPort.postMessage(results);
+  setInterval(() => {}, 1000);
+})();\`, { eval: true, workerData: file });
+worker.once('message', async results => {
+  await worker.terminate();
+  const failed = results.some(r => r.status === 'failed');
+  fs.writeFileSync(argv.find(a => a.startsWith('--outputFile=')).slice(13), JSON.stringify({ testResults: [{ name: file, status: failed ? 'failed' : 'passed', assertionResults: results }] }));
+  process.exitCode = failed ? 1 : 0;
+});
+`;
+const vitestRepo = (bin, tests) => {
+  const repo = realpathSync(gitRepo());
+  mkdirSync(join(repo, 'src')); mkdirSync(join(repo, 'node_modules', 'vitest'), { recursive: true }); mkdirSync(join(repo, 'node_modules', '.bin'));
+  writeFileSync(join(repo, 'node_modules', 'vitest', 'bin.js'), bin);
+  symlinkSync('../vitest/bin.js', join(repo, 'node_modules', '.bin', 'vitest'));
+  writeFileSync(join(repo, '.gitignore'), 'node_modules\n');
+  writeFileSync(join(repo, 'package.json'), '{ "name": "api", "devDependencies": { "vitest": "3" } }\n');
+  writeFileSync(join(repo, 'src', 'add.js'), 'function add(a, b) { return a + b; }\nmodule.exports = { add };\n');
+  writeFileSync(join(repo, 'src', 'add.test.js'), ["const assert = require('node:assert');", "const { add } = require('./add');", ...tests, ''].join('\n'));
+  git(repo, 'add', '-A');
+  return repo;
+};
+
+test('vitest after an ordinary local run (an empty node_modules/.vite-temp left behind) still runs the tests: vite\'s cache dirs are the copy\'s own, writable', { skip }, () => {
+  const repo = vitestRepo(FAKE_VITEST, ["test('adds', () => { assert.equal(add(1, 2), 3); });"]);
+  mkdirSync(join(repo, 'node_modules', '.vite-temp'));
+  const out = mineFixture(repo);
+  const r = trace(out, 'npx vitest run');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(Object.values(t.byTest).map(v => v.status), ['passed']);
+  assert.deepEqual(t.ran['src/add.js:add'], ['src/add.test.js']);
+  assert.deepEqual(readdirSync(join(repo, 'node_modules', '.vite-temp')), [], 'nothing is written into the repo\'s own cache dir');
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+test('vitest: the direct-link share counts only the tests the runner collected; an e2e spec its config leaves out is listed as not collected', { skip }, () => {
+  // like vitest with an `include` that leaves e2e/ out: an e2e spec it is handed reports no test and exits 0
+  const bin = FAKE_VITEST.replace("const temp =", "if (file.includes('/e2e/')) { fs.writeFileSync(argv.find(a => a.startsWith('--outputFile=')).slice(13), JSON.stringify({ testResults: [] })); return; }\nconst temp =");
+  const repo = vitestRepo(bin, ["test('adds', () => { assert.equal(add(1, 2), 3); });"]);
+  mkdirSync(join(repo, 'e2e'));
+  writeFileSync(join(repo, 'e2e', 'add.spec.js'), ["const { add } = require('../src/add');", "test('adds in the browser', () => { add(1, 1); });", "test('adds again', () => { add(2, 2); });", ''].join('\n'));
+  git(repo, 'add', '-A');
+  const out = mineFixture(repo);
+  const r = trace(out, 'npx vitest run');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(t.notCollected, [{ file: 'e2e/add.spec.js', tests: 2 }]);
+  assert.deepEqual([t.summary.directLinksPerTest.tests, t.summary.directLinksPerTest.observed, t.summary.directLinksPerTest.total], [1, 1, 1]);
+  assert.deepEqual(Object.keys(t.byTest), ['src/add.test.js:adds'], 'a test in a file the runner did not collect never ran');
+  assert.match(r.stdout, /direct links whose target ran in their test's file 1\/1 \(100\.0%, 1 tests\)/);
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+test('vitest: a fetch the sandbox refuses in a worker thread the runner terminates is listed as denied, with its target', { skip }, () => {
+  const repo = vitestRepo(FAKE_VITEST, ["test('adds', () => { assert.equal(add(1, 2), 3); });", "test('reaches the api', async () => { await fetch('http://127.0.0.1:6379/'); });"]);
+  const out = mineFixture(repo);
+  const r = trace(out, 'npx vitest run');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(Object.fromEntries(Object.entries(t.byTest).map(([k, v]) => [k.split(':').pop(), v.status])), { adds: 'passed', 'reaches the api': 'failed' });
+  assert.deepEqual(t.deniedBySandbox.map(d => [d.nodeid, d.network]), [['src/add.test.js::reaches the api', ['connect 127.0.0.1:6379']]]);
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+test('exit 2: a run in which no test file reported a test (every file failed at startup) is no trace, though V8 wrote coverage', { skip }, () => {
+  const repo = vitestRepo("#!/usr/bin/env node\nconsole.error('Error: EPERM: operation not permitted');\nprocess.exit(1);\n", ["test('adds', () => { assert.equal(add(1, 2), 3); });"]);
+  const out = mineFixture(repo);
+  const r = trace(out, 'npx vitest run');
+  assert.equal(r.status, 2, r.stderr + r.stdout);
+  assert.match(r.stderr, /ran no test/);
+  assert.deepEqual(readdirSync(out).sort(), ['codemap.json', 'codemap.md', 'trace.log']);
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+test('exit 1: npx jest is refused when the repo has no jest installed; tracing never installs one', { skip }, () => {
+  const out = mineFixture(REPO);
+  const r = trace(out, 'npx jest');
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /jest is not installed in the repo .*never installs packages/);
+  assert.deepEqual(readdirSync(out).sort(), ['codemap.json', 'codemap.md']);
+  cleanup(join(out, '..'));
+});
+
+test('exit 2: no test file matches the runner\'s pattern under the paths given', { skip }, () => {
+  const out = mineFixture(REPO);
+  const r = trace(out, 'node --test nowhere/');
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /no test file in the code map matches node-test/);
+  cleanup(join(out, '..'));
+});

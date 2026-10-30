@@ -10,7 +10,7 @@
 # - no writes outside scratch: / is mounted read-only, the dirs that hold host state (/run, /tmp, /var/tmp,
 #   home dirs) and the hidden paths (the user's home folder and the original repo) are replaced by empty
 #   tmpfs mounts, so nothing in them can be read, and <scratch> is the only writable host path;
-# - the read-only paths (the interpreter and its virtualenv) are mounted back over the hidden dirs;
+# - the read-only paths (the interpreter and its virtualenv, or node and the repo's node_modules) are mounted back over the hidden dirs;
 #   lib/sandbox.mjs never passes one that contains <scratch> or a hidden path;
 # - new user, pid, ipc, uts and cgroup namespaces. No --die-with-parent: trace.mjs's time limit signals the whole
 #   process group, and the collector must outlive bwrap long enough to write the partial trace.

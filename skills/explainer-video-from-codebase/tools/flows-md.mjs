@@ -65,7 +65,7 @@ export function renderFlows(v, problems, estimate, r) {
   for (const s of v.series) {
     const x = byId.get(s.id);
     out.push(`### ${x.kind} \`${x.id}\`: ${x.title}`, '',
-      `${x.from ? `from \`${x.from}\`${x.entry?.path ? ` (${x.entry.method} ${x.entry.path})` : x.entry?.key ? ` (${x.entry.key})` : ''} · ` : ''}group ${x.group} · ${x.rank || 'no rank'} · why: ${s.why}`, '',
+      `${x.from ? `from \`${x.from}\`${x.entry?.path ? ` (${[x.entry.method, x.entry.path].filter(Boolean).join(' ')})` : x.entry?.key ? ` (${x.entry.key})` : ''} · ` : ''}group ${x.group} · ${x.rank || 'no rank'} · why: ${s.why}`, '',
       table(['#', 'hop', 'span', 'reached by', 'rule / evidence', 'cited tests', 'notes'], x.hops.map(h => [h.index, code(h.symbol), span(h), reached(h), evidence(h), tests(h),
         [h.crossing ? 'crossing' : '', h.break ? 'break' : '', h.uses ? `uses ${h.uses}` : '', h.exercises ? `exercises ${h.exercises}` : '', h.selectedBy ? `selected only by an unverified out-of-repo claim: ${h.selectedBy.outOfRepo}` : ''].filter(Boolean).join(', ')])), '');
     if (x.segments.length) out.push('Segments:', '', table(['root', 'reached from', 'via', 'own', 'decision', 'say / why'], x.segments.map(y => [code(short(y.root)), y.from ? code(short(y.from)) : '(entry)', y.kind || '', y.own, y.decision + (y.rule ? ` (${y.rule})` : ''), y.say || y.why || ''])), '');

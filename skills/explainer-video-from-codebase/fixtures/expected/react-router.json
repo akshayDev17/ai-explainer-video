@@ -1,0 +1,11 @@
+{
+  "entries": [
+    "ui-route src/Layout.tsx:Layout /",
+    "ui-route src/pages/Audit.tsx:Audit /audit",
+    "ui-route src/pages/Dashboard.tsx:Dashboard /",
+    "ui-route src/pages/Reports.tsx:Reports /reports",
+    "ui-route src/settings/pages.tsx:Profile /settings/profile",
+    "ui-route src/settings/pages.tsx:SettingsHome /settings"
+  ],
+  "links": []
+}

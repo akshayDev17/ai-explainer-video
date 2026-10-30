@@ -32,10 +32,12 @@ jobs:
           [ ${#files[@]} -gt 0 ] || { echo "no source files matched — the layout moved"; exit 1; }
           for f in "${files[@]}"; do node --check "$f"; done
           echo "parsed ${#files[@]} files"
-      # trace.mjs's payload is not JavaScript: the Python collector and plugin, and the bwrap profile.
+      # trace.mjs's payload outside the .mjs glob: the Python collector and plugin, the Node network preload, and the
+      # bwrap profile.
       - run: |
           set -euo pipefail
           python3 -m py_compile skills/explainer-video-from-codebase/tools/trace/python/*.py
+          for f in skills/explainer-video-from-codebase/tools/trace/js/*.cjs; do node --check "$f"; done
           sh -n skills/explainer-video-from-codebase/tools/trace/sandbox/linux-bwrap.sh
       - run: echo "all tools parse"
 
@@ -82,9 +84,10 @@ jobs:
         with: { node-version: "22" }
       - run: npm test
 
-  # trace.mjs end to end in the Linux sandbox: the bwrap profile probed from inside, the fixture suite traced
-  # (its socket test denied), the home folder and the original repo unreadable, a virtualenv inside the repo,
-  # unittest, the time limit, and the refusals. npm test skips the sandboxed half where
+  # trace.mjs end to end in the Linux sandbox: the bwrap profile probed from inside, the fixture suites traced
+  # (pytest and node --test; each socket test denied), the home folder and the original repo unreadable, a
+  # virtualenv and a node_modules inside the repo, unittest, the time limit, and the refusals. npm test skips the
+  # sandboxed half where
   # no sandbox starts (as on the job above); here FM_TRACE_REQUIRE_SANDBOX turns a skip into a failure. The
   # network is used only to install bwrap and pytest; the traced run itself has none.
   trace-fixture:
@@ -103,7 +106,7 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
           python3 -c 'import pytest' || python3 -m pip install --break-system-packages pytest
           bwrap --version
-      - run: node --test test/trace.test.mjs
+      - run: node --test test/trace.test.mjs test/trace-js.test.mjs
         env: { FM_TRACE_REQUIRE_SANDBOX: "1" }
 
   # skills/explainer-video-from-codebase/vendor/tree-sitter is COPIED from the pinned

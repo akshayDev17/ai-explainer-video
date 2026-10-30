@@ -472,7 +472,7 @@ const readsConfig = (g, alias) => CFG_GUARD.test(g.text) || (g.text.match(/[A-Za
 export function addEdge(py, from, to, kind, line, extra = {}) {
   if (!from || !to || from === to) return;
   const e = { from, to, kind, line, ...extra };
-  const gf = py.symbols.get(from)?.group || py.modules.get(from.split(':')[0])?.group, gt = py.symbols.get(to)?.group;
+  const gf = py.symbols.get(from)?.group || py.modules.get(from.split(':')[0])?.group, gt = py.symbols.get(to)?.group ?? py.groupOf?.(to);   // a route in another language
   if (gf && gt && gf !== gt) e.groups = [gf, gt];
   py.edges.push(e);
 }

@@ -1,0 +1,7 @@
+{
+  // shared compiler options: the path aliases live here, reached through `extends`
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": { "@core/*": ["src/core/*"], },
+  },
+}

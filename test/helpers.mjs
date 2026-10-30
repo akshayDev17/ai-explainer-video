@@ -67,7 +67,7 @@ export const edgesFrom = (m, from) => m.edges.filter(e => e.from === from);
 // the rule-produced part of a code map, as sorted lines: what a pack's golden file pins
 export function ruleView(m) {
   return {
-    entries: m.entries.map(e => `${e.kind} ${e.id}${e.path ? ` ${e.method} ${e.path}` : e.key ? ` ${e.key}` : ''}`).sort(),
+    entries: m.entries.map(e => `${e.kind} ${e.id}${e.path ? ` ${[e.method, e.path].filter(Boolean).join(' ')}` : e.key ? ` ${e.key}` : ''}`).sort(),
     links: m.edges.filter(e => e.rule).map(e => `${e.from} -> ${e.to} ${e.kind} ${e.rule}${e.group ? ` [${e.group}]` : ''}`).sort(),
   };
 }

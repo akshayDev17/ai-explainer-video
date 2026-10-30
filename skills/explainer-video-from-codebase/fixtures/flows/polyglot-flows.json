@@ -1,0 +1,46 @@
+{
+ "series": [
+  { "flow": "import", "why": "prod #2: a button in the browser that reaches the Python import route" },
+  { "flow": "search", "why": "prod #1: the search page and both backend searches it calls" },
+  { "flow": "eval-search", "why": "eval #1: the harness that grades the search route over HTTP" }
+ ],
+ "skipped": [
+  { "entry": "frontend/src/pages/JobPage.tsx:JobPage", "rank": "prod #3", "why": "a status read with no logic beyond the route it calls" }
+ ],
+ "flows": [
+  { "id": "import", "title": "Importing a shelf's books from the browser",
+   "from": "frontend/src/pages/ImportPage.tsx:ImportPage",
+   "hops": [
+    { "symbol": "frontend/src/pages/ImportPage.tsx:ImportPage",
+     "pinnedBy": [ { "test": "frontend/src/pages/ImportPage.test.tsx:starts an import when the button is pressed", "say": "pressing Import starts an import of shelf s" } ] },
+    { "symbol": "frontend/src/pages/ImportPage.tsx:ImportPage.<locals>.go" },
+    { "symbol": "frontend/src/api/catalog.ts:importBooks" },
+    { "symbol": "backend.app:import_shelf_books" },
+    { "symbol": "backend.imports:queue_import" }
+   ],
+   "segments": { "keep": [ "backend.app:import_shelf_books" ] } },
+  { "id": "search", "title": "Searching from the search page",
+   "from": "frontend/src/pages/SearchPage.tsx:SearchPage",
+   "hops": [
+    { "symbol": "frontend/src/pages/SearchPage.tsx:SearchPage" },
+    { "symbol": "frontend/src/pages/SearchPage.tsx:SearchPage.<locals>.run" },
+    { "symbol": "frontend/src/api/catalog.ts:searchBooks" },
+    { "symbol": "backend.app:search_books",
+     "pinnedBy": [ { "test": "backend.test_app:test_search_route_returns_hits", "say": "the route answers a search with status 200" } ] },
+    { "symbol": "backend.search:find_books",
+     "pinnedBy": [ { "test": "backend.test_app:test_hits_are_ranked_best_first", "say": "the best hit comes first" } ] },
+    { "symbol": "frontend/src/api/catalog.ts:searchReviews",
+     "pinnedBy": [ { "test": "frontend/src/api/catalog.test.ts:catalog api > posts a review search", "say": "a review search posts and returns the response" } ] },
+    { "symbol": "backend.app:search_reviews" }
+   ],
+   "segments": { "keep": [ "backend.app:search_books" ], "mention": [ { "root": "backend.app:search_reviews", "say": "the review search runs the same way on its own route" } ] } },
+  { "id": "eval-search", "title": "How the harness grades search",
+   "from": "backend.evals.run_eval:<main>",
+   "hops": [
+    { "symbol": "backend.evals.run_eval:<main>" },
+    { "symbol": "backend.evals.run_eval:run_search_eval", "exercises": "search" },
+    { "symbol": "backend.evals.run_eval:score" }
+   ] }
+ ],
+ "triage": { "excluded": [ { "match": "backend.app:get_import_job", "why": "the job page we skip is its only caller" } ] }
+}

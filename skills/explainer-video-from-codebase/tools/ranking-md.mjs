@@ -3,7 +3,7 @@
    config-dependent dispatch points and config-guarded branches. No row is marked chosen: the agent proposes. */
 const short = id => id.endsWith(':<main>') ? id.split(':')[0].split('.').pop() + ':<main>' : id.split(':').pop();
 const table = (head, rows) => rows.length ? [`| ${head.join(' | ')} |`, `|${head.map(() => '---').join('|')}|`, ...rows.map(r => `| ${r.map(c => String(c ?? '').replace(/\|/g, '\\|')).join(' | ')} |`)].join('\n') : '_none_';
-const what = x => x.path ? `${x.method} ${x.path}` : x.key || '';
+const what = x => x.path ? [x.method, x.path].filter(Boolean).join(' ') : x.key || '';
 const pct = x => `${Math.round(100 * x)}%`;
 
 // a dispatch point whose targets depend on config: narrowed by a config read, picked by selectors, or a collaborator
