@@ -92,7 +92,7 @@ test('--estimate prints the plan without an approval and writes nothing', () => 
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /estimate only: no flows\.approved\.json/);
   assert.match(r.stdout, /\*\*Estimate only: this flow list is not approved\.\*\*/);
-  assert.match(r.stdout, /## 6 videos, 23\.8 min/);
+  assert.match(r.stdout, /## 6 videos, 17\.1 min/);
   assert.equal(existsSync(join(dir, 'plan.json')), false);
 });
 
@@ -107,7 +107,9 @@ test('the plan: an overview, then each series item in order, split at a break', 
   assert.deepEqual(p.videos[2].sectionSpans.map(s => s.title), ['notify_member', 'format_notice'], 'the break starts the second lending video');
   assert.deepEqual(p.forms, ['overview', 'flow', 'core']);
   assert.equal(p.model.maxVideoMin, 25);
-  assert.equal(p.model.calibrated, false);
+  assert.equal(p.model.calibrated, true);
+  assert.deepEqual(p.model.uncalibrated, ['boundary'], 'the pilot crossed no boundary');
+  assert.equal(p.model.basis.narratedLines, 96);
   assert.equal(p.approval.by, 'user');
   assert.equal(p.approval.flowsHash, json(join(dir, 'flows.approved.json')).flowsHash);
 });
@@ -142,21 +144,21 @@ test('coverage (C4): every kept hop is assigned to exactly one video', () => {
 test('the cost model: frame, hops by narrated lines, crossings, taught branches, cited tests', () => {
   // lending part 1: hops 1-7, two cited tests, the make_store branch; spans 2,10,2,2,4,5,2 lines → 1,5,1,1,2,3,1 narrated
   const v = p.videos[1];
-  assert.equal(v.words, 150 + 7 * 60 + 8 * (1 + 5 + 1 + 1 + 2 + 3 + 1) + 80 + 2 * 30);
+  assert.equal(v.words, 150 + 7 * 5 + 6 * (1 + 5 + 1 + 1 + 2 + 3 + 1) + 70 + 2 * 45);
   assert.deepEqual([v.evidence.crossings, v.evidence.branches, v.evidence.citedTests], [0, 1, 2]);
   assert.equal(p.videos[2].evidence.crossings, 1, 'the queue hand-off');
   assert.equal(v.minutes, +(Math.round(v.words / 153 * 60 * 1.1) / 60).toFixed(1));
   assert.match(readFileSync(join(dir, 'plan.md'), 'utf8'), /^# repo — code-flow video plan\n\nApproved by \*\*user\*\* at .*: "yes, plan these four"/);
-  assert.match(readFileSync(join(dir, 'plan.md'), 'utf8'), /\*\*uncalibrated\*\*/);
+  assert.match(readFileSync(join(dir, 'plan.md'), 'utf8'), /> Calibrated on 1 narrated pilot video \(8 hops, 96 narrated lines, .*Still \*\*uncalibrated\*\*: crossing 60/);
 });
 
 test('splitting under the cap: at the latest crossing, else at the overflowing hop', () => {
   const d = validated(f => { delete f.flows[0].hops[7].break; });
   approve(d);
   const lending = cap => { const r = plan(d, '--max-min', cap, '--force'); return json(join(d, 'plan.json')).videos.filter(v => v.group === 'lending').map(v => v.sectionSpans.map(s => s.hop)); };
-  assert.deepEqual(lending('10'), [[1, 2, 3, 4, 5, 6, 7, 8, 9]]);
-  assert.deepEqual(lending('7'), [[1, 2, 3, 4, 5, 6, 7], [8, 9]], 'at the queue crossing');
-  assert.deepEqual(lending('5'), [[1, 2, 3, 4, 5], [6, 7, 8, 9]], 'no crossing in the first piece: at the overflowing hop');
+  assert.deepEqual(lending('4'), [[1, 2, 3, 4, 5, 6, 7, 8, 9]]);
+  assert.deepEqual(lending('3.5'), [[1, 2, 3, 4, 5, 6, 7], [8, 9]], 'at the queue crossing');
+  assert.deepEqual(lending('2.5'), [[1, 2, 3, 4, 5], [6, 7, 8, 9]], 'no crossing in the first piece: at the overflowing hop');
 });
 
 test('exit 2 when a video cannot fit the cap: a hop is never split', () => {

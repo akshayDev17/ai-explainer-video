@@ -1,6 +1,8 @@
 /* Validated flows → videos (design §4.5): the cost model and the splitting rules, shared by flow-plan.mjs and by
-   apply-flows' estimate in the approval table. Every constant except WPM and EXPANSION (measured on coursework,
-   imported from its model.mjs) is an uncalibrated estimate until the pilot measures code videos.
+   apply-flows' estimate in the approval table. WPM and EXPANSION are measured on coursework (imported from its
+   model.mjs). FRAME, HOP_BASE, WPL, BRANCH and TEST are calibrated on one narrated pilot code video (CALIBRATION:
+   8 hops with 96 narrated lines spoken in 609 words, 2 taught branches in 135, 3 cited tests in 134, the frame in
+   154; 1032 words in all, 381.6 s of speech). BOUNDARY is still an estimate: the pilot crossed no boundary.
 
      words(video) = FRAME + Σ_hops (HOP_BASE + WPL × narrated(h)) + Σ_crossings BOUNDARY + Σ_taught branches BRANCH
                   + min(MAX_TESTS, cited tests) × TEST
@@ -13,8 +15,12 @@
    the series. */
 import { WPM, EXPANSION } from '../../../explainer-video-from-coursework/tools/model.mjs';
 
-export const MODEL = { wpm: WPM, expansion: EXPANSION, frame: 150, hopBase: 60, wpl: 8, lineCap: 22, narrate: 0.5, boundary: 60, branch: 80,
-  prompt: 12, test: 30, maxTests: 3, overview: 1000, calibrated: false };
+// what the calibration was measured on, in counts (one pilot video, 18 segments, 0 pause prompts)
+export const CALIBRATION = { videos: 1, segments: 18, hops: 8, narratedLines: 96, hopWords: 609, branches: 2, branchWords: 135,
+  citedTests: 3, testWords: 134, frameWords: 154, crossings: 0, pausePrompts: 0, words: 1032, speechSeconds: 381.6 };
+
+export const MODEL = { wpm: WPM, expansion: EXPANSION, frame: 150, hopBase: 5, wpl: 6, lineCap: 22, narrate: 0.5, boundary: 60, branch: 70,
+  prompt: 12, test: 45, maxTests: 3, overview: 1000, calibrated: true, uncalibrated: ['boundary'], basis: CALIBRATION };
 
 export const narratedLines = h => h.lines ? h.lines.reduce((a, [x, y]) => a + y - x + 1, 0) : Math.min(MODEL.lineCap, Math.ceil(MODEL.narrate * (h.end - h.start + 1)));
 const hopWords = h => MODEL.hopBase + MODEL.wpl * narratedLines(h);

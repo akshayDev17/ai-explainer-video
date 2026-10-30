@@ -24,7 +24,10 @@
      and ends between its end and the next line's onset (scene time, ±0.06 s, as
      resolve-beats measures). Only a pause segment (one whose script segment
      carries `pause`) may show lines outside a focus window; there are at most 3,
-     each with a badge.
+     each with a badge. A code scene names its segment (`segment: <key>`): its
+     acts are timed from that segment's window, and the code host plays a scene
+     that names none on the whole video's clock, where every window after the
+     first would be missed.
 
    Exit: 0 ok · 1 bad flags, no manifest, no scenes, no lines.json or no script · 2 drift · 3 a shown line
          outside every narration-synced focus window, or a pause rule broken
@@ -108,6 +111,7 @@ for (const { key, cfg } of scenes) {
   const hasBadge = acts.some(a => a.op === 'pause');
   if (isPause && !hasBadge) focus.push(`${key}: a pause segment shows no pause badge (add a \`pause\` act over the spoken prompt)`);
   if (!isPause && hasBadge) focus.push(`${key}: a pause badge on a segment whose narration does not ask for a pause`);
+  if (cfg.segment !== key) focus.push(`${key}: the scene ${cfg.segment == null ? 'names no segment' : `names segment "${cfg.segment}"`} (set \`segment: "${key}"\`): its acts are timed from this segment's window, and the code host plays them on that window only when the scene names it`);
 
   // the focus windows synced to this segment's narration; an unsynced one covers nothing
   const synced = new Map();   // panel id -> Set of 1-based panel lines

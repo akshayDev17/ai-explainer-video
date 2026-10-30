@@ -418,12 +418,14 @@ minutes merges with a neighbour of the same item when the two fit (never across 
 assigned to exactly one video; an orphan or a video over the cap exits 2. Re-planning when `plan.enriched.json`
 exists and the tree, candidates, flows, approval or cap changed exits 4 unless `--force`.
 
-The cost model (`lib/decompose.mjs`), every constant but WPM and EXPANSION (coursework's measured `model.mjs`)
-uncalibrated until the pilot:
+The cost model (`lib/decompose.mjs`). WPM and EXPANSION are coursework's measured `model.mjs`; FRAME, HOP_BASE,
+WPL, BRANCH and TEST are calibrated on one narrated pilot code video (8 hops, 96 narrated lines, 2 taught branches,
+3 cited tests, 1032 words; `CALIBRATION` holds the counts). BOUNDARY and the overview's words are still estimates:
+the pilot crossed no boundary and produced no overview.
 
 ```
-words   = FRAME 150 + Σ hops (HOP_BASE 60 + WPL 8 × narrated) + crossings × BOUNDARY 60
-        + taught branches × BRANCH 80 + min(3, cited tests) × TEST 30          (the overview: 1000 words)
+words   = FRAME 150 + Σ hops (HOP_BASE 5 + WPL 6 × narrated) + crossings × BOUNDARY 60
+        + taught branches × BRANCH 70 + min(3, cited tests) × TEST 45          (the overview: 1000 words)
 narrated = count(hop.lines) or min(22, ceil(0.5 × span lines))
 minutes  = words / 153 × 1.10
 ```
@@ -453,7 +455,10 @@ exit 2.
 Scene-code reads `numbers[]` for the number column and styles the `elided[]` lines apart. A panel with
 `numbers[]` takes one `focus` act per sentence (`{op: "focus", panel, lines: [1-based panel lines], from, to,
 narration}`), and a window that starts as the previous one ends keeps the dim; a coursework panel keeps its single
-focus act. A `{op: "pause", from, to, text?}` act shows the pause badge.
+focus act. A `{op: "pause", from, to, text?}` act shows the pause badge. A scene with `segment: "<key>"` is
+timed from that segment's window: the host (opened with `?work=`) reads the window from `timeline.js` and plays
+the scene at video time minus the window's start, and draws no progress bar unless `progress: true`; a named
+segment with no window throws. A coursework scene, with no `segment`, keeps the video clock and its own `total`.
 
 ## `excerpt-check.mjs` (C6)
 
@@ -467,7 +472,8 @@ focus act. A `{op: "pause", from, to, text?}` act shows the pause badge.
 - **focus, exit 3**: every shown non-blank line is in a focus act whose `narration` names lines of the segment in
   `lines.json` and whose window starts at the first line's onset and ends between the last line's end and the next
   line's onset (scene time = line time + `lead`, ±0.06 s). A pause segment (its script segment carries `pause`; it must be a code scene with panels) is exempt, must carry a `pause` act, and a video has at most 3;
-  a `pause` act on any other segment is an error.
+  a `pause` act on any other segment is an error. Every code scene names its own segment (`segment` equal to its
+  manifest key), since its acts are timed from that window.
 
 A pause segment's script carries `"pause": {"dwell": <s>}` with 0 < dwell ≤ 2, said out loud ("pause" in its
 text), with `pad` equal to the dwell; `script-check` adds the dwell to its estimate and errors on a `pad` that

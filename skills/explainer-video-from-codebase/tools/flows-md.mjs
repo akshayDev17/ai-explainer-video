@@ -43,7 +43,7 @@ export function renderFlows(v, problems, estimate, r) {
     table(['entry', 'kind', 'route / key', 'rank', 'status'], v.triage.entries.filter(t => t.group === 'dev').map(t => [code(short(t.id)), t.kind, t.route, t.rank ? `#${t.rank}` : '—', t.status || 'untriaged'])), '');
   if (estimate) {
     out.push(`### Estimate: ${estimate.videos.length} videos, ${estimate.totals.seriesMinutes} min (cap ${estimate.totals.capMinutes} min per video)`, '',
-      'From the cost model in `flow-plan --estimate`; every constant but the narration pace is uncalibrated until the pilot measures a code video.', '',
+      'From the cost model in `flow-plan --estimate`; calibrated on one pilot code video, except the crossing and overview constants.', '',
       table(['#', 'video', 'form', 'hops', 'cited tests', 'words', 'min'], estimate.videos.map(x => [x.index, x.title, x.form, x.evidence.hops ?? '—', x.evidence.citedTests ?? '—', x.words, x.minutes])), '');
   }
 

@@ -64,6 +64,16 @@ test('focus: an excerpt panel has one window per sentence, chained without flash
   assert.equal(CodeScenes.focusState(acts, 'r', true, 1), null);
 });
 
+test('clock: a coursework scene keeps the video clock and its own total; a scene naming its segment plays from that window', () => {
+  const TL = { total: 120, windows: { hook: { start: 0, end: 30 }, hop2: { start: 30, end: 75 } } };
+  const clock = (cfg, tl) => ({ ...CodeScenes.clockOf(cfg, tl) });   // out of the vm realm, for deepEqual
+  assert.deepEqual(clock({ total: 8 }, TL), { offset: 0, total: 8 });
+  assert.deepEqual(clock({ total: 8 }, undefined), { offset: 0, total: 8 }, 'no timeline is fine for a coursework scene');
+  assert.deepEqual(clock({ total: 45, segment: 'hop2' }, TL), { offset: 30, total: 120 });
+  assert.throws(() => CodeScenes.clockOf({ total: 45, segment: 'hop9' }, TL), /no window for it/);
+  assert.throws(() => CodeScenes.clockOf({ total: 45, segment: 'hop2' }, undefined), /no window for it/);
+});
+
 /* ---------------- scene-core: primitives.sequence ---------------- */
 // the smallest DOM the SVG helpers touch: elements record their attributes, children and text
 const node = tag => ({ tag, attrs: {}, children: [], textContent: '', setAttribute(k, v) { this.attrs[k] = String(v); }, appendChild(c) { this.children.push(c); return c; } });

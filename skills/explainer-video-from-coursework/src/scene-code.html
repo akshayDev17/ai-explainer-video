@@ -104,15 +104,24 @@
   var Q = new URLSearchParams(location.search);
   var NAME = Q.get('scene') || 'ocp-refactor';
   var WORK = Q.get('work') || '';
-  var s = document.createElement('script');
-  s.src = WORK ? WORK + '/scenes/' + NAME + '.js' : '../scenes/' + NAME + '.js';
-  s.onload = function () {
-    var cfg = window.SCENE_CONFIG;
-    var scene = window.CodeScenes.create({ root: document.getElementById('stage'), config: cfg });
-    window.renderAt = function (t) { scene.renderAt(t); return true; };
-    window.VIDEO_META = { width: 1920, height: 1080, fps: cfg.fps || 30, total: cfg.total };
-  };
-  document.head.appendChild(s);
+  // the measured timeline, when there is one: a scene naming its `segment` is timed from that window
+  function loadScene() {
+    var s = document.createElement('script');
+    s.src = WORK ? WORK + '/scenes/' + NAME + '.js' : '../scenes/' + NAME + '.js';
+    s.onload = function () {
+      var cfg = window.SCENE_CONFIG;
+      var clock = window.CodeScenes.clockOf(cfg, window.TIMELINE);
+      var scene = window.CodeScenes.create({ root: document.getElementById('stage'), config: cfg });
+      window.renderAt = function (t) { scene.renderAt(t - clock.offset); return true; };
+      window.VIDEO_META = { width: 1920, height: 1080, fps: cfg.fps || 30, total: clock.total };
+    };
+    document.head.appendChild(s);
+  }
+  var tlEl = document.createElement('script');
+  tlEl.src = WORK ? WORK + '/timeline.js' : 'timeline.js';
+  tlEl.onload = loadScene;
+  tlEl.onerror = loadScene;
+  document.head.appendChild(tlEl);
 </script>
 </body>
 </html>
