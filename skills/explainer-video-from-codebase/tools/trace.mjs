@@ -287,7 +287,7 @@ async function runJs({ copied, changedFiles, shown }) {
     mkdirSync(cov, { recursive: true });
     const env = {
       HOME: join(SCRATCH, 'home'), TMPDIR: join(SCRATCH, 'tmp'), PATH: `${dirname(exe)}:/usr/bin:/bin`,
-      NODE_V8_COVERAGE: cov, NODE_OPTIONS: `--require ${JSON.stringify(join(SCRATCH, 'trace', 'fmtrace-net.cjs'))}`,
+      NODE_V8_COVERAGE: cov, NODE_OPTIONS: ['fmtrace-net.cjs', 'fmtrace-srcmap.cjs'].map(f => `--require ${JSON.stringify(join(SCRATCH, 'trace', f))}`).join(' '),
       FM_TRACE_OUT: TRACE_OUT, FM_TRACE_FILE: file, CI: '1', NO_COLOR: '1', FORCE_COLOR: '0',
     };
     const argv = fileArgv({ runner, node: exe, bin, flags: passThrough(runner, testArgs), file, report: rep });
@@ -298,6 +298,10 @@ async function runJs({ copied, changedFiles, shown }) {
     if (runner === 'node-test') outcomes = parseTap(run.stdout);
     else { let json = null; try { json = JSON.parse(readFileSync(rep, 'utf8')); } catch {} outcomes = parseJestJson(json, COPY); }
     const coverage = readdirSync(cov).filter(f => f.endsWith('.json')).sort().flatMap(f => { try { return [JSON.parse(readFileSync(join(cov, f), 'utf8'))]; } catch { return []; } });
+    // the source maps of the scripts jest and vitest compiled through node:vm, which Node's dump does not record
+    const maps = readdirSync(TRACE_OUT).filter(f => /^srcmap-.*\.json$/.test(f)).flatMap(f => { try { return [JSON.parse(readFileSync(join(TRACE_OUT, f), 'utf8'))]; } catch { return []; } finally { rmSync(join(TRACE_OUT, f), { force: true }); } })
+      .filter(s => s.file === file);
+    for (const d of coverage) for (const s of maps) (d['source-map-cache'] ||= {})[s.url] ??= { lineLengths: s.lineLengths, data: s.data };
     const network = readdirSync(TRACE_OUT).filter(f => /^net-.*\.json$/.test(f)).flatMap(f => { try { return [JSON.parse(readFileSync(join(TRACE_OUT, f), 'utf8'))]; } catch { return []; } })
       .filter(n => n.file === file).flatMap(n => n.attempts);
     runs.push({ file, outcomes, coverage, network: [...new Set(network)], timedOut: run.timedOut, exitCode: run.status });

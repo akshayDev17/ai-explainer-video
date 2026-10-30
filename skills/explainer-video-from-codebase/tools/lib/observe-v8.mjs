@@ -4,11 +4,13 @@
    edge is marked observed; a direct test link counts as observed when its target ran in its test's file. It never
    removes or demotes an edge: the result is an overlay beside the code map, which is not edited.
 
-   A covered function is matched to a code-map symbol by its position when the script V8 ran is the file itself (plain
-   JavaScript), or the file with something appended (TypeScript with its types stripped in place, plus a sourceURL
-   comment) and every named function sits on a line of the file that names it; through the script's source map when
-   Node recorded one; and otherwise by name when exactly one symbol of that file has it. A named function that matches
-   nothing is counted, never guessed; an anonymous one (a callback inside a symbol) has nothing of its own to mark.
+   A covered function is matched to a code-map symbol through the script's source map when there is one (Node's own,
+   or the inline map of a script jest or vitest compiled through node:vm, which trace/js/fmtrace-srcmap.cjs records);
+   else by its position when the script V8 ran is the file itself (plain JavaScript), or the file with something
+   appended (TypeScript with its types stripped in place, plus a sourceURL comment) and every named function sits on a
+   line of the file that names it; and otherwise by name when exactly one symbol of that file has it. A named function
+   that matches nothing is counted, never guessed; an anonymous one (a callback inside a symbol) has nothing of its own
+   to mark.
    A file whose run ended cleanly but reported no test is listed as not collected (the runner's own config leaves it
    out, or it defines none), never as an error. */
 import { fileURLToPath } from 'node:url';
@@ -33,7 +35,7 @@ export function decodeMappings(mappings) {
   }
   return lines;
 }
-// the original line (1-based) a generated offset maps to, through Node's source-map-cache entry
+// the original line (1-based) a generated offset maps to, through a source-map-cache entry
 function sourceMapLine(entry, offset) {
   if (!entry?.lineLengths || !entry.data?.mappings) return null;
   let line = 0, start = 0;
@@ -73,7 +75,7 @@ export function functionsRan(m, dump, root, readFile) {
     for (const f of fns) {
       const r0 = f.ranges[0];
       if (!r0.count) continue;
-      const line = identical ? lineOf(starts, r0.startOffset) : sm ? sourceMapLine(sm, r0.startOffset) : null;
+      const line = sm ? sourceMapLine(sm, r0.startOffset) : identical ? lineOf(starts, r0.startOffset) : null;
       let cand = line != null ? here.filter(s => s.start === line) : [];
       if (cand.length > 1) cand = cand.filter(s => nameMatches(s, f.functionName));
       if (!cand.length && f.functionName && !identical) { const named = here.filter(s => nameMatches(s, f.functionName)); if (named.length === 1) cand = named; }

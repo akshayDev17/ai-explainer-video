@@ -294,9 +294,10 @@ Reports: node --test's TAP on stdout; jest `--json --outputFile --runInBand --wa
 vitest `run --reporter=json --outputFile --pool=threads --passWithNoTests` (a forked worker is killed before it
 writes its coverage). A file whose run ends cleanly with no test reported (the repo's own runner config does not
 collect it, or it defines none) is listed in `notCollected`, never counted as an error. A covered
-function is matched to a symbol by position when the script V8 ran is the file (plain JavaScript, or TypeScript with
-its types stripped in place and a comment appended), through a source map Node recorded, and otherwise by a name only
-one symbol of that file has. `tools/trace/js/fmtrace-net.cjs` (`NODE_OPTIONS=--require`) records each process's
+function is matched to a symbol through the script's source map when there is one (Node's own, or the inline map of a
+file jest or vitest compiled through `node:vm`, which `tools/trace/js/fmtrace-srcmap.cjs` records), else by position
+when the script V8 ran is the file (plain JavaScript, or TypeScript with its types stripped in place and a comment
+appended), and otherwise by a name only one symbol of that file has. `tools/trace/js/fmtrace-net.cjs` (`NODE_OPTIONS=--require`) records each process's
 connects and DNS lookups; where it cannot (a worker thread), the target is read from the error. Attribution is per
 test file and there are no caller → callee pairs, so `pairs`, `edges`, `noStaticEdge` and `callbacks` are empty;
 `granularity: "test-file"`, `files` / `ranFiles` (the test files, and those run before the time limit), `ran`
