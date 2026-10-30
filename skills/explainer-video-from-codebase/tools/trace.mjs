@@ -92,7 +92,7 @@ function splitCommand(s) {
 }
 const COMMAND = flags.get('--test-command');
 const words = splitCommand(COMMAND);
-const NOT_TEST = `refused: "${COMMAND}" is not a recognised test command. Accepted: pytest [args], py.test [args], python -m pytest [args], python -m unittest [args] (python, python3 or python3.N, by name or path); node --test [--test-* flags] [paths], npx jest [args], npx vitest [run] [args] (or jest / vitest from the repo's node_modules/.bin); with no shell syntax and no wrapper, a jest or vitest flag's value joined to it (-t=name, --config=file), and none of the flags the trace sets itself (watch, reporter, coverage, pool); nothing but the repo's own test suite is ever traced`;
+const NOT_TEST = `refused: "${COMMAND}" is not a recognised test command. Accepted: pytest [args], py.test [args], python -m pytest [args], python -m unittest [args] (python, python3 or python3.N, by name or path); node --test [--test-* flags] [paths], npx jest [args], npx vitest [run] [args] (or jest / vitest from the repo's node_modules/.bin); with no shell syntax and no wrapper, a jest or vitest flag's value given as -t=name or -t name (only for the flags that take one; every other flag is boolean, so a word after it is a test path or filter), and none of the flags the trace sets itself (watch, reporter, coverage, pool); nothing but the repo's own test suite is ever traced`;
 if (!words?.length) fail(3, NOT_TEST);
 let runner, testArgs, lang = 'python';
 const head = basename(words[0]);

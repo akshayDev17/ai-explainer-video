@@ -9,7 +9,7 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, realpathSync, syml
 import { join, dirname } from 'node:path';
 import { FIXTURES, scratch, cleanup, tool, git, gitRepo, assertGolden } from './helpers.mjs';
 import { sandboxWorks } from '../skills/explainer-video-from-codebase/tools/lib/sandbox.mjs';
-import { recogniseJs, jsTestFiles, fileArgv } from '../skills/explainer-video-from-codebase/tools/lib/trace-js.mjs';
+import { recogniseJs, jsTestFiles, fileArgv, passThrough } from '../skills/explainer-video-from-codebase/tools/lib/trace-js.mjs';
 import { parseTap, parseJestJson, functionsRan, observeV8, decodeMappings } from '../skills/explainer-video-from-codebase/tools/lib/observe-v8.mjs';
 
 const REPO = join(FIXTURES, 'trace-js');
@@ -54,16 +54,22 @@ test('each runner runs the code map\'s test files that match its own pattern, un
     ['node', 'node_modules/.bin/vitest', 'run', '--passWithNoTests', '--reporter=json', '--outputFile=r.json', '--pool=threads', 'a.test.ts']);
 });
 
-test('a jest or vitest flag\'s value must be joined to it; a split one is refused, never read as a test path', () => {
+test('a split value of a flag that takes one is joined to it; after a boolean flag a word stays a test path or filter', () => {
   const r = cmd => recogniseJs(cmd.split(' '));
   assert.deepEqual(r('npx jest -t=adds'), { runner: 'jest', args: ['-t=adds'] });
-  assert.deepEqual(r('npx vitest run --config=vitest.config.ts cart'), { runner: 'vitest', args: ['--config=vitest.config.ts', 'cart'] });
-  assert.deepEqual(r('npx jest cart --silent'), { runner: 'jest', args: ['cart', '--silent'] });
-  for (const cmd of ['npx jest -t adds', 'npx vitest run --config vitest.config.ts', 'npx jest --testNamePattern adds src']) assert.equal(r(cmd), null, cmd);
+  assert.deepEqual(r('npx jest -t adds'), { runner: 'jest', args: ['-t=adds'] });
+  assert.deepEqual(r('npx jest --testNamePattern adds src'), { runner: 'jest', args: ['--testNamePattern=adds', 'src'] });
+  assert.deepEqual(r('npx vitest run --config vitest.config.ts cart'), { runner: 'vitest', args: ['--config=vitest.config.ts', 'cart'] });
+  assert.deepEqual(r('npx jest --verbose src/cart'), { runner: 'jest', args: ['--verbose', 'src/cart'] });
+  assert.deepEqual(r('npx vitest run --silent src'), { runner: 'vitest', args: ['--silent', 'src'] });
+  assert.deepEqual(passThrough(r('npx jest -t adds src').args), ['-t=adds']);
+  assert.deepEqual(jsTestFiles({ tests: [{ file: 'src/a.test.ts' }, { file: 'lib/b.test.ts' }] }, 'jest', r('npx jest -t adds src').args), ['src/a.test.ts'], 'the value is no path');
+  assert.deepEqual(r('npx jest --reporters default src').args, ['--reporters=default', 'src']);
+  for (const cmd of ['npx vitest run --reporter dot src', 'npx jest --watch src', 'npm test']) assert.equal(r(cmd), null, cmd);
   const m = { tests: ['src/cart.test.ts', 'src/cart/totals.test.ts', 'src/checkout.test.ts', 'src/Cart.spec.ts'].map(file => ({ file })) };
   assert.deepEqual(jsTestFiles(m, 'jest', ['cart']), ['src/Cart.spec.ts', 'src/cart.test.ts', 'src/cart/totals.test.ts'], 'jest: a case-insensitive regex over the path');
   assert.deepEqual(jsTestFiles(m, 'jest', ['out\\.test']), ['src/checkout.test.ts']);
-  assert.deepEqual(jsTestFiles(m, 'vitest', ['cart']), ['src/cart.test.ts', 'src/cart/totals.test.ts'], 'vitest: a substring of the path');
+  assert.deepEqual(jsTestFiles(m, 'vitest', ['cart']), ['src/Cart.spec.ts', 'src/cart.test.ts', 'src/cart/totals.test.ts'], 'vitest: a case-insensitive substring of the path');
   assert.deepEqual(jsTestFiles(m, 'node-test', ['cart']), [], 'node: a path or directory');
   assert.deepEqual(jsTestFiles(m, 'node-test', ['src/cart']), ['src/cart/totals.test.ts']);
 });

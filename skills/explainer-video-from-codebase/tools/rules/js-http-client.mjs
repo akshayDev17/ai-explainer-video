@@ -5,7 +5,8 @@
    name a const, here or imported; `process.env.X ?? '/api'` folds to its default; what cannot be known is `{}`.
    Any scheme://host is dropped. The path is matched against every route the repo serves, in any language
    (FastAPI, Express, Next.js): a placeholder matches a route parameter, and the route with the most literal
-   segments wins. A URL whose leading base could not be folded is matched by its tail instead, only when one route
+   segments wins. A method that cannot be folded links only when every method the path serves leads to one handler;
+   otherwise the call stays unlinked, with why (`unlinked`). A URL whose leading base could not be folded is matched by its tail instead, only when one route
    has that tail more literally than every other (`match: "suffix"`). A match is an `http` crossing from the caller to the route handler. */
 import { addTsEdge, foldString, constOf } from '../lang/typescript.mjs';
 
@@ -17,16 +18,26 @@ const isParam = s => /^\{[^}]+\}$/.test(s);
 const fits = (rs, cs) => rs.length === cs.length && rs.every((r, i) => isParam(r) ? cs[i] !== '' : r === cs[i]);
 const literal = rs => rs.filter(s => !isParam(s)).length;
 
+// the route `best` picks among those serving the method; when the method is unknown, the one handler every method the
+// routes serve would pick, else { ambiguous: the routes it could be }
+function byMethod(routes, method, best) {
+  const serving = m => routes.filter(r => r.method === '*' || r.method === m);
+  if (method) return { route: best(serving(method)) };
+  const picks = [...new Set(routes.map(r => r.method))].map(m => best(serving(m))).filter(Boolean);
+  if (new Set(picks.map(r => r.id)).size <= 1) return { route: picks[0] || null };
+  return { route: null, ambiguous: [...new Set(picks.map(r => `${r.method} ${r.path}`))].sort() };
+}
+
 export function matchRoute(routes, method, path, { suffix = false } = {}) {
   const cs = segsOf(path);
-  const ok = r => r.method === '*' || !method || r.method === method;
-  const exact = routes.filter(r => ok(r) && fits(r.segs, cs)).sort((a, b) => literal(b.segs) - literal(a.segs));
-  if (exact.length) return { route: exact[0], match: 'exact' };
-  if (!suffix || !cs.some(s => s !== '{}')) return null;
+  const result = (r, match) => r.route ? { route: r.route, match } : r.ambiguous ? { route: null, ambiguous: r.ambiguous } : null;
+  const exact = byMethod(routes, method, rs => rs.filter(r => fits(r.segs, cs)).sort((a, b) => literal(b.segs) - literal(a.segs))[0] || null);
+  if (exact.route || exact.ambiguous || !suffix || !cs.some(s => s !== '{}')) return result(exact, 'exact');
   // the tail match must be unambiguous: one route, or one with more literal segments in its tail than any other
   const tailLit = r => literal(r.segs.slice(r.segs.length - cs.length));
-  const tail = routes.filter(r => ok(r) && r.segs.length > cs.length && fits(r.segs.slice(r.segs.length - cs.length), cs)).sort((a, b) => tailLit(b) - tailLit(a));
-  return tail.length && (tail.length === 1 || tailLit(tail[0]) > tailLit(tail[1])) ? { route: tail[0], match: 'suffix' } : null;
+  const tailOf = rs => { const tail = rs.filter(r => r.segs.length > cs.length && fits(r.segs.slice(r.segs.length - cs.length), cs)).sort((a, b) => tailLit(b) - tailLit(a));
+    return tail.length && (tail.length === 1 || tailLit(tail[0]) > tailLit(tail[1])) ? tail[0] : null; };
+  return result(byMethod(routes, method, tailOf), 'suffix');
 }
 
 export function routeTable(httpRoutes) {
@@ -86,10 +97,11 @@ export function linkHttpCalls(ts, R, httpRoutes) {
     url = `${baseStr.replace(/^\{\}/, '').replace(/\/$/, '')}${baseStr && !url.startsWith('/') && !url.startsWith('{}') ? '/' : ''}${url.replace(/^\{\}/, '')}`;
     if (!url.startsWith('/')) { if (!unknownLead) continue; url = '/' + url; }
     const path = url.replace(/\?.*$/, '').replace(/#.*$/, '');
-    const hit = matchRoute(routes, method, path, { suffix: unknownLead });
+    const m = matchRoute(routes, method, path, { suffix: unknownLead }), hit = m?.route ? m : null;
     const folded = [...new Set([...f.acc.folded, ...(base?.acc.folded || [])])], env = [...new Set([...f.acc.env, ...(base?.acc.env || [])])];
     const group = ts.modules.get(c.module)?.group;
     calls.push({ from: c.from, file: c.file, line: c.line, client, method, url: path, handler: hit?.route.id || null, group,
+      ...(m?.ambiguous ? { unlinked: `the method is unknown and the path is served by ${m.ambiguous.join(', ')}` } : {}),
       ...(hit && hit.match !== 'exact' ? { match: hit.match } : {}), ...(folded.length ? { folded } : {}), ...(env.length ? { env } : {}) });
     if (hit) addTsEdge(ts, c.from, hit.route.id, 'http', c.line, { rule: 'js.http-client', group, evidence: `${c.file}:${c.line} ${method || '*'} ${path}${folded.length ? ` (folded ${folded.join(', ')})` : ''}${hit.match === 'suffix' ? ` (tail match: ${hit.route.method} ${hit.route.path})` : ''}`,
       ...(hit.match !== 'exact' ? { match: hit.match } : {}) });

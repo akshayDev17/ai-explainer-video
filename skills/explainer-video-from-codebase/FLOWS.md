@@ -26,7 +26,7 @@ artifact made by running repo code: the repo's own test suite, sandboxed.
 | `classes[]` | `id`, resolved `bases`, raw `baseExprs`, `methods` (name → symbol id), `decos` |
 | `edges[]`, `entries[]` | below |
 | `tests[]`, `fixtures[]`, `fixtureBindings[]`, `mocks[]`, `testSummary` | below |
-| `rules` | per-pack records: Depends links, queue producers, registry tables (with dropped constructors), Haystack pipelines, HTTP client calls (linked or not), spawns, callback count; with TS/JS files also `jsHttp` (every fetch / axios / ky call: `client`, `method`, folded `url`, `handler` or null, `folded` consts, `env` keys, `match: "suffix"`), `uiRoutes`, Express `mounts`, `nextRoots`, `routeAliases` (a second route to a handler that already has an entry) and `setupFiles` |
+| `rules` | per-pack records: Depends links, queue producers, registry tables (with dropped constructors), Haystack pipelines, HTTP client calls (linked or not), spawns, callback count; with TS/JS files also `jsHttp` (every fetch / axios / ky call: `client`, `method`, folded `url`, `handler` or null, `unlinked` (why, when the method is unknown and the path serves more than one handler), `folded` consts, `env` keys, `match: "suffix"`), `uiRoutes`, Express `mounts`, `nextRoots`, `routeAliases` (a second route to a handler that already has an entry) and `setupFiles` |
 | `dispatchSites[]`, `factories` | every narrowed or CHA dispatch point; every function that can return two or more classes, with branch guards |
 | `config` | git-tracked config files (`group`, `reader`, fact count), the number of `untracked` ones not read, and `notGitWorkTree` (the mined or `--config-root` directories outside a git work tree, whose config is not read at all), settings fields and properties, every fact (`key`, `file:line`, and `value` only for a key a dispatch guard reads), profiles and classified dispatch sites (below) |
 | `frameworksWithoutPack[]` | known frameworks the repo imports that no rule pack covers: their wiring is not linked |
@@ -74,7 +74,8 @@ Every file is in exactly one group. Ordered path rules, first match wins: **test
 is moved by content: it imports pytest/unittest and defines tests → test; it imports an eval framework
 (ragas, deepeval, promptfoo, lm_eval, inspect_ai, mteb, beir, trulens, langsmith `evaluate`) or has
 training-loop markers → eval; a JS/TS file that imports vitest, `@jest/globals`, `node:test` or mocha and defines
-tests → test, one that imports promptfoo, evalite, autoevals or braintrust → eval. `--group 'glob=group'` always wins.
+tests → test, one that imports promptfoo, evalite, autoevals or braintrust → eval: in every language, an
+eval-framework import puts a file in the eval group (design rev3 §3.15). `--group 'glob=group'` always wins.
 
 ## Entries
 
@@ -232,8 +233,9 @@ Written only after the user said yes to one exact test command (`--i-ran-this-by
 (exit 1) without that flag; refuses (exit 3) anything but `pytest`, `py.test`, `python -m pytest` or `python -m
 unittest` (python, python3 or python3.N, by name or path; a bare name is found in the repo's `.venv/bin` or
 `venv/bin`, then on PATH), `node --test` (only `--test-*` and type-stripping flags), `npx jest` or `npx vitest [run]`
-(no npx flags, no watch mode, a flag's value joined to it as `-t=name` or `--config=file`, since a split one cannot be
-told from a test filter, none of the flags the trace sets itself: reporter, coverage, pool), or `jest` / `vitest`
+(no npx flags, no watch mode, none of the flags the trace sets itself: reporter, coverage, pool; a flag's value as
+`-t=name` or `-t name`, split only for the jest and vitest flags that take a value, so a word after any other flag is
+a test path or filter), or `jest` / `vitest`
 from the repo's `node_modules/.bin`; refuses (exit 1) a jest or vitest the repo has not installed (nothing is ever
 installed, and `npx` itself is never run), with any shell syntax (`;`, `&&`, `|`, redirects, `$`, backticks) or a wrapper (`uv run`,
 `env`); and refuses (exit 4) on a platform with no OS sandbox, or where this platform's sandbox does not start
@@ -283,8 +285,8 @@ virtualenv.
 
 A JavaScript / TypeScript runner is run once per test file (the code map's test files that match the runner's own
 default pattern, selected by the command's positionals as the runner reads them: a path or directory for node, a
-regex over the path for jest, a substring of it for vitest), each in its own sandboxed process under V8 precise
-coverage (`NODE_V8_COVERAGE`), on the `node` the command names by path, else the one on PATH, with the repo's
+case-insensitive regex over the path for jest, a case-insensitive substring of it for vitest), each in its own
+sandboxed process under V8 precise coverage (`NODE_V8_COVERAGE`), on the `node` the command names by path, else the one on PATH, with the repo's
 `node_modules` linked into the copy entry by entry and exposed read-only; a workspace package's link (a symlink into
 the repo, such as `node_modules/@app/shared -> ../../packages/shared`) points at its copy, never at the hidden repo.
 Reports: node --test's TAP on stdout; jest `--json --outputFile --runInBand --watchman=false --passWithNoTests`;

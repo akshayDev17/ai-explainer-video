@@ -22,6 +22,7 @@ const EVAL_IMPORT = /^\s*(import|from)\s+(ragas|deepeval|promptfoo|lm_eval|inspe
 const TRAINING = /\bTrainer\(|\.backward\(\)|^\s*(import|from)\s+accelerate\b/m;
 const JS_TEST_IMPORT = /\bfrom\s+["'](vitest|@jest\/globals|node:test|mocha)["']|\brequire\(\s*["'](node:test|mocha|@jest\/globals)["']\s*\)/;
 const JS_TEST_DEF = /^\s*(describe|it|test)(\.\w+)*\s*\(/m;
+// design rev3 §3.15 (eval row, content signals): an eval-framework import puts a file in eval, in every language
 const JS_EVAL_IMPORT = /\bfrom\s+["'](promptfoo|evalite|autoevals|braintrust|langsmith\/evaluation)["']|\brequire\(\s*["'](promptfoo|autoevals|braintrust)["']\s*\)/;
 
 export function contentRule(text, lang = 'python') {

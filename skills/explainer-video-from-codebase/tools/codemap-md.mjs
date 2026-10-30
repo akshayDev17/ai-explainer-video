@@ -66,7 +66,7 @@ export function renderCodemap(m) {
   const jsUnlinked = (m.rules.jsHttp || []).filter(h => !h.handler);
   if (m.rules.jsHttp?.length) out.push(`### TypeScript / JavaScript HTTP client calls (${m.rules.jsHttp.length - jsUnlinked.length} of ${m.rules.jsHttp.length} linked)`, '',
     'A URL is folded from literals and consts (`folded`); one whose leading base could not be folded is linked only when exactly one route has its tail (`tail match`).', '',
-    table(['from', 'client', 'call', 'route handler', 'how', 'where'], m.rules.jsHttp.map(h => [`\`${short(h.from)}\``, h.client, `${h.method || '*'} ${h.url}`, h.handler ? `\`${short(h.handler)}\`` : '**no matching route**',
+    table(['from', 'client', 'call', 'route handler', 'how', 'where'], m.rules.jsHttp.map(h => [`\`${short(h.from)}\``, h.client, `${h.method || '*'} ${h.url}`, h.handler ? `\`${short(h.handler)}\`` : h.unlinked ? `**not linked**: ${h.unlinked}` : '**no matching route**',
       [h.folded ? `folded ${h.folded.join(', ')}` : '', h.env ? `env ${h.env.join(', ')}` : '', h.match === 'suffix' ? 'tail match' : ''].filter(Boolean).join(' · '), loc(h.file, h.line)])), '');
   if (m.rules.routeAliases?.length) out.push('### Handlers a second route also reaches', '', table(['route', 'handler', 'where'],
     m.rules.routeAliases.map(r => [`${r.method} ${r.path}`, `\`${short(r.id)}\``, loc(r.file, r.line)])), '');

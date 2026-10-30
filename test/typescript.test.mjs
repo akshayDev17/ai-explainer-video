@@ -101,22 +101,32 @@ test('express: a mount prefix named by a const, and a router a factory returns, 
   assert.deepEqual(by, { 'web/src/api.ts:users': 'server/app.js:listUsers', 'web/src/api.ts:items': 'server/items.js:listItems' });
 });
 
-test('js-http-client: an options or config object whose method cannot be known matches any method, never GET by default', () => {
+test('js-http-client: a method that cannot be known is never GET by default, and links only when every method the path serves leads to one handler', () => {
   const m = mineFiles({
     'server/app.js': ["const express = require('express');", 'const app = express();', "app.get('/api/users', listUsers);", "app.post('/api/users', createUser);",
-      'function listUsers(req, res) { res.json([]); }', 'function createUser(req, res) { res.json({}); }', 'module.exports = app;', ''].join('\n'),
+      "app.get('/api/health', health);", "app.all('/api/echo', echo);",
+      'function listUsers(req, res) { res.json([]); }', 'function createUser(req, res) { res.json({}); }', 'function health(req, res) { res.send("ok"); }',
+      'function echo(req, res) { res.send(""); }', 'module.exports = app;', ''].join('\n'),
     'web/src/api.ts': ["import axios from 'axios';",
       "export function list() { return fetch('/api/users'); }",
       "export function create(body: string) { const opts = { method: 'POST', body }; return fetch('/api/users', opts); }",
       "export function bySpread(init: RequestInit) { return fetch('/api/users', { ...init }); }",
       "export function byParam(method: string) { return fetch('/api/users', { method }); }",
       "export function byConfig(cfg: { method: string }) { return axios.request({ url: '/api/users', method: cfg.method }); }",
-      "export function byAxiosArg(cfg: object) { return axios('/api/users', cfg); }", ''].join('\n'),
+      "export function byAxiosArg(cfg: object) { return axios('/api/users', cfg); }",
+      "export function ping(method: string) { return fetch('/api/health', { method }); }",
+      "export function echoAny(method: string) { return fetch('/api/echo', { method }); }", ''].join('\n'),
   });
   const by = Object.fromEntries(m.rules.jsHttp.map(h => [h.from.split(':').pop(), [h.method, h.handler?.split(':').pop() ?? null]]));
   assert.deepEqual(by.list, ['GET', 'listUsers'], 'no options: GET');
   assert.deepEqual(by.create, ['POST', 'createUser'], 'an options const is folded');
-  for (const f of ['bySpread', 'byParam', 'byConfig', 'byAxiosArg']) assert.equal(by[f][0], null, f);
+  const unlinked = Object.fromEntries(m.rules.jsHttp.map(h => [h.from.split(':').pop(), h.unlinked]));
+  for (const f of ['bySpread', 'byParam', 'byConfig', 'byAxiosArg']) {
+    assert.deepEqual(by[f], [null, null], `${f}: GET and POST /api/users have different handlers`);
+    assert.equal(unlinked[f], 'the method is unknown and the path is served by GET /api/users, POST /api/users', f);
+  }
+  assert.deepEqual([by.ping, by.echoAny], [[null, 'health'], [null, 'echo']], 'one handler serves the path, whatever the method');
+  assert.equal(m.edges.some(e => e.kind === 'http' && /listUsers|createUser/.test(e.to) && /byParam|bySpread|byConfig|byAxiosArg/.test(e.from)), false);
 });
 
 test('nextjs: App Router pages and route handlers, Pages Router pages and API routes; groups and private folders add nothing', () => {
