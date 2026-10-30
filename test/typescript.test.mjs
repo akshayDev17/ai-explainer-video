@@ -2,8 +2,9 @@
 // barrels, workspace packages), classes and receivers, and each TS/JS rule pack against its golden links.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
-import { FIXTURES, mine, ruleView, assertGolden, edgesFrom } from './helpers.mjs';
+import { join, dirname } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { FIXTURES, mine, ruleView, assertGolden, edgesFrom, gitRepo, git, cleanup } from './helpers.mjs';
 
 const pack = name => { const r = mine(join(FIXTURES, 'rules', name)); assert.equal(r.status, 0, r.stderr); return r.codemap; };
 const has = (m, from, to, kind, pred = () => true) => m.edges.some(e => e.from === from && e.to === to && (!kind || e.kind === kind) && pred(e));
@@ -72,6 +73,50 @@ test('express: routes, mounted routers (CommonJS and ESM), .route() chains and m
   assert.equal(m.edges.some(e => e.from === 'server/routes/users.js:<module>'), false, 'registering a handler is not calling it');
   assert.ok(has(m, 'api/src/server.ts:<module>', 'api/src/server.ts:GET /decoy', 'static', e => e.rule === 'js.callback'), 'a non-Express .get keeps its callback as a call');
   assert.equal(m.selfCheck.typescript.unresolvedByOrigin.inRepo, 0, 'calls on the Express app count as external');
+});
+
+// a scratch repo: { 'path': 'source' }, mined
+const mineFiles = files => {
+  const repo = gitRepo();
+  for (const [f, text] of Object.entries(files)) { mkdirSync(dirname(join(repo, f)), { recursive: true }); writeFileSync(join(repo, f), text); }
+  git(repo, 'add', '-A');
+  const r = mine(repo);
+  cleanup(dirname(repo));
+  assert.equal(r.status, 0, r.stderr);
+  return r.codemap;
+};
+
+test('express: a mount prefix named by a const, and a router a factory returns, are mounted; a call built on the same const links', () => {
+  const m = mineFiles({
+    'server/app.js': ["const express = require('express');", "const { makeItems } = require('./items');", "const API = '/api';", 'const app = express();',
+      'const users = express.Router();', "users.get('/users', listUsers);", 'app.use(API, users);', "app.use('/v1', makeItems());",
+      'function listUsers(req, res) { res.json([]); }', 'module.exports = app;', ''].join('\n'),
+    'server/items.js': ["const express = require('express');", "function makeItems() { const r = express.Router(); r.get('/items', listItems); return r; }",
+      'function listItems(req, res) { res.json([]); }', 'module.exports = { makeItems };', ''].join('\n'),
+    'web/src/api.ts': ["const BASE = '/api';", 'export function users() { return fetch(`${BASE}/users`); }', "export function items() { return fetch('/v1/items'); }", ''].join('\n'),
+  });
+  assert.deepEqual(m.entries.filter(e => e.kind === 'http').map(e => `${e.method} ${e.path} ${e.id}`).sort(),
+    ['GET /api/users server/app.js:listUsers', 'GET /v1/items server/items.js:listItems']);
+  const by = Object.fromEntries(m.rules.jsHttp.map(h => [h.from, h.handler]));
+  assert.deepEqual(by, { 'web/src/api.ts:users': 'server/app.js:listUsers', 'web/src/api.ts:items': 'server/items.js:listItems' });
+});
+
+test('js-http-client: an options or config object whose method cannot be known matches any method, never GET by default', () => {
+  const m = mineFiles({
+    'server/app.js': ["const express = require('express');", 'const app = express();', "app.get('/api/users', listUsers);", "app.post('/api/users', createUser);",
+      'function listUsers(req, res) { res.json([]); }', 'function createUser(req, res) { res.json({}); }', 'module.exports = app;', ''].join('\n'),
+    'web/src/api.ts': ["import axios from 'axios';",
+      "export function list() { return fetch('/api/users'); }",
+      "export function create(body: string) { const opts = { method: 'POST', body }; return fetch('/api/users', opts); }",
+      "export function bySpread(init: RequestInit) { return fetch('/api/users', { ...init }); }",
+      "export function byParam(method: string) { return fetch('/api/users', { method }); }",
+      "export function byConfig(cfg: { method: string }) { return axios.request({ url: '/api/users', method: cfg.method }); }",
+      "export function byAxiosArg(cfg: object) { return axios('/api/users', cfg); }", ''].join('\n'),
+  });
+  const by = Object.fromEntries(m.rules.jsHttp.map(h => [h.from.split(':').pop(), [h.method, h.handler?.split(':').pop() ?? null]]));
+  assert.deepEqual(by.list, ['GET', 'listUsers'], 'no options: GET');
+  assert.deepEqual(by.create, ['POST', 'createUser'], 'an options const is folded');
+  for (const f of ['bySpread', 'byParam', 'byConfig', 'byAxiosArg']) assert.equal(by[f][0], null, f);
 });
 
 test('nextjs: App Router pages and route handlers, Pages Router pages and API routes; groups and private folders add nothing', () => {

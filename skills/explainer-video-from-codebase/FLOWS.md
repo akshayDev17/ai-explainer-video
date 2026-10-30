@@ -232,7 +232,8 @@ Written only after the user said yes to one exact test command (`--i-ran-this-by
 (exit 1) without that flag; refuses (exit 3) anything but `pytest`, `py.test`, `python -m pytest` or `python -m
 unittest` (python, python3 or python3.N, by name or path; a bare name is found in the repo's `.venv/bin` or
 `venv/bin`, then on PATH), `node --test` (only `--test-*` and type-stripping flags), `npx jest` or `npx vitest [run]`
-(no npx flags, no watch mode, none of the flags the trace sets itself: reporter, coverage, pool), or `jest` / `vitest`
+(no npx flags, no watch mode, a flag's value joined to it as `-t=name` or `--config=file`, since a split one cannot be
+told from a test filter, none of the flags the trace sets itself: reporter, coverage, pool), or `jest` / `vitest`
 from the repo's `node_modules/.bin`; refuses (exit 1) a jest or vitest the repo has not installed (nothing is ever
 installed, and `npx` itself is never run), with any shell syntax (`;`, `&&`, `|`, redirects, `$`, backticks) or a wrapper (`uv run`,
 `env`); and refuses (exit 4) on a platform with no OS sandbox, or where this platform's sandbox does not start
@@ -281,10 +282,15 @@ names come from `co_qualname` (Python 3.11+; older interpreters report bare func
 virtualenv.
 
 A JavaScript / TypeScript runner is run once per test file (the code map's test files that match the runner's own
-default pattern, under any paths the command names), each in its own sandboxed process under V8 precise coverage
-(`NODE_V8_COVERAGE`), on the `node` the command names by path, else the one on PATH, with the repo's `node_modules` linked into the copy and exposed
-read-only. Reports: node --test's TAP on stdout; jest `--json --outputFile --runInBand --watchman=false`; vitest
-`run --reporter=json --outputFile --pool=threads` (a forked worker is killed before it writes its coverage). A covered
+default pattern, selected by the command's positionals as the runner reads them: a path or directory for node, a
+regex over the path for jest, a substring of it for vitest), each in its own sandboxed process under V8 precise
+coverage (`NODE_V8_COVERAGE`), on the `node` the command names by path, else the one on PATH, with the repo's
+`node_modules` linked into the copy entry by entry and exposed read-only; a workspace package's link (a symlink into
+the repo, such as `node_modules/@app/shared -> ../../packages/shared`) points at its copy, never at the hidden repo.
+Reports: node --test's TAP on stdout; jest `--json --outputFile --runInBand --watchman=false --passWithNoTests`;
+vitest `run --reporter=json --outputFile --pool=threads --passWithNoTests` (a forked worker is killed before it
+writes its coverage). A file whose run ends cleanly with no test reported (the repo's own runner config does not
+collect it, or it defines none) is listed in `notCollected`, never counted as an error. A covered
 function is matched to a symbol by position when the script V8 ran is the file (plain JavaScript, or TypeScript with
 its types stripped in place and a comment appended), through a source map Node recorded, and otherwise by a name only
 one symbol of that file has. `tools/trace/js/fmtrace-net.cjs` (`NODE_OPTIONS=--require`) records each process's

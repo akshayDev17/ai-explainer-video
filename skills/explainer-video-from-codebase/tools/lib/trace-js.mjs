@@ -4,9 +4,13 @@
    - `node --test [--test-* flags] [paths]`: the TAP reporter on stdout;
    - `npx jest [args]`, `jest [args]`, `node_modules/.bin/jest [args]`: --json --outputFile, --runInBand, no watchman;
    - `npx vitest [run] [args]`, `vitest …`: --reporter=json --outputFile, run mode, the threads pool (a forked worker is
-     killed before it can write its coverage; worker threads write theirs). */
+     killed before it can write its coverage; worker threads write theirs).
+   A jest or vitest flag's value is joined to it (`-t=adds`, `--config=vitest.config.ts`): a split one cannot be told
+   from a test filter. A positional selects test files as the runner does: a path or directory for node, a regex over
+   the path for jest, a substring of it for vitest. jest and vitest run with --passWithNoTests, so a file the repo's
+   own config does not collect exits 0 instead of failing. */
 import { existsSync, readFileSync, readdirSync, lstatSync, realpathSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { join, basename, relative, sep } from 'node:path';
 
 const NODE_FLAG = /^--(test-name-pattern|test-skip-pattern|test-timeout|test-concurrency)=.+$|^--test-only$|^--experimental-(strip|transform)-types$|^--experimental-test-module-mocks$|^--no-experimental-strip-types$/;
 // flags the trace sets itself, or that would never end or report elsewhere
@@ -25,6 +29,7 @@ export function recogniseJs(words) {
   if (!tool) return null;
   if (tool === 'vitest') { if (/^(watch|dev|bench|init|list|serve)$/.test(args[0] || '')) return null; if (args[0] === 'run') args = args.slice(1); }
   if (args.some(a => OWN_FLAGS.test(a))) return null;
+  if (args.some((a, i) => /^-[^=]*$/.test(a) && args[i + 1] != null && !args[i + 1].startsWith('-'))) return null;
   return { runner: tool, args };
 }
 
@@ -34,10 +39,16 @@ const PATTERNS = {
   jest: f => /(^|\/)__tests__\/.*\.[jt]sx?$|\.(test|spec)\.[jt]sx?$/.test(f),
   vitest: f => /\.(test|spec)\.[cm]?[jt]sx?$/.test(f),
 };
+// which files a positional selects, as each runner reads it
+const SELECTS = {
+  'node-test': p => f => f === p || f.startsWith(p + '/'),
+  jest: p => { let re; try { re = new RegExp(p, 'i'); } catch { return () => false; } return f => re.test(f); },
+  vitest: p => f => f.includes(p),
+};
 export function jsTestFiles(m, runner, args) {
-  const paths = args.filter(a => !a.startsWith('-')).map(a => a.replace(/^\.\//, '').replace(/\/$/, ''));
+  const selects = args.filter(a => !a.startsWith('-')).map(a => SELECTS[runner](a.replace(/^\.\//, '').replace(/\/$/, '')));
   const files = [...new Set((m.tests || []).filter(t => /\.[cm]?[jt]sx?$/.test(t.file)).map(t => t.file))].sort();
-  return files.filter(f => PATTERNS[runner](f) && (!paths.length || paths.some(p => f === p || f.startsWith(p + '/'))));
+  return files.filter(f => PATTERNS[runner](f) && (!selects.length || selects.some(sel => sel(f))));
 }
 export const passThrough = args => args.filter(a => a.startsWith('-'));
 
@@ -67,10 +78,28 @@ export function nodeModulesDirs(root, max = 4) {
   return out.sort();
 }
 
+// the links that put one of those node_modules dirs into the copy: each entry (a scope's entries one by one) to the
+// repo's own, except a workspace package (a symlink into the repo, outside every node_modules dir) to its counterpart
+// in the copy, since the sandbox hides the repo. -> [{ rel, copy }], copy null for the repo's own entry
+export function nodeModulesLinks(root, dir, dirs) {
+  const out = [];
+  (function each(rel) {
+    for (const name of readdirSync(join(root, rel)).sort()) {
+      const r = `${rel}/${name}`;
+      let st; try { st = lstatSync(join(root, r)); } catch { continue; }
+      if (name.startsWith('@') && st.isDirectory()) { each(r); continue; }
+      let real = null; if (st.isSymbolicLink()) try { real = realpathSync(join(root, r)); } catch {}
+      const workspace = real && real.startsWith(root + sep) && !dirs.some(d => real.startsWith(join(root, d) + sep));
+      out.push({ rel: r, copy: workspace ? relative(root, real) : null });
+    }
+  })(dir);
+  return out;
+}
+
 // one file's command line, and where its report lands (null: stdout)
 export function fileArgv({ runner, node, bin, flags, file, report }) {
   const tool = bin ? (bin.node ? [node, bin.rel] : [bin.rel]) : null;
   if (runner === 'node-test') return [node, ...flags, '--test', '--test-reporter=tap', file];
-  if (runner === 'jest') return [...tool, ...flags, '--ci', '--watchman=false', '--runInBand', '--json', `--outputFile=${report}`, '--runTestsByPath', file];
-  return [...tool, 'run', ...flags, '--reporter=json', `--outputFile=${report}`, '--pool=threads', file];
+  if (runner === 'jest') return [...tool, ...flags, '--ci', '--watchman=false', '--runInBand', '--passWithNoTests', '--json', `--outputFile=${report}`, '--runTestsByPath', file];
+  return [...tool, 'run', ...flags, '--passWithNoTests', '--reporter=json', `--outputFile=${report}`, '--pool=threads', file];
 }

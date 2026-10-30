@@ -7,7 +7,7 @@
    (FastAPI, Express, Next.js): a placeholder matches a route parameter, and the route with the most literal
    segments wins. A URL whose leading base could not be folded is matched by its tail instead, only when one route
    has that tail more literally than every other (`match: "suffix"`). A match is an `http` crossing from the caller to the route handler. */
-import { addTsEdge, foldString } from '../lang/typescript.mjs';
+import { addTsEdge, foldString, constOf } from '../lang/typescript.mjs';
 
 const VERB = /^(get|post|put|patch|delete|head|options)$/;
 const segsOf = p => p.replace(/\?.*$/, '').split('/').filter(Boolean);
@@ -49,21 +49,31 @@ export function linkHttpCalls(ts, R, httpRoutes) {
     const base = baseIr ? foldString(ts, R, baseIr, { module: spec.module || c.module, consts: spec.module === c.module ? c.consts : null }) : null;
     return { client: ext, base };
   };
-  const methodOf = ir => ir?.k === 'obj' && ir.pairs.method?.k === 'str' ? ir.pairs.method.v.toUpperCase() : null;
+  // the method an options / config argument sets: GET when there is none or it sets none, null (any) when it cannot be known
+  const methodOf = (arg, sc) => {
+    if (!arg) return 'GET';
+    let o = arg, osc = sc;
+    if (arg.k === 'id') { const local = sc.consts?.get(arg.name), found = local ? null : constOf(ts, R, arg.name, sc.module);
+      o = local || found?.ir; if (found) osc = { module: found.module, consts: null }; }
+    if (o?.k !== 'obj') return null;
+    if (!o.pairs.method) return o.pairs['...'] ? null : 'GET';
+    const m = foldString(ts, R, o.pairs.method, osc).s;
+    return /^[a-z]+$/i.test(m) ? m.toUpperCase() : null;
+  };
   for (const c of ts.rawCalls) {
     if (c.jsx || c.isNew) continue;
     let client = null, method = null, urlIr = null, base = null;
     const a0 = c.args[0]?.ir, a1 = c.args[1]?.ir;
-    if (!c.attr && /^(fetch|window\.fetch|globalThis\.fetch)$/.test(c.expr) && !R.resolveName('fetch', c)?.id) { client = 'fetch'; urlIr = a0; method = methodOf(a1) || 'GET'; }
+    if (!c.attr && /^(fetch|window\.fetch|globalThis\.fetch)$/.test(c.expr) && !R.resolveName('fetch', c)?.id) { client = 'fetch'; urlIr = a0; method = methodOf(a1, c); }
     else if (!c.attr && /^(axios|ky)$/.test(extOf(c.expr, c) || '')) {
       client = extOf(c.expr, c);
-      if (a0?.k === 'obj') { urlIr = a0.pairs.url; method = methodOf(a0) || 'GET'; } else { urlIr = a0; method = methodOf(a1) || 'GET'; }
+      if (a0?.k === 'obj') { urlIr = a0.pairs.url; method = methodOf(a0, c); } else { urlIr = a0; method = methodOf(a1, c); }
     } else if (c.attr && c.obj && /^[\w$]+$/.test(c.obj)) {
       const ext = extOf(c.obj, c), inst = ext ? null : instanceOf(c.obj, c);
       const lib = /^(axios|ky)$/.test(ext || '') ? ext : inst?.client;
       if (!lib) continue;
       if (VERB.test(c.attr)) { client = lib; method = c.attr.toUpperCase(); urlIr = a0; }
-      else if (c.attr === 'request' && a0?.k === 'obj') { client = lib; method = methodOf(a0) || 'GET'; urlIr = a0.pairs.url; }
+      else if (c.attr === 'request' && a0?.k === 'obj') { client = lib; method = methodOf(a0, c); urlIr = a0.pairs.url; }
       else continue;
       base = inst?.base || null;
     } else continue;
@@ -81,7 +91,7 @@ export function linkHttpCalls(ts, R, httpRoutes) {
     const group = ts.modules.get(c.module)?.group;
     calls.push({ from: c.from, file: c.file, line: c.line, client, method, url: path, handler: hit?.route.id || null, group,
       ...(hit && hit.match !== 'exact' ? { match: hit.match } : {}), ...(folded.length ? { folded } : {}), ...(env.length ? { env } : {}) });
-    if (hit) addTsEdge(ts, c.from, hit.route.id, 'http', c.line, { rule: 'js.http-client', group, evidence: `${c.file}:${c.line} ${method} ${path}${folded.length ? ` (folded ${folded.join(', ')})` : ''}${hit.match === 'suffix' ? ` (tail match: ${hit.route.method} ${hit.route.path})` : ''}`,
+    if (hit) addTsEdge(ts, c.from, hit.route.id, 'http', c.line, { rule: 'js.http-client', group, evidence: `${c.file}:${c.line} ${method || '*'} ${path}${folded.length ? ` (folded ${folded.join(', ')})` : ''}${hit.match === 'suffix' ? ` (tail match: ${hit.route.method} ${hit.route.path})` : ''}`,
       ...(hit.match !== 'exact' ? { match: hit.match } : {}) });
   }
   return calls;

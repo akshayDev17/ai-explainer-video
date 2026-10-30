@@ -74,10 +74,9 @@ if (REAL_OUT === REAL_ROOT || REAL_OUT.startsWith(REAL_ROOT + sep)) fail(1, `ref
 let overrides;
 try { overrides = parseOverrides((flags.get('--group') || []).flatMap(s => s.split(',')).filter(Boolean)); } catch (e) { fail(1, e.message); }
 const EXCLUDE = (flags.get('--exclude') || []).flatMap(s => s.split(',')).filter(Boolean).map(p => p.replace(/\/+$/, ''));
-const LANG_ALIAS = { python: 'python', py: 'python', typescript: 'typescript', ts: 'typescript', javascript: 'typescript', js: 'typescript' };
 const LANGS = new Set((flags.get('--lang') || ['python,typescript']).flatMap(s => s.split(',')).filter(Boolean).map(l => {
-  if (!LANG_ALIAS[l]) fail(1, `--lang ${l}: mined languages are python and typescript (javascript is mined with typescript); go, c and cpp are not mined yet`);
-  return LANG_ALIAS[l]; }));
+  if (l !== 'python' && l !== 'typescript') fail(1, `--lang ${l}: mined languages are python and typescript (javascript is mined with typescript); go, c and cpp are not mined yet`);
+  return l; }));
 const CONFIG_ROOTS = (flags.get('--config-root') || []).map(d => resolve(d));
 for (const d of CONFIG_ROOTS) if (!existsSync(d)) fail(1, `--config-root ${d} does not exist`);
 

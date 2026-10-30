@@ -2,8 +2,9 @@
 // file the path rules left in prod; a --group override wins over everything.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
-import { FIXTURES, mine } from './helpers.mjs';
+import { join, dirname } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { FIXTURES, mine, gitRepo, git, cleanup } from './helpers.mjs';
 import { globToRegExp, classifyFile, parseOverrides } from '../skills/explainer-video-from-codebase/tools/lib/groups.mjs';
 
 const POLYGLOT = join(FIXTURES, 'polyglot');
@@ -58,6 +59,22 @@ test('a --group override wins over every rule and is recorded', () => {
   assert.deepEqual([f.group, f.rule], ['dev', 'override: backend/verification/**=dev']);
   assert.equal(o.codemap.entries.find(e => e.id === 'backend.verification.test_connections:<main>').group, 'dev');
   assert.deepEqual(o.codemap.groups.overrides, ['backend/verification/**=dev']);
+});
+
+test('a JS/TS file outside any eval dir that imports an eval framework is an eval file; one that imports none stays prod', () => {
+  const repo = gitRepo();
+  mkdirSync(join(repo, 'src'));
+  writeFileSync(join(repo, 'src', 'quality.ts'), "import { evalite } from 'evalite';\nexport const run = () => evalite;\n");
+  writeFileSync(join(repo, 'src', 'scorer.js'), "const { Factuality } = require('autoevals');\nmodule.exports = Factuality;\n");
+  writeFileSync(join(repo, 'src', 'app.ts'), "import express from 'express';\nexport const app = express();\n");
+  git(repo, 'add', '-A');
+  const m = mine(repo);
+  cleanup(dirname(repo));
+  assert.equal(m.status, 0, m.stderr);
+  const by = Object.fromEntries(m.codemap.files.map(f => [f.path, [f.group, f.rule]]));
+  assert.deepEqual(by['src/quality.ts'], ['eval', 'content: imports an eval framework']);
+  assert.deepEqual(by['src/scorer.js'], ['eval', 'content: imports an eval framework']);
+  assert.deepEqual(by['src/app.ts'], ['prod', 'prod: everything else']);
 });
 
 test('globs: ** crosses directories, * does not, a slash-free pattern matches at any depth', () => {

@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, realpathSync, symlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { FIXTURES, scratch, cleanup, tool, git, gitRepo, assertGolden } from './helpers.mjs';
 import { sandboxWorks } from '../skills/explainer-video-from-codebase/tools/lib/sandbox.mjs';
@@ -51,7 +51,21 @@ test('each runner runs the code map\'s test files that match its own pattern, un
   assert.deepEqual(jsTestFiles(m, 'jest', []), ['src/__tests__/b.ts', 'src/c.spec.tsx']);
   assert.deepEqual(jsTestFiles(m, 'vitest', ['src']), ['src/c.spec.tsx']);
   assert.deepEqual(fileArgv({ runner: 'vitest', node: 'node', bin: { rel: 'node_modules/.bin/vitest', node: true }, flags: [], file: 'a.test.ts', report: 'r.json' }),
-    ['node', 'node_modules/.bin/vitest', 'run', '--reporter=json', '--outputFile=r.json', '--pool=threads', 'a.test.ts']);
+    ['node', 'node_modules/.bin/vitest', 'run', '--passWithNoTests', '--reporter=json', '--outputFile=r.json', '--pool=threads', 'a.test.ts']);
+});
+
+test('a jest or vitest flag\'s value must be joined to it; a split one is refused, never read as a test path', () => {
+  const r = cmd => recogniseJs(cmd.split(' '));
+  assert.deepEqual(r('npx jest -t=adds'), { runner: 'jest', args: ['-t=adds'] });
+  assert.deepEqual(r('npx vitest run --config=vitest.config.ts cart'), { runner: 'vitest', args: ['--config=vitest.config.ts', 'cart'] });
+  assert.deepEqual(r('npx jest cart --silent'), { runner: 'jest', args: ['cart', '--silent'] });
+  for (const cmd of ['npx jest -t adds', 'npx vitest run --config vitest.config.ts', 'npx jest --testNamePattern adds src']) assert.equal(r(cmd), null, cmd);
+  const m = { tests: ['src/cart.test.ts', 'src/cart/totals.test.ts', 'src/checkout.test.ts', 'src/Cart.spec.ts'].map(file => ({ file })) };
+  assert.deepEqual(jsTestFiles(m, 'jest', ['cart']), ['src/Cart.spec.ts', 'src/cart.test.ts', 'src/cart/totals.test.ts'], 'jest: a case-insensitive regex over the path');
+  assert.deepEqual(jsTestFiles(m, 'jest', ['out\\.test']), ['src/checkout.test.ts']);
+  assert.deepEqual(jsTestFiles(m, 'vitest', ['cart']), ['src/cart.test.ts', 'src/cart/totals.test.ts'], 'vitest: a substring of the path');
+  assert.deepEqual(jsTestFiles(m, 'node-test', ['cart']), [], 'node: a path or directory');
+  assert.deepEqual(jsTestFiles(m, 'node-test', ['src/cart']), ['src/cart/totals.test.ts']);
 });
 
 /* ---------------- reports ---------------- */
@@ -128,6 +142,16 @@ test('observeV8: what ran is attributed to its test file; direct links count as 
   assert.deepEqual([o.pairs, o.edges], [[], []], 'coverage has no caller -> callee pairs: no edge is marked observed');
 });
 
+test('observeV8: a file whose run ended cleanly but reported no test is not collected, never an error', () => {
+  const m = { symbols: SYMS.map(s => ({ group: 'prod', ...s })), tests: [{ id: 'e2e/login.spec.ts:logs in', file: 'e2e/login.spec.ts', direct: [] }], fixtureBindings: [] };
+  const runs = [{ file: 'e2e/login.spec.ts', exitCode: 0, timedOut: false, network: [], outcomes: { tests: [], suiteErrors: [] }, coverage: [] },
+    { file: 'src/a.test.ts', exitCode: 1, timedOut: false, network: [], outcomes: { tests: [], suiteErrors: [] }, coverage: [] }];
+  const o = observeV8(m, runs, { root: '/r', readFile: () => TEXT, node: 'v22' });
+  assert.deepEqual(o.notCollected, ['e2e/login.spec.ts']);
+  assert.equal(o.outcome.errors, 1, 'a run that failed with no report is still an error');
+  assert.deepEqual(o.failures.map(f => f.nodeid), ['src/a.test.ts']);
+});
+
 /* ---------------- end to end on fixtures/trace-js ---------------- */
 
 const mineFixture = repo => {
@@ -174,6 +198,27 @@ test('the repo\'s node_modules is linked into the copy read-only: a test can imp
   assert.deepEqual(Object.fromEntries(Object.entries(t.byTest).map(([k, v]) => [k.split(':').pop(), v.status])), { 'pads from node_modules': 'passed', 'cannot write into node_modules': 'failed' });
   assert.deepEqual(t.deniedBySandbox.map(d => [d.nodeid.split('::').pop(), d.permission]), [['cannot write into node_modules', true]]);
   assert.deepEqual(readdirSync(join(repo, 'node_modules', 'pad')).sort(), ['index.js', 'package.json']);
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+test('a workspace package linked from node_modules into the repo is imported from the copy, not the hidden repo', { skip }, () => {
+  const repo = realpathSync(gitRepo(REPO));
+  mkdirSync(join(repo, 'packages', 'shared'), { recursive: true });
+  writeFileSync(join(repo, 'packages', 'shared', 'package.json'), '{ "name": "@app/shared", "main": "index.js" }');
+  writeFileSync(join(repo, 'packages', 'shared', 'index.js'), "function shout(s) { return s + '!'; }\nmodule.exports = shout;\n");
+  mkdirSync(join(repo, 'node_modules', '@app'), { recursive: true });
+  symlinkSync('../../packages/shared', join(repo, 'node_modules', '@app', 'shared'));
+  writeFileSync(join(repo, '.gitignore'), 'node_modules\n');
+  writeFileSync(join(repo, 'test', 'ws.test.mjs'), ["import { test } from 'node:test';", "import assert from 'node:assert/strict';", "import shout from '@app/shared';", '',
+    "test('imports a workspace package', () => { assert.equal(shout('x'), 'x!'); });", ''].join('\n'));
+  git(repo, 'add', '-A');
+  const out = mineFixture(repo);
+  const r = trace(out, 'node --test test/ws.test.mjs');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(Object.values(t.byTest).map(v => v.status), ['passed']);
+  assert.deepEqual(t.deniedBySandbox, []);
+  assert.deepEqual(t.ran['packages/shared/index.js:shout'], ['test/ws.test.mjs'], 'the package ran from the copy, so it maps onto the code map');
   cleanup(dirname(repo)); cleanup(join(out, '..'));
 });
 

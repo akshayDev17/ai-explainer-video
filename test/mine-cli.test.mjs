@@ -55,6 +55,21 @@ test('exit 1: a bad --group or an unmined --lang', () => {
   assert.match(run(RESOLVER, '--out', out(), '--lang', 'go').stderr, /mined languages are python and typescript/);
 });
 
+test('--lang takes python and typescript (which covers JavaScript), each mining only its own files; no other spelling', () => {
+  const polyglot = join(FIXTURES, 'polyglot');
+  const py = mine(polyglot, '--lang', 'python'), tsx = mine(polyglot, '--lang', 'typescript');
+  assert.equal(py.status, 0, py.stderr);
+  assert.equal(tsx.status, 0, tsx.stderr);
+  const files = m => [...new Set(m.symbols.map(s => s.file.slice(s.file.lastIndexOf('.'))))].sort();
+  assert.deepEqual(files(py.codemap), ['.py']);
+  assert.deepEqual(files(tsx.codemap), ['.ts', '.tsx']);
+  for (const alias of ['py', 'ts', 'javascript', 'js']) {
+    const r = run(polyglot, '--out', out(), '--lang', alias);
+    assert.equal(r.status, 1, alias);
+    assert.match(r.stderr, new RegExp(`--lang ${alias}: mined languages are python and typescript`));
+  }
+});
+
 test('the repo is never written to, and two runs produce identical code maps', () => {
   const before = listing(RESOLVER);
   const a = mine(RESOLVER), b = mine(RESOLVER);

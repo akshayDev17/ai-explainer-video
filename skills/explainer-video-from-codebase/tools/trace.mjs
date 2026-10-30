@@ -49,7 +49,7 @@ import { pickSandbox, sandboxArgv, exposable, SANDBOX_LABEL } from './lib/sandbo
 import { redactSecrets } from './lib/redact.mjs';
 import { observe } from './lib/observe.mjs';
 import { observeV8, parseTap, parseJestJson } from './lib/observe-v8.mjs';
-import { recogniseJs, jsTestFiles, passThrough, runnerBin, nodeModulesDirs, fileArgv } from './lib/trace-js.mjs';
+import { recogniseJs, jsTestFiles, passThrough, runnerBin, nodeModulesDirs, nodeModulesLinks, fileArgv } from './lib/trace-js.mjs';
 
 const fail = (code, msg) => { console.error(`[trace] ${msg}`); process.exit(code); };
 const PAYLOAD = join(dirname(fileURLToPath(import.meta.url)), 'trace', 'python');
@@ -92,7 +92,7 @@ function splitCommand(s) {
 }
 const COMMAND = flags.get('--test-command');
 const words = splitCommand(COMMAND);
-const NOT_TEST = `refused: "${COMMAND}" is not a recognised test command. Accepted: pytest [args], py.test [args], python -m pytest [args], python -m unittest [args] (python, python3 or python3.N, by name or path); node --test [--test-* flags] [paths], npx jest [args], npx vitest [run] [args] (or jest / vitest from the repo's node_modules/.bin); with no shell syntax and no wrapper, and none of the flags the trace sets itself (watch, reporter, coverage, pool); nothing but the repo's own test suite is ever traced`;
+const NOT_TEST = `refused: "${COMMAND}" is not a recognised test command. Accepted: pytest [args], py.test [args], python -m pytest [args], python -m unittest [args] (python, python3 or python3.N, by name or path); node --test [--test-* flags] [paths], npx jest [args], npx vitest [run] [args] (or jest / vitest from the repo's node_modules/.bin); with no shell syntax and no wrapper, a jest or vitest flag's value joined to it (-t=name, --config=file), and none of the flags the trace sets itself (watch, reporter, coverage, pool); nothing but the repo's own test suite is ever traced`;
 if (!words?.length) fail(3, NOT_TEST);
 let runner, testArgs, lang = 'python';
 const head = basename(words[0]);
@@ -133,7 +133,7 @@ const bin = lang === 'js' && runner !== 'node-test' ? runnerBin(ROOT, runner) : 
 if (lang === 'js' && runner !== 'node-test' && !bin)
   fail(1, `refused: ${runner} is not installed in the repo (no node_modules/.bin/${runner}): tracing runs only the repo's own installed test runner and never installs packages`);
 const jsFiles = lang === 'js' ? jsTestFiles(m, runner, testArgs) : [];
-if (lang === 'js' && !jsFiles.length) fail(2, `no test file in the code map matches ${runner}'s test-file pattern${testArgs.some(a => !a.startsWith('-')) ? ' under the paths given' : ''}: nothing to trace`);
+if (lang === 'js' && !jsFiles.length) fail(2, `no test file in the code map matches ${runner}'s test-file pattern${testArgs.some(a => !a.startsWith('-')) ? ' among the files the paths or filters given select' : ''}: nothing to trace`);
 const runArgs = runner === 'pytest' && !testArgs.some((a, i) => a === 'no:cacheprovider' && testArgs[i - 1] === '-p') ? [...testArgs, '-p', 'no:cacheprovider'] : testArgs;
 const testArgv = lang === 'js' ? fileArgv({ runner, node: exe, bin, flags: passThrough(testArgs), file: '<test file>', report: '<report>' })
   : /^(pytest|py\.test)$/.test(head) ? [exe, ...runArgs] : [exe, '-m', runner, ...runArgs];
@@ -267,8 +267,13 @@ process.exit(code);
 
 /* ---------------- JavaScript / TypeScript: one run per test file, under V8 coverage ---------------- */
 async function runJs({ copied, changedFiles, shown }) {
-  // the repo's node_modules are not copied (git ignores them): linked into the copy, read-only through the sandbox
-  for (const d of nodeModulesDirs(ROOT)) if (!existsSync(join(COPY, d))) { mkdirSync(dirname(join(COPY, d)), { recursive: true }); symlinkSync(join(ROOT, d), join(COPY, d)); }
+  // the repo's node_modules are not copied (git ignores them): linked into the copy entry by entry, read-only through
+  // the sandbox; a workspace package's link points at its copy
+  const nm = nodeModulesDirs(ROOT);
+  for (const d of nm) if (!existsSync(join(COPY, d))) {
+    mkdirSync(join(COPY, d), { recursive: true });
+    for (const l of nodeModulesLinks(ROOT, d, nm)) { mkdirSync(dirname(join(COPY, l.rel)), { recursive: true }); symlinkSync(l.copy != null ? join(COPY, l.copy) : join(ROOT, l.rel), join(COPY, l.rel)); }
+  }
   for (const f of readdirSync(JS_PAYLOAD)) copyFileSync(join(JS_PAYLOAD, f), join(SCRATCH, 'trace', f));
   const nodeVersion = (spawnSync(exe, ['--version'], { encoding: 'utf8', env: {} }).stdout || '').trim() || null;
   console.log(`[trace] ${SANDBOX_LABEL[box.kind]} · ${copied} files copied to scratch · ${runner}: ${jsFiles.length} test files, one run each under V8 coverage (limit ${timeoutSec}s in all)`);
@@ -318,13 +323,14 @@ function reportJs(o, { durationMs, tail, changedFiles, timedOut, exitCode, ranFi
     optIn: { by: 'user', at: new Date().toISOString(), command: COMMAND },
     sandbox: SANDBOX_LABEL[box.kind], runner, argv: testArgv, files: jsFiles, ranFiles, timeoutSec, timedOut, exitCode, durationMs,
     codemap: { file: relative(OUT, CODEMAP), sha256: sha(CODEMAP), commit: m.commit ?? null, treeHash: m.treeHash ?? null, changedFiles },
-    granularity: o.granularity, outcome: o.outcome, failures: o.failures.map(redactMessage), deniedBySandbox: o.deniedBySandbox.map(redactMessage), summary: o.summary,
+    granularity: o.granularity, outcome: o.outcome, notCollected: o.notCollected, failures: o.failures.map(redactMessage), deniedBySandbox: o.deniedBySandbox.map(redactMessage), summary: o.summary,
     pairs: o.pairs, edges: o.edges, noStaticEdge: o.noStaticEdge, callbacks: o.callbacks, ran: o.ran, byFile: o.byFile, byTest: o.byTest,
   };
   writeFileSync(join(OUT, 'trace.json'), JSON.stringify(trace, null, 1) + '\n');
   const s = o.summary, oc = o.outcome, pct = (a, b) => b ? `${(100 * a / b).toFixed(1)}%` : '-';
   console.log(tail.split('\n').slice(-3).map(l => `  | ${l}`).join('\n'));
   console.log(`[trace] ${ranFiles.length}/${jsFiles.length} test files run · ${oc.collected} tests: ${oc.passed} passed, ${oc.failed} failed, ${oc.errors} errors, ${oc.skipped} skipped · ${(durationMs / 1000).toFixed(1)}s${timedOut ? ' · TIMED OUT, partial trace' : ''}`);
+  if (o.notCollected.length) console.log(`[trace] ${o.notCollected.length} test files ran but reported no test (the runner's config does not collect them, or they define none): ${o.notCollected.slice(0, 5).join(', ')}`);
   console.log(`[trace] functions that ran (V8 coverage, per test file): ${Object.entries(s.functionsRan).map(([g, v]) => `${g} ${v.ran}/${v.total}`).join(', ')} · ${s.unmappedFunctions} named functions matched no symbol (${s.anonymousCallbacks} anonymous callbacks ran inside the symbols above)`);
   console.log(`[trace] per test file: direct links whose target ran in their test's file ${s.directLinksPerTest.observed}/${s.directLinksPerTest.total} (${pct(s.directLinksPerTest.observed, s.directLinksPerTest.total)}, ${s.directLinksPerTest.tests} tests) · hooks that ran ${s.fixtureLinks.observed}/${s.fixtureLinks.total}`);
   console.log(`[trace] caller -> callee pairs: ${s.pairs}`);

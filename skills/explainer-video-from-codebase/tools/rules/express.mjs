@@ -3,8 +3,9 @@
    parameter annotated `Router` / `Express` / `Application`). `<app|router>.<method>(path, ...handlers)` and
    `<router>.route(path).<method>(...handlers)` make an `http` entry at the last handler; each handler before it is
    middleware, linked from that handler (`framework`, express.middleware). `<app|router>.use([prefix,] router)` mounts
-   a router: a route's path is every mount prefix up the chain, then its own; `:id` is written `{id}`. A function
-   handed to a registration is the router's to run, so it is never a call from the registering code. */
+   a router (a variable, a `require`, or a call of a function that returns one by name); the prefix is folded like a
+   route path (a const works). A route's path is every mount prefix up the chain, then its own; `:id` is written
+   `{id}`. A function handed to a registration is the router's to run, so it is never a call from the registering code. */
 import { addTsEdge, foldString } from '../lang/typescript.mjs';
 
 const METHOD = /^(get|post|put|patch|delete|del|all|options|head)$/;
@@ -23,6 +24,9 @@ export function expressRoutes(ts, R) {
     if (a.name) return routerOf(a.name, c);
     const req = /^require\(\s*["'`]([^"'`]+)["'`]\s*\)$/.exec(a.text);
     if (req) { const mod = R.resolveModule(req[1], c.module); const r = mod && R.exportOf(mod, '*'); return r?.var && isExpress(r.var, r.var) ? `${r.in}#${r.name}` : null; }
+    const callee = a.type === 'call_expression' && /^([\w$]+(?:\.[\w$]+)*)\s*\(/.exec(a.text);
+    const fn = callee && R.resolveExpr(callee[1], c)?.id;
+    for (const ret of fn ? ts.returns.filter(x => x.fn === fn && x.kind === 'name') : []) { const r = routerOf(ret.name, { ...ret, from: fn }); if (r) return r; }
     return null;
   };
   const handlerOf = (a, c) => {
@@ -38,8 +42,9 @@ export function expressRoutes(ts, R) {
     const owner = chained ? routerOf(chained.owner, c) : c.obj ? routerOf(c.obj, c) : null;
     if (!owner) return;
     if (c.attr === 'use') {
-      const prefix = c.args[0] && (c.args[0].type === 'string' || c.args[0].type === 'template_string') ? pathOf(c.args[0], c) : '';
-      for (const a of c.args) { const child = argRouter(a, c); if (child && child !== owner && !mounts.has(child)) mounts.set(child, { parent: owner, prefix: prefix || '' }); }
+      const first = c.args[0] && !argRouter(c.args[0], c) ? pathOf(c.args[0], c) : null;
+      const prefix = first?.startsWith('/') ? first : '';
+      for (const a of c.args) { const child = argRouter(a, c); if (child && child !== owner && !mounts.has(child)) mounts.set(child, { parent: owner, prefix }); }
       claimed.add(i);
       return;
     }

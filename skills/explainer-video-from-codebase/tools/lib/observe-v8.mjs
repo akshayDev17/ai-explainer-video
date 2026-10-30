@@ -8,7 +8,9 @@
    JavaScript), or the file with something appended (TypeScript with its types stripped in place, plus a sourceURL
    comment) and every named function sits on a line of the file that names it; through the script's source map when
    Node recorded one; and otherwise by name when exactly one symbol of that file has it. A named function that matches
-   nothing is counted, never guessed; an anonymous one (a callback inside a symbol) has nothing of its own to mark. */
+   nothing is counted, never guessed; an anonymous one (a callback inside a symbol) has nothing of its own to mark.
+   A file whose run ended cleanly but reported no test is listed as not collected (the runner's own config leaves it
+   out, or it defines none), never as an error. */
 import { fileURLToPath } from 'node:url';
 
 const byStr = (a, b) => a < b ? -1 : a > b ? 1 : 0;
@@ -141,7 +143,7 @@ export function observeV8(m, runs, { root, readFile, node }) {
   const grp = id => sym.get(id)?.group || '?';
   const tests = (m.tests || []).filter(t => /\.[cm]?[jt]sx?$/.test(t.file));
   const testsIn = new Map(); for (const t of tests) (testsIn.get(t.file) || testsIn.set(t.file, []).get(t.file)).push(t);
-  const ranIn = new Map(), statusBy = new Map(), nodeidsOf = new Map(), failures = [], denied = [];
+  const ranIn = new Map(), statusBy = new Map(), nodeidsOf = new Map(), failures = [], denied = [], notCollected = [];
   const outcome = { collected: 0, passed: 0, failed: 0, errors: 0, skipped: 0, xfailed: 0, xpassed: 0 };
   let unmapped = 0, scripts = 0, anonymous = 0;
   for (const run of runs) {
@@ -164,6 +166,7 @@ export function observeV8(m, runs, { root, readFile, node }) {
       if (network.length || PERMISSION.test(t.message)) denied.push({ test: id, nodeid, status: 'failed', network, permission: !network.length && PERMISSION.test(t.message), message: t.message });
     }
     const errs = [...run.outcomes.suiteErrors];
+    if (!reported.length && !errs.length && run.exitCode === 0 && !run.timedOut) notCollected.push(run.file);
     if (!reported.length && !errs.length && (run.exitCode !== 0 || run.timedOut)) errs.push({ message: run.timedOut ? 'cut off by the time limit' : `the runner exited ${run.exitCode} and reported no test` });
     for (const e of errs) {
       outcome.errors++;
@@ -200,7 +203,7 @@ export function observeV8(m, runs, { root, readFile, node }) {
   for (const [file, set] of [...ranIn].sort(([a], [b]) => byStr(a, b))) for (const id of set) (ran[id] ||= []).push(file);
   const byFile = Object.fromEntries([...ranIn].sort(([a], [b]) => byStr(a, b)).map(([file, set]) => [file, { ran: [...set].sort(byStr) }]));
   return {
-    runtime: { node }, granularity: 'test-file', outcome, failures, deniedBySandbox: denied,
+    runtime: { node }, granularity: 'test-file', outcome, notCollected: notCollected.sort(byStr), failures, deniedBySandbox: denied,
     summary: {
       scripts, functionsRan: functionsRanBy, unmappedFunctions: unmapped, anonymousCallbacks: anonymous,
       pairs: 'not recorded: V8 coverage says which functions ran in a test file, not which called which (an inspector-based tracer would be needed)',
