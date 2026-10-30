@@ -6,13 +6,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync, writeFileSync, mkdirSync, cpSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync, mkdirSync, cpSync, symlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { FIXTURES, SKILL, scratch, cleanup, tool, gitRepo, assertGolden } from './helpers.mjs';
-import { sandboxWorks } from '../skills/explainer-video-from-codebase/tools/lib/sandbox.mjs';
+import { sandboxWorks, readRunFile, readRunJson } from '../skills/explainer-video-from-codebase/tools/lib/sandbox.mjs';
 import { recogniseGo, goModuleDir, goTestsToRun, goTestArgv, parseGoTestJson, parseCoverProfile } from '../skills/explainer-video-from-codebase/tools/lib/trace-go.mjs';
-import { recogniseMake, makeArgv, makefileShell, parseGcov, parseCTestOutput } from '../skills/explainer-video-from-codebase/tools/lib/trace-c.mjs';
+import { recogniseMake, makeArgv, makefileShell, lineShape, parseGcov, parseCTestOutput } from '../skills/explainer-video-from-codebase/tools/lib/trace-c.mjs';
 import { symbolsRan, linesToBlocks, observeCoverage } from '../skills/explainer-video-from-codebase/tools/lib/observe-coverage.mjs';
 
 const OPT_IN = '--i-ran-this-by-the-user';
@@ -76,6 +76,21 @@ test('the Go module the run uses, and the tests it runs: one alone per run, in t
     tests: [{ id: 'app_test.go:TestApp', file: 'app_test.go' }, { id: 'tools/gen/gen_test.go:TestGen', file: 'tools/gen/gen_test.go' }] };
   assert.deepEqual(goTestsToRun(nested, recogniseGo(['go', 'test', './...']), '').map(t => t.name), ['TestApp'], 'a nested module\'s tests are its own: go test ./... skips them');
   assert.deepEqual(goTestsToRun(nested, recogniseGo('go -C tools test ./...'.split(' ')), 'tools').map(t => t.name), ['TestGen']);
+});
+
+test('a recipe line\'s shape: what its exit status can say about the programs it runs', () => {
+  const shapes = { './tests/test_cart': 'single', './t > log 2>&1': 'single', 'VAR=1 ./t "a;b"': 'single', './a && ./b': 'and', 'cd t && ./t': 'and',
+    './a; ./b': 'other', './a || true': 'other', './a | tee log': 'other', '(./a)': 'other', './t $(cat args)': 'other', 'for t in a b; do ./$t || exit 1; done': 'other', './a &': 'other' };
+  assert.deepEqual(Object.fromEntries(Object.keys(shapes).map(c => [c, lineShape(c)])), shapes);
+});
+
+test('a file the run wrote is read from outside the sandbox only as a plain file, never through a symlink', () => {
+  const d = scratch(), secret = join(d, 'secret.txt');
+  writeFileSync(secret, 'not for the trace\n'); writeFileSync(join(d, 'report.json'), '{"ok":true}');
+  symlinkSync(secret, join(d, 'output')); symlinkSync(join(d, 'report.json'), join(d, 'linked.json')); mkdirSync(join(d, 'adir'));
+  assert.deepEqual([readRunFile(join(d, 'output')), readRunFile(join(d, 'adir')), readRunFile(join(d, 'missing')), readRunFile(join(d, 'report.json'))], [null, null, null, '{"ok":true}']);
+  assert.deepEqual([readRunJson(join(d, 'report.json')), readRunJson(join(d, 'linked.json')), readRunJson(secret)], [[{ ok: true }], [], []]);
+  cleanup(d);
 });
 
 /* ---------------- reports and coverage onto the code map ---------------- */
@@ -231,4 +246,37 @@ test('make test: a symlink the run plants where the trace reads its counters is 
   assert.equal(readFileSync(victim, 'utf8'), 'untouched\n');
   assert.equal(read(out, 'trace.json').byTest['tests/test_cart.c:test_total'].status, 'passed');
   cleanup(dirname(victim)); cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+test('make test: a recipe line gives its tests a status only when its shape lets the exit status speak for each binary', { skip: skipFor(['cc', 'make', 'gcov']) }, () => {
+  const more = { 'tests/test_more.c': ['#include <assert.h>\n#include "../src/cart.h"\n\nstatic void test_more(void) { assert(discount(50) == 50); }\n\nint main(void) {\n  test_more();\n  return 0;\n}\n', 0o644],
+    'tests/test_abort.c': ['#include <assert.h>\n#include "../src/cart.h"\n\nstatic void test_abort(void) { assert(discount(1) == 99); }\n\nint main(void) {\n  test_abort();\n  return 0;\n}\n', 0o644] };
+  const rules = `${C_RULES}\ntests/test_more: tests/test_more.c src/cart.c src/cart.h\n\t$(CC) -O0 -g -o $@ tests/test_more.c src/cart.c\n\n`
+    + 'tests/test_abort: tests/test_abort.c src/cart.c src/cart.h\n\t$(CC) -O0 -g -o $@ tests/test_abort.c src/cart.c\n';
+  const statuses = line => {
+    const repo = cRepo(`test: tests/test_cart tests/test_net tests/test_more tests/test_abort\n\t${line}\n\n${rules}`, more), out = mineFixture(repo);
+    const r = trace(out, 'make test');
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    const t = read(out, 'trace.json');
+    cleanup(dirname(repo)); cleanup(join(out, '..'));
+    return Object.fromEntries(Object.entries(t.byTest).filter(([, v]) => v.status !== 'not run').map(([k, v]) => [k.split(':').pop(), v.status]));
+  };
+  assert.deepEqual(statuses('./tests/test_net; ./tests/test_cart'), { test_total: 'unknown', test_discount: 'unknown', test_ping: 'unknown' },
+    'the line exits 0 because its last binary passed: the failing test_net is never passed');
+  assert.deepEqual(statuses('./tests/test_cart && ./tests/test_abort'), { test_total: 'unknown', test_discount: 'unknown' },
+    'the second binary aborted and wrote no counters: the first is not blamed');
+  assert.deepEqual(statuses('./tests/test_cart && ./tests/test_more'), { test_total: 'passed', test_discount: 'passed', test_more: 'passed' });
+});
+
+test('a process a test leaves behind is killed when its run ends', { skip: skipFor(['go']) }, () => {
+  const marker = `${17 + Math.floor(Math.random() * 1000) / 1000 + 0.0001}`, repo = gitRepo();
+  writeFileSync(join(repo, 'go.mod'), 'module example.com/linger\n\ngo 1.22\n');
+  writeFileSync(join(repo, 'linger_test.go'), `package linger\n\nimport (\n\t"os/exec"\n\t"testing"\n)\n\nfunc TestLeaves(t *testing.T) {\n\tif err := exec.Command("/bin/sleep", "${marker}").Start(); err != nil {\n\t\tt.Fatal(err)\n\t}\n}\n`);
+  const out = mineFixture(repo), r = trace(out, 'go test ./...');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.equal(read(out, 'trace.json').byTest['linger_test.go:TestLeaves'].status, 'passed');
+  const alive = spawnSync('pgrep', ['-f', `sleep ${marker}`], { encoding: 'utf8' });
+  spawnSync('pkill', ['-f', `sleep ${marker}`]);
+  assert.equal(alive.stdout.trim(), '', 'nothing the run started outlives it');
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
 });

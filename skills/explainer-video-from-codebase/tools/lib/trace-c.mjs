@@ -7,13 +7,14 @@
      trace/c/fmtrace-sh, which runs each recipe line under the shell the Makefile's own top-level `SHELL =` names
      (else /bin/sh), with the line's .SHELLFLAGS, and GCOV_PREFIX pointing at a dir of its own: the counters each
      line's test binary writes land apart, and its exit status and output are kept beside them;
-   - each recipe line that wrote counters is one unit (`granularity: binary`); after the run, each counter file and
-     the notes file the compiler wrote beside its object are copied into a fresh dir outside scratch and read there
-     with `gcov -t`, inside the same sandbox, for the line counts of each source it covers. A test whose own lines ran
-     in a unit belongs to that unit (the first, if several), and its direct links are judged against that unit's
-     coverage; its status comes from GoogleTest's `[ RUN ]` / `[ OK ]` / `[ FAILED ]` lines or Unity's
-     `file:line:test:PASS` lines, else from its recipe line's exit status: passed on 0; failed otherwise, unless the
-     line ran more than one program's `main` (`./a && ./b`, a loop), when it is `unknown`. */
+   - each recipe line that wrote counters is one unit (`granularity: binary`); after the run, inside the same sandbox,
+     each counter file and the notes file the compiler wrote beside its object are copied into a fresh dir and read
+     there with `gcov -t` for the line counts of each source it covers. A test whose own lines ran in a unit belongs to
+     that unit (the first, if several), and its direct links are judged against that unit's coverage; its status
+     comes from GoogleTest's `[ RUN ]` / `[ OK ]` / `[ FAILED ]` lines or Unity's `file:line:test:PASS` lines, else from
+     its recipe line's exit status, as far as the line's shape (lineShape) lets that status speak for one binary: one
+     simple command running one program's `main` is passed on 0 and failed otherwise; an `&&` chain is passed on 0
+     and `unknown` otherwise; any other line (`./a; ./b`, `||`, a pipe, a loop, a subshell) is `unknown` either way. */
 import { posix } from 'node:path';
 
 /* -> { runner: 'make', dir, target } or null */
@@ -32,6 +33,30 @@ export function makefileShell(text) {
   let sh = null;
   for (const m of text.matchAll(/^(?:(?:export|override)\s+)*SHELL\s*:{0,3}=[ \t]*(.*?)\s*(?:#.*)?$/gm)) sh = m[1];
   return sh && !sh.includes('$') ? sh : null;
+}
+
+const KEYWORDS = new Set(['!', 'if', 'then', 'else', 'elif', 'fi', 'for', 'while', 'until', 'do', 'done', 'case', 'esac', 'select', 'function', 'time']);
+/* what a recipe line's exit status can say about the programs it runs: 'single' (one simple command), 'and' (simple
+   commands joined by `&&`, so 0 means each one passed) or 'other' (`;`, `||`, `|`, `&`, a newline, a subshell or group,
+   a command substitution, a compound command); quotes and redirections are read as a shell would */
+export function lineShape(cmd) {
+  const segs = ['']; let q = null;
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    if (q === "'") { if (c === "'") q = null; segs[segs.length - 1] += 'x'; continue; }
+    if (c === '`' || (c === '$' && cmd[i + 1] === '(')) return 'other';
+    if (c === '\\') { i++; segs[segs.length - 1] += 'x'; continue; }
+    if (q === '"') { if (c === '"') q = null; segs[segs.length - 1] += 'x'; continue; }
+    if (c === "'" || c === '"') { q = c; segs[segs.length - 1] += 'x'; continue; }
+    if (c === '&' && cmd[i + 1] === '&') { segs.push(''); i++; continue; }
+    if (c === '>' || c === '<') { if (cmd[i + 1] === '&' || cmd[i + 1] === c) i++; segs[segs.length - 1] += ' '; continue; }
+    if (';|&(){}\n'.includes(c)) return 'other';
+    segs[segs.length - 1] += c;
+  }
+  if (q) return 'other';
+  const heads = segs.map(x => x.trim().split(/\s+/).find(w => !/^\w+=/.test(w)));
+  if (heads.some(h => !h || KEYWORDS.has(h))) return 'other';
+  return segs.length > 1 ? 'and' : 'single';
 }
 
 export const makeArgv = ({ make, dir, target, shell }) => [make, ...(dir ? ['-C', dir] : []), target, 'CC=cc --coverage', 'CXX=c++ --coverage', `SHELL=${shell}`];

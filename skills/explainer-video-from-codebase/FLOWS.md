@@ -394,12 +394,16 @@ counters, exit 2) and `SHELL` set to `tools/trace/c/fmtrace-sh`, which runs each
 `.SHELLFLAGS`, under the shell the Makefile's own top-level `SHELL =` names (else `/bin/sh`), with `GCOV_PREFIX`
 pointing at a dir of its own, so the counters each test binary writes land apart, beside the line's exit status and
 output. Each recipe line that wrote counters is one unit, keyed by the line (`./tests/test_cart`):
-`granularity: "binary"`. After the run, each `.gcda` and the `.gcno` beside its object are copied into a fresh dir
-outside scratch and read there with `gcov -t`, inside the same sandbox. A binary that aborts writes no counters. A
-test belongs to the first unit its own lines ran in, and its direct links are judged against that unit's coverage;
-its status comes from GoogleTest (`[ OK ]`, `[ FAILED ]`) or Unity (`file:line:test:PASS`) output, else from its
-recipe line's exit status: `passed` on 0, else `failed`, or `unknown` when the line ran more than one program's `main`
-(`./a && ./b`, a loop), so no one binary's status can be told; `not run` when its lines never ran. Network errors in a
+`granularity: "binary"`. After the run, inside the same sandbox, each `.gcda` and the `.gcno` beside its object are
+copied into a fresh dir and read there with `gcov -t`; nothing outside the sandbox opens a file the run wrote except
+through a no-symlink read of a plain file, and the run's process group is killed when it ends. A binary that aborts
+writes no counters. A test belongs to the first unit its own lines ran in, and its direct links are judged against that
+unit's coverage; its status comes from GoogleTest (`[ OK ]`, `[ FAILED ]`) or Unity (`file:line:test:PASS`) output,
+else from its recipe line's exit status, as far as the line's shape lets that status speak for one binary: a single
+simple command that ran one program's `main` is `passed` on 0 and `failed` otherwise; an all-`&&` chain is `passed` on
+0 and `unknown` otherwise (a binary that aborted wrote no counters, so which one failed cannot be told); any other line
+(`./a; ./b`, `||`, a pipe, a loop, a subshell) is `unknown` either way, since its status is only its last command's;
+`not run` when its lines never ran. Network errors in a
 line's output (`connect: Operation not permitted`) put its failing test in `deniedBySandbox`. Neither runner records
 a caller → callee pair, so `pairs`, `edges`, `noStaticEdge` and `callbacks` are empty, and `outcome` adds `unknown` and
 `notRun`.

@@ -7,7 +7,7 @@
      empty dirs, a seccomp filter on unix sockets).
    There is no unsandboxed mode: where this platform's sandbox does not start, the caller refuses (exit 4). */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, mkdtempSync, rmSync, openSync, fstatSync, closeSync, constants } from 'node:fs';
 import { join, dirname, sep } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +30,19 @@ export function exposable(p, { scratch, hidden }) {
   if (!p || !existsSync(p)) return false;
   const d = strip(p);
   return !inside(strip(scratch), d) && !hidden.some(h => inside(strip(h), d));
+}
+
+// a file the sandboxed run wrote (or could have replaced), read from outside the sandbox: opened without following a
+// symlink, and read only when the open file is a plain file; null otherwise
+export function readRunFile(p) {
+  let fd = null;
+  try { fd = openSync(p, constants.O_RDONLY | constants.O_NOFOLLOW); return fstatSync(fd).isFile() ? readFileSync(fd, 'utf8') : null; }
+  catch { return null; } finally { if (fd != null) closeSync(fd); }
+}
+// the same, parsed as JSON: [value], or [] when it cannot be read or parsed
+export function readRunJson(p) {
+  const t = readRunFile(p); if (t == null) return [];
+  try { return [JSON.parse(t)]; } catch { return []; }
 }
 
 // the read rules the macOS profile gets for this run: nothing under a hidden path, except scratch and the read-only
