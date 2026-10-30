@@ -25,6 +25,7 @@ def _last_line(longrepr):
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item, nextitem):
     fm.CURRENT[0] = _key(item)
+    fm.OUTCOMES.setdefault(fm.CURRENT[0], {"nodeid": item.nodeid})
     yield
     fm.CURRENT[0] = None
 

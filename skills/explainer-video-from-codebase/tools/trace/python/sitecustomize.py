@@ -26,6 +26,7 @@ ORIGINS = tuple(sorted({o for r in os.environ.get("FM_TRACE_ORIGIN", "").split(o
                         for o in (os.path.abspath(r) + os.sep, os.path.realpath(r) + os.sep)}, key=len, reverse=True))
 HIDDEN = _dirs("FM_TRACE_HIDDEN")
 OUT = os.environ["FM_TRACE_OUT"]
+RUNNER = os.environ.get("FM_TRACE_RUNNER")
 # an interpreter or virtualenv that lives under a repo root is library code, not repo code
 _LIB = tuple({os.path.realpath(p) + os.sep for p in (sys.prefix, sys.base_prefix, sys.exec_prefix)})
 _FOLD = (".<lambda>", ".<genexpr>", ".<listcomp>", ".<dictcomp>", ".<setcomp>")
@@ -37,6 +38,7 @@ COLLECTED = [None]
 COLLECT_ERRORS = []
 CURRENT = [None]   # the running test's key, set around its setup, call and teardown
 _done = [False]
+_forked = [False]
 
 
 def _rel(f):
@@ -192,13 +194,22 @@ def _reset_in_child():
     OUTCOMES.clear()
     COLLECT_ERRORS.clear()
     COLLECTED[0] = None
+    _forked[0] = True
 
 
 def _on_term(signum, frame):
-    # the test the time limit cut off: its own record would come after this, so it gets one with no call phase,
-    # which counts as an error
-    if CURRENT[0] is not None:
-        OUTCOMES.setdefault(CURRENT[0], {}).setdefault("message", "cut off by the time limit")
+    # the test the time limit cut off, in the process that ran it (a forked worker's SIGTERM is not a cut-off): the
+    # phase it was in fails, as pytest counts it; under unittest the test is an error
+    if CURRENT[0] is not None and not _forked[0]:
+        rec = OUTCOMES.setdefault(CURRENT[0], {})
+        rec.setdefault("message", "cut off by the time limit")
+        if RUNNER == "pytest":
+            phases = ("setup", "call", "teardown") if rec.get("setup", "passed") == "passed" else ("setup", "teardown")
+            phase = next((p for p in phases if p not in rec), None)
+            if phase:
+                rec[phase] = "error" if phase == "call" else "failed"
+        else:
+            rec.setdefault("call", "error")
     _dump()
     os._exit(128 + signum)
 
@@ -216,6 +227,8 @@ def _wrap_unittest():
         key = "unittest::" + self.id()
         before = counts(result) if result is not None else None
         CURRENT[0] = key
+        if before is not None:
+            OUTCOMES[key] = {}
         try:
             return run(self, result)
         finally:
@@ -250,7 +263,7 @@ def _run_shadowed_sitecustomize():
 
 _run_shadowed_sitecustomize()
 _redirect_origin()
-if os.environ.get("FM_TRACE_RUNNER") == "unittest":
+if RUNNER == "unittest":
     _wrap_unittest()
 os.register_at_fork(after_in_child=_reset_in_child)
 if signal.getsignal(signal.SIGTERM) == signal.SIG_DFL:

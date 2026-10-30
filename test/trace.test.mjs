@@ -429,14 +429,17 @@ test('python -m unittest is traced too, attributed by test id', { skip }, () => 
   cleanup(join(out, '..'));
 });
 
-// a test the limit cut off counts as an error however far it got: mid-call under pytest, in a slow fixture's setup,
-// mid-test under unittest
-for (const [what, file, body, cmd, id] of [
-  ['mid-call', 'test_slow.py', 'def test_slow():\n    discount_for(1)\n    time.sleep(60)\n', 'python3 -m pytest -q tests/test_slow.py', 'tests.test_slow:test_slow'],
+// a test the limit cut off counts as an error in the phase it was in: mid-call under pytest, in a slow fixture's setup
+// or teardown (pytest's count: the test passed, its teardown is an error), mid-test under unittest
+for (const [what, file, body, cmd, id, want] of [
+  ['mid-call', 'test_slow.py', 'def test_slow():\n    discount_for(1)\n    time.sleep(60)\n', 'python3 -m pytest -q tests/test_slow.py', 'tests.test_slow:test_slow',
+    { status: 'error', phase: 'call', passed: 0 }],
   ['in a fixture\'s setup', 'test_slow_setup.py', 'import pytest\n\n\n@pytest.fixture\ndef slow():\n    discount_for(1)\n    time.sleep(60)\n\n\ndef test_slow_setup(slow):\n    pass\n',
-    'python3 -m pytest -q tests/test_slow_setup.py', 'tests.test_slow_setup:test_slow_setup'],
+    'python3 -m pytest -q tests/test_slow_setup.py', 'tests.test_slow_setup:test_slow_setup', { status: 'error', phase: 'setup', passed: 0 }],
+  ['in a fixture\'s teardown', 'test_slow_teardown.py', 'import pytest\n\n\n@pytest.fixture\ndef slow():\n    yield\n    discount_for(1)\n    time.sleep(60)\n\n\ndef test_slow_teardown(slow):\n    pass\n',
+    'python3 -m pytest -q tests/test_slow_teardown.py', 'tests.test_slow_teardown:test_slow_teardown', { status: 'passed', phase: 'teardown', passed: 1 }],
   ['under unittest', 'test_slow_case.py', 'import unittest\n\n\nclass SlowTest(unittest.TestCase):\n    def test_slow(self):\n        discount_for(1)\n        time.sleep(60)\n',
-    'python3 -m unittest tests.test_slow_case', 'tests.test_slow_case:SlowTest.test_slow'],
+    'python3 -m unittest tests.test_slow_case', 'tests.test_slow_case:SlowTest.test_slow', { status: 'error', phase: 'call', passed: 0 }],
 ]) test(`exit 5: the time limit stops the run and keeps the partial trace, marked; a test cut off ${what} is an error`, { skip }, () => {
   const repo = join(scratch(), 'repo');
   cpSync(REPO, repo, { recursive: true });
@@ -447,9 +450,26 @@ for (const [what, file, body, cmd, id] of [
   const t = read(out, 'trace.json');
   assert.equal(t.timedOut, true);
   assert.ok(t.byTest[id].ran.includes('shop.cart:discount_for'), 'what ran before the limit is kept');
-  assert.equal(t.byTest[id].status, 'error', 'a test the limit cut off did not pass');
-  assert.deepEqual([t.outcome.collected, t.outcome.passed, t.outcome.errors], [1, 0, 1]);
-  assert.deepEqual(t.failures.map(f => [f.test, f.status, f.message]), [[id, 'error', 'cut off by the time limit']]);
+  assert.equal(t.byTest[id].status, want.status);
+  assert.deepEqual([t.outcome.collected, t.outcome.passed, t.outcome.errors], [1, want.passed, 1]);
+  assert.deepEqual(t.failures.map(f => [f.test, f.status, f.phase, f.message]), [[id, want.status, want.phase, 'cut off by the time limit']]);
+  cleanup(join(repo, '..')); cleanup(join(out, '..'));
+});
+
+// a forked worker stopped with SIGTERM (as multiprocessing.Pool's terminate does) is not a cut-off: the test that forked
+// it keeps its own failure
+test('a forked worker\'s SIGTERM does not mark its test cut off', { skip }, () => {
+  const repo = join(scratch(), 'repo');
+  cpSync(REPO, repo, { recursive: true });
+  writeFileSync(join(repo, 'tests', 'test_fork.py'), ['import os', 'import signal', 'import time', '', '',
+    'def test_forks_a_worker():', '    pid = os.fork()', '    if pid == 0:', '        time.sleep(60)', '        os._exit(0)',
+    '    time.sleep(0.5)', '    os.kill(pid, signal.SIGTERM)', '    os.waitpid(pid, 0)', '    raise RuntimeError("its own failure")', ''].join('\n'));
+  const out = mineFixture(repo);
+  const r = trace(out, 'python3 -m pytest -q tests/test_fork.py');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(t.failures.map(f => [f.test, f.status, f.phase, f.message]),
+    [['tests.test_fork:test_forks_a_worker', 'failed', 'call', 'RuntimeError: its own failure']]);
   cleanup(join(repo, '..')); cleanup(join(out, '..'));
 });
 
