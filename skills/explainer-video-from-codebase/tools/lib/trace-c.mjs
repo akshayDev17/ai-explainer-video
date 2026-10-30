@@ -13,8 +13,9 @@
      that unit (the first, if several), and its direct links are judged against that unit's coverage; its status
      comes from GoogleTest's `[ RUN ]` / `[ OK ]` / `[ FAILED ]` lines or Unity's `file:line:test:PASS` lines, else from
      its recipe line's exit status, only when every command of the line (lineHeads: one simple command, or each part of
-     an all-`&&` chain) is a native executable the build produced in the copy (ELF or Mach-O, isNativeExecutable): one
-     such command is passed on 0 and failed otherwise, an `&&` chain of them is passed on 0 and `unknown` otherwise.
+     an all-`&&` chain) is a native executable the build produced in the copy (ELF or Mach-O, isNativeExecutable), a
+     relative head read from the dir that line ran in (a sub-make's own, as fmtrace-sh records it): one such command
+     is passed on 0 and failed otherwise, an `&&` chain of them is passed on 0 and `unknown` otherwise.
      Every other line is `unknown` either way: a script or a shell or interpreter at its head (`sh tests/run.sh`,
      `./run.sh` starting with `#!`, `env`, `python`), a command that runs others (`find -exec`, `xargs`, `cd`, `time`),
      `;`, `||`, `|`, a loop or a subshell. */

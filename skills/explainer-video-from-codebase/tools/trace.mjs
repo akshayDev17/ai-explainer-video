@@ -49,7 +49,7 @@ import { tmpdir, homedir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { pickSandbox, sandboxArgv, exposable, readRunFile, readRunJson, SANDBOX_LABEL } from './lib/sandbox.mjs';
+import { pickSandbox, sandboxArgv, exposable, readRunFile, readRunHead, readRunJson, SANDBOX_LABEL } from './lib/sandbox.mjs';
 import { redactSecrets } from './lib/redact.mjs';
 import { observe } from './lib/observe.mjs';
 import { observeV8, parseTap, parseJestJson } from './lib/observe-v8.mjs';
@@ -450,36 +450,41 @@ async function runC({ copied, copiedFiles, changedFiles, shown }) {
   console.log(`[trace] ${SANDBOX_LABEL[box.kind]} · ${copied} files copied to scratch · running: ${argv.join(' ')}, coverage per test binary (limit ${timeoutSec}s)`);
   const t0 = Date.now();
   const run = await runSandboxed(argv, env, { box: box.kind, readOnly: shown, limitMs: timeoutSec * 1000 });
-  // each recipe line fmtrace-sh ran, in order: its command, the commands it runs, exit status, output and the counters
-  // it wrote.
-  // The run wrote these files, so only plain files inside its own line dirs are read, never through a symlink
+  // each recipe line fmtrace-sh ran, in order: its command, the commands it runs, the dir it ran in (inside the copy,
+  // else null), exit status, output and the counters it wrote. The run wrote these files, so only plain files inside its own line dirs are read, never through a symlink
   const gcdasIn = d => { const out = []; (function walk(p) { let st; try { st = lstatSync(p); } catch { return; }
     if (st.isDirectory()) for (const n of readdirSync(p)) walk(join(p, n)); else if (st.isFile() && p.endsWith('.gcda')) out.push(p); })(d); return out; };
   const lines = [...new Set((readRunFile(join(UNITS, 'order')) || '').split('\n').map(l => basename(l.trim())).filter(n => /^line-\w+$/.test(n)))]
     .filter(n => lstatSync(join(UNITS, n), { throwIfNoEntry: false })?.isDirectory())
     .map(n => { const d = join(UNITS, n), st = readRunFile(join(d, 'status')), command = readRunFile(join(d, 'command')) ?? '';
-      return { dir: d, command, heads: lineHeads(command), status: st == null ? null : Number(st.trim()), output: readRunFile(join(d, 'output')) || '', gcdas: gcdasIn(join(d, 'gcda')) }; });
+      const cwd = readRunFile(join(d, 'cwd'))?.trim(), inCopy = cwd === COPY || cwd?.startsWith(COPY + '/');
+      return { dir: d, command, heads: lineHeads(command), cwd: inCopy ? cwd : null, status: st == null ? null : Number(st.trim()), output: readRunFile(join(d, 'output')) || '', gcdas: gcdasIn(join(d, 'gcda')) }; });
   // inside the same sandbox, each counter file and the notes file the compiler wrote beside its object are copied into
   // a fresh dir and read there by gcov: nothing outside the sandbox opens what the run wrote; a source is named as the
-  // compiler saw it, from the make dir
+  // compiler saw it, from the dir the line ran in
   const cFiles = new Set((m.files || []).filter(f => f.lang === 'c' || f.lang === 'cpp').map(f => f.path));
-  const toRepo = src => { const a = src.startsWith('/') ? (src.startsWith(COPY + '/') ? src.slice(COPY.length + 1) : null) : posix.normalize(posix.join(dir, src));
-    if (a && cFiles.has(a)) return a; const hits = [...cFiles].filter(f => f.endsWith('/' + src.replace(/^(\.\.?\/)+/, ''))); return hits.length === 1 ? hits[0] : null; };
-  // a head word that names a native executable in the copy which the repo did not hold: a binary the build produced
-  const repoHeld = new Set(copiedFiles);
-  const built = h => { const p = posix.normalize(h.startsWith('/') ? h : posix.join(COPY, dir, h));
-    return h.includes('/') && p.startsWith(COPY + '/') && !repoHeld.has(p.slice(COPY.length + 1)) && isNativeExecutable(readRunFile(p, null)); };
+  const toRepo = (src, cwd) => { const a = posix.normalize(src.startsWith('/') ? src : posix.join(cwd, src));
+    const rel = a.startsWith(COPY + '/') ? a.slice(COPY.length + 1) : null;
+    if (rel && cFiles.has(rel)) return rel; const tail = src.replace(/^(\.\.?\/)+/, ''); const hits = [...cFiles].filter(f => f === tail || f.endsWith('/' + tail)); return hits.length === 1 ? hits[0] : null; };
+  // a head word that names, from the dir its line ran in, a native executable in the copy which the repo did not hold:
+  // a binary the build produced (each distinct file is read once, its first 4 bytes only)
+  const repoHeld = new Set(copiedFiles), native = new Map();
+  const built = (h, cwd) => { if (!cwd || !h.includes('/')) return false;
+    const p = posix.normalize(h.startsWith('/') ? h : posix.join(cwd, h));
+    if (!p.startsWith(COPY + '/') || repoHeld.has(p.slice(COPY.length + 1))) return false;
+    if (!native.has(p)) native.set(p, isNativeExecutable(readRunHead(p, 4)));
+    return native.get(p); };
   const GCOV_COPY = 'd=$(mktemp -d "$TMPDIR/gcov-XXXXXX") && cp -- "$1" "$d/x.gcda" && cp -- "$2" "$d/x.gcno" && exec "$3" -t -o "$d" "$d/x.gcda"';
   const units = [], seen = new Map();
   for (const l of lines.filter(x => x.gcdas.length)) {
-    const counts = new Map();
+    const counts = new Map(), cwd = l.cwd || join(COPY, dir);
     for (const g of l.gcdas) {
       const gcno = g.slice(join(l.dir, 'gcda').length).replace(/\.gcda$/, '.gcno');
-      const r = await runSandboxed(['/bin/sh', '-c', GCOV_COPY, 'fmtrace-gcov', g, gcno, gcov], env, { box: box.kind, readOnly: shown, limitMs: 60000, cwd: join(COPY, dir) });
-      for (const [src, ls] of parseGcov(r.stdout)) { const f = toRepo(src); if (f) (counts.get(f) || counts.set(f, []).get(f)).push(...linesToBlocks(ls)); }
+      const r = await runSandboxed(['/bin/sh', '-c', GCOV_COPY, 'fmtrace-gcov', g, gcno, gcov], env, { box: box.kind, readOnly: shown, limitMs: 60000, cwd });
+      for (const [src, ls] of parseGcov(r.stdout)) { const f = toRepo(src, cwd); if (f) (counts.get(f) || counts.set(f, []).get(f)).push(...linesToBlocks(ls)); }
     }
     const n = (seen.get(l.command) || 0) + 1; seen.set(l.command, n);
-    const binaries = !!l.heads && l.heads.every(built);
+    const binaries = !!l.heads && l.heads.every(h => built(h, l.cwd));
     units.push({ key: n > 1 ? `${l.command} #${n}` : l.command, line: l, tests: [], ran: symbolsRan(m, counts), provesPass: binaries, provesFail: binaries && l.heads.length === 1 });
   }
   const durationMs = Date.now() - t0;

@@ -10,7 +10,7 @@ import { readFileSync, readdirSync, writeFileSync, mkdirSync, cpSync, symlinkSyn
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { FIXTURES, SKILL, scratch, cleanup, tool, gitRepo, assertGolden } from './helpers.mjs';
-import { sandboxWorks, readRunFile, readRunJson } from '../skills/explainer-video-from-codebase/tools/lib/sandbox.mjs';
+import { sandboxWorks, readRunFile, readRunHead, readRunJson } from '../skills/explainer-video-from-codebase/tools/lib/sandbox.mjs';
 import { recogniseGo, goModuleDir, goTestsToRun, goTestArgv, parseGoTestJson, parseCoverProfile } from '../skills/explainer-video-from-codebase/tools/lib/trace-go.mjs';
 import { recogniseMake, makeArgv, makefileShell, lineHeads, isNativeExecutable, parseGcov, parseCTestOutput } from '../skills/explainer-video-from-codebase/tools/lib/trace-c.mjs';
 import { symbolsRan, linesToBlocks, observeCoverage } from '../skills/explainer-video-from-codebase/tools/lib/observe-coverage.mjs';
@@ -94,6 +94,12 @@ test('a file the run wrote is read from outside the sandbox only as a plain file
   symlinkSync(secret, join(d, 'output')); symlinkSync(join(d, 'report.json'), join(d, 'linked.json')); mkdirSync(join(d, 'adir'));
   assert.deepEqual([readRunFile(join(d, 'output')), readRunFile(join(d, 'adir')), readRunFile(join(d, 'missing')), readRunFile(join(d, 'report.json'))], [null, null, null, '{"ok":true}']);
   assert.deepEqual([readRunJson(join(d, 'report.json')), readRunJson(join(d, 'linked.json')), readRunJson(secret)], [[{ ok: true }], [], []]);
+  assert.deepEqual([readRunHead(join(d, 'report.json'), 4)?.toString(), readRunHead(join(d, 'output'), 4)], ['{"ok', null], 'only the bytes asked for, never through a symlink');
+  assert.equal(spawnSync('mkfifo', [join(d, 'fifo')]).status, 0);
+  const sandboxLib = join(SKILL, 'tools', 'lib', 'sandbox.mjs');
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', `import { readRunFile } from ${JSON.stringify(sandboxLib)}; console.log(readRunFile(${JSON.stringify(join(d, 'fifo'))}))`],
+    { encoding: 'utf8', timeout: 10000 });
+  assert.deepEqual([r.signal, r.stdout.trim()], [null, 'null'], 'a FIFO the run left is not waited on');
   cleanup(d);
 });
 
@@ -295,5 +301,16 @@ test('a process a test leaves behind is killed when its run ends', { skip: skipF
   const alive = spawnSync('pgrep', ['-f', `sleep ${marker}`], { encoding: 'utf8' });
   spawnSync('pkill', ['-f', `sleep ${marker}`]);
   assert.equal(alive.stdout.trim(), '', 'nothing the run started outlives it');
+  cleanup(dirname(repo)); cleanup(join(out, '..'));
+});
+
+test('make test: a sub-make\'s recipe line is read from its own dir: its binary there gives its tests a status', { skip: skipFor(['cc', 'make', 'gcov']) }, () => {
+  const sub = 'check: test_cart\n\t./test_cart\n\ntest_cart: test_cart.c ../src/cart.c ../src/cart.h\n\t$(CC) -O0 -g -o $@ test_cart.c ../src/cart.c\n';
+  const repo = cRepo('test:\n\t$(MAKE) -C tests check\n', { 'tests/Makefile': [sub, 0o644] }), out = mineFixture(repo);
+  const r = trace(out, 'make test');
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const t = read(out, 'trace.json');
+  assert.deepEqual(['tests/test_cart.c:test_total', 'tests/test_cart.c:test_discount'].map(id => t.byTest[id].status), ['passed', 'passed']);
+  assert.ok(t.ran['src/cart.c:cart_total'], 'a source the sub-make compiled as ../src/cart.c is src/cart.c');
   cleanup(dirname(repo)); cleanup(join(out, '..'));
 });
