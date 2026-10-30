@@ -1,0 +1,14 @@
+#!/bin/sh
+# fmtrace-sh — trace.mjs's recipe shell for `make` (SHELL=<this>): each recipe line runs, with the .SHELLFLAGS make
+# hands it, under the shell the Makefile itself names ($FM_TRACE_SHELL, else /bin/sh), with the coverage counters it
+# writes routed below a dir of its own (GCOV_PREFIX), so each test binary a line runs is measured on its own. Beside
+# them: the line, the dir it runs in (a sub-make's own), its exit status and a copy of its output (stdout and stderr
+# still go out apart, so a $(shell …) reads only stdout). $FM_TRACE_UNITS/order lists the dirs in the order the lines
+# ran.
+u=$(mktemp -d "$FM_TRACE_UNITS/line-XXXXXX") || exit 70
+echo "$u" >> "$FM_TRACE_UNITS/order"
+for a in "$@"; do line=$a; done
+printf '%s' "$line" > "$u/command"
+pwd -P > "$u/cwd"
+{ { { GCOV_PREFIX=$u/gcda ${FM_TRACE_SHELL:-/bin/sh} "$@"; echo $? > "$u/status"; } | tee -a "$u/output"; } 2>&1 1>&3 | tee -a "$u/output" 1>&2; } 3>&1
+exit "$(cat "$u/status")"

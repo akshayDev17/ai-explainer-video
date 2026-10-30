@@ -1,11 +1,16 @@
 {
  "series": [
-  { "flow": "import", "why": "prod #2: a button in the browser that reaches the Python import route" },
+  { "flow": "import", "why": "prod #3: a button in the browser that reaches the Python import route" },
   { "flow": "search", "why": "prod #1: the search page and both backend searches it calls" },
+  { "flow": "stock", "why": "prod #2: the stock page reads a book's stock from the Go inventory service" },
+  { "flow": "isbn-check", "why": "prod #6: the C tool's check command and the checksum it runs" },
   { "flow": "eval-search", "why": "eval #1: the harness that grades the search route over HTTP" }
  ],
  "skipped": [
-  { "entry": "frontend/src/pages/JobPage.tsx:JobPage", "rank": "prod #3", "why": "a status read with no logic beyond the route it calls" }
+  { "entry": "frontend/src/pages/JobPage.tsx:JobPage", "rank": "prod #4", "why": "a status read with no logic beyond the route it calls" },
+  { "entry": "services/inventory/cmd/inventory/main.go:main", "rank": "prod #5", "why": "only wires the store into the server; the routes it registers are the stock flow's segments" },
+  { "entry": "native/isbn/src/cli.c:cmd_convert", "rank": "prod #7", "why": "runs the same ISBN-10 check as the check command, then appends a check digit" },
+  { "entry": "native/isbn/src/cli.c:main", "rank": "prod #8", "why": "only looks the command up in the table; each command is its own flow" }
  ],
  "flows": [
   { "id": "import", "title": "Importing a shelf's books from the browser",
@@ -34,6 +39,24 @@
     { "symbol": "backend.app:search_reviews" }
    ],
    "segments": { "keep": [ "backend.app:search_books" ], "mention": [ { "root": "backend.app:search_reviews", "say": "the review search runs the same way on its own route" } ] } },
+  { "id": "stock", "title": "Reading a book's stock from the Go service",
+   "from": "frontend/src/pages/StockPage.tsx:StockPage",
+   "hops": [
+    { "symbol": "frontend/src/pages/StockPage.tsx:StockPage" },
+    { "symbol": "frontend/src/pages/StockPage.tsx:StockPage.<locals>.check" },
+    { "symbol": "frontend/src/api/stock.ts:stockLevel" },
+    { "symbol": "services/inventory/api/server.go:Server.getStock",
+     "pinnedBy": [ { "test": "services/inventory/api/server_test.go:TestGetStock", "say": "a stock read answers with status 200" } ] }
+   ],
+   "segments": { "keep": [ "services/inventory/api/server.go:Server.getStock" ], "mention": [ { "root": "services/inventory/api/server.go:Server.reserve", "say": "reserving a copy goes to the same service on its own route" } ] } },
+  { "id": "isbn-check", "title": "Checking an ISBN with the C tool",
+   "from": "native/isbn/src/cli.c:cmd_check",
+   "hops": [
+    { "symbol": "native/isbn/src/cli.c:cmd_check" },
+    { "symbol": "native/isbn/src/isbn.c:isbn10_valid",
+     "pinnedBy": [ { "test": "native/isbn/tests/test_isbn.c:test_isbn10_valid", "say": "a correct check digit passes and a changed one fails" } ] },
+    { "symbol": "native/isbn/src/isbn.c:digit" }
+   ] },
   { "id": "eval-search", "title": "How the harness grades search",
    "from": "backend.evals.run_eval:<main>",
    "hops": [

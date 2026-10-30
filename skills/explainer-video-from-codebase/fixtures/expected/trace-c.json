@@ -1,0 +1,50 @@
+{
+  "granularity": "binary",
+  "ran": [
+    "src/cart.c:cart_total",
+    "src/cart.c:discount",
+    "src/net.c:ping",
+    "tests/test_cart.c:main",
+    "tests/test_cart.c:test_discount",
+    "tests/test_cart.c:test_total",
+    "tests/test_net.c:main",
+    "tests/test_net.c:test_ping"
+  ],
+  "byUnit": {
+    "./tests/test_cart": "src/cart.c:cart_total, src/cart.c:discount, tests/test_cart.c:main, tests/test_cart.c:test_discount, tests/test_cart.c:test_total",
+    "./tests/test_net": "src/net.c:ping, tests/test_net.c:main, tests/test_net.c:test_ping"
+  },
+  "byTest": {
+    "tests/test_cart.c:test_total": "passed: 1/1",
+    "tests/test_cart.c:test_discount": "passed: 1/1",
+    "tests/test_net.c:test_ping": "failed: 1/1"
+  },
+  "directLinksPerTest": {
+    "tests": 3,
+    "observed": 3,
+    "total": 3,
+    "prod": {
+      "observed": 3,
+      "total": 3
+    },
+    "granularity": "binary"
+  },
+  "functionsRan": {
+    "prod": {
+      "ran": 3,
+      "total": 4
+    },
+    "eval": {
+      "ran": 0,
+      "total": 0
+    },
+    "test": {
+      "ran": 5,
+      "total": 5
+    },
+    "dev": {
+      "ran": 0,
+      "total": 0
+    }
+  }
+}

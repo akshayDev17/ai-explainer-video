@@ -16,6 +16,7 @@ export function renderCodemap(m) {
     `- tools: ${Object.entries(m.tool.versions).map(([k, v]) => `${k}@${v}`).join(', ')}`,
     `- ${m.files.length} files: ${m.languages.python.files} Python (${m.languages.python.parseErrors} with syntax errors)` +
       (m.languages.typescript ? `, ${m.languages.typescript.files} TypeScript (${m.languages.typescript.parseErrors} with syntax errors), ${m.languages.javascript.files} JavaScript (${m.languages.javascript.parseErrors} with syntax errors)` : '') +
+      [['go', 'Go'], ['c', 'C'], ['cpp', 'C++']].filter(([k]) => m.languages[k]).map(([k, n]) => `, ${m.languages[k].files} ${n} (${m.languages[k].parseErrors} with syntax errors)`).join('') +
       `, ${m.unsupported.files} not mined yet ${JSON.stringify(m.unsupported.byExt)}`,
     `- ${m.symbols.length} symbols · ${m.edges.length} edges · ${m.entries.length} entries · ${ts.tests} tests`, '');
 
@@ -32,6 +33,10 @@ export function renderCodemap(m) {
     ...(sc.typescript ? [`- TypeScript / JavaScript: ${sc.typescript.defsExtracted} of ${sc.typescript.defNodes} parsed definitions extracted · ${sc.typescript.symbols} symbols · calls: ${sc.typescript.calls.resolved} resolved · unresolved by origin ${JSON.stringify(sc.typescript.unresolvedByOrigin)} · in-repo miss rate ${(sc.typescript.inRepoMissRate * 100).toFixed(1)}%`,
       ...(sc.typescript.unresolvedImports.length ? [`- **${sc.typescript.unresolvedImports.length} relative imports name no file in the repo** (their calls are not linked): ` +
         sc.typescript.unresolvedImports.slice(0, 20).map(x => `\`${x.spec}\` in \`${x.from}\``).join(', ') + (sc.typescript.unresolvedImports.length > 20 ? ', …' : '')] : [])] : []),
+    ...(sc.go ? [`- Go: ${sc.go.defsExtracted} of ${sc.go.defNodes} parsed definitions extracted · ${sc.go.symbols} symbols · modules ${sc.go.modules.map(x => `\`${x.module}\` (${x.dir}/)`).join(', ') || 'none (imports of in-repo packages cannot be told from dependencies)'} · calls: ${sc.go.calls.resolved} resolved · unresolved by origin ${JSON.stringify(sc.go.unresolvedByOrigin)} · in-repo miss rate ${(sc.go.inRepoMissRate * 100).toFixed(1)}%`] : []),
+    ...(sc.c ? [`- C / C++: ${sc.c.defsExtracted} of ${sc.c.defNodes} parsed definitions extracted · ${sc.c.symbols} symbols · calls: ${sc.c.calls.resolved} resolved · unresolved by origin ${JSON.stringify(sc.c.unresolvedByOrigin)} (an ALL_CAPS macro counts as builtin) · in-repo miss rate ${(sc.c.inRepoMissRate * 100).toFixed(1)}%`,
+      ...(sc.c.unresolvedIncludes.length ? [`- ${sc.c.unresolvedIncludes.length} quoted includes name no repo file (a vendored or generated header): ` +
+        sc.c.unresolvedIncludes.slice(0, 20).map(x => `\`${x.include}\` in \`${x.from}\``).join(', ') + (sc.c.unresolvedIncludes.length > 20 ? ', …' : '')] : [])] : []),
     `- files with syntax errors: ${(m.files.filter(f => f.parseError).map(f => f.path)).length ? m.files.filter(f => f.parseError).map(f => `\`${f.path}\``).join(', ') : 'none'}`,
     ...(sc.dependencyFilesNotParsed.length ? [`- **dependency files that are not valid TOML, their names read line by line**: ${sc.dependencyFilesNotParsed.map(f => `\`${f}\``).join(', ')}`] : []), '');
 
@@ -96,7 +101,7 @@ export function renderCodemap(m) {
     ...m.config.notGitWorkTree.map(d => `**Config not read from \`${d}\`: not a git work tree, so no config file can be proven tracked.**`), ...(m.config.notGitWorkTree.length ? [''] : []),
     'A value is kept only for a key a dispatch guard reads; a secret-looking key or value is shown as `set (redacted)`.', '',
     table(['config file', 'group', 'reader', 'facts'], m.config.files.map(f => [`\`${f.path}\``, f.group, f.reader, f.facts])), '',
-    ...(m.config.envReads ? ['### Environment variables the TypeScript / JavaScript code reads', '', 'A default is the literal after `??` or `||`; a secret-looking one is shown as `set (redacted)`.', '',
+    ...(m.config.envReads ? ['### Environment variables and flags the code reads', '', 'TypeScript / JavaScript `process.env` and `import.meta.env`, Go `os.Getenv` / `os.LookupEnv` and `flag.*` (key `-name`), C `getenv`. A default is the literal after `??` or `||`, or a flag\'s default; a secret-looking one is shown as `set (redacted)`.', '',
       table(['variable', 'via', 'default', 'where', 'group'], m.config.envReads.map(r => [r.key, r.via, r.default ?? '', loc(r.file, r.line), r.group])), ''] : []),
     '### Profiles', '', table(['profile', 'group', 'keys a guard reads'], m.config.profiles.map(p => [p.name, p.group, p.keys.join(', ')])), '',
     '### Config-selected dispatch', '');

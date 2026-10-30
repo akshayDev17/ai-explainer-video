@@ -1,0 +1,52 @@
+{
+  "granularity": "test",
+  "outcome": {
+    "collected": 3,
+    "passed": 2,
+    "failed": 1,
+    "errors": 0,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0,
+    "unknown": 0,
+    "notRun": 0
+  },
+  "byUnit": {
+    "shop/cart_test.go:TestDiscount": "shop/cart.go:Discount",
+    "shop/cart_test.go:TestPing": "shop/net.go:Ping",
+    "shop/cart_test.go:TestTotal": "shop/cart.go:Cart.Add, shop/cart.go:Cart.Total, shop/cart.go:Catalog.Price, shop/cart.go:Discount, shop/cart.go:NewCart"
+  },
+  "byTest": {
+    "shop/cart_test.go:TestTotal": "passed: 3/3",
+    "shop/cart_test.go:TestDiscount": "passed: 1/1",
+    "shop/cart_test.go:TestPing": "failed: 1/1"
+  },
+  "directLinksPerTest": {
+    "tests": 3,
+    "observed": 5,
+    "total": 5,
+    "prod": {
+      "observed": 5,
+      "total": 5
+    },
+    "granularity": "test"
+  },
+  "functionsRan": {
+    "prod": {
+      "ran": 6,
+      "total": 8
+    },
+    "eval": {
+      "ran": 0,
+      "total": 0
+    },
+    "test": {
+      "ran": 0,
+      "total": 3
+    },
+    "dev": {
+      "ran": 0,
+      "total": 0
+    }
+  }
+}

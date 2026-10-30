@@ -1,0 +1,27 @@
+{
+  "entries": [
+    "http chiapp/router.go:adminStats GET /admin/stats",
+    "http chiapp/router.go:createAccount POST /accounts",
+    "http chiapp/router.go:getAccount GET /accounts/{id}",
+    "http chiapp/router.go:index GET /",
+    "http echoapp/server.go:deleteItem DELETE /items/{id}",
+    "http echoapp/server.go:getItem GET /v2/items/{id}",
+    "http ginapp/routes.go:createOrder POST /api/orders",
+    "http ginapp/routes.go:getUser GET /api/users/{id}",
+    "http ginapp/routes.go:orderFiles GET /api/orders/{path}",
+    "http nethttp/server.go:NewMux.<locals>.DELETE /items/{id} DELETE /items/{id}",
+    "http nethttp/server.go:createItem POST /items",
+    "http nethttp/server.go:fileServer.ServeHTTP * /files/{path}",
+    "http nethttp/server.go:getItem GET /items/{id}",
+    "http nethttp/server.go:health * /health",
+    "http nethttp/server.go:ping * /ping",
+    "http nethttp/server.go:stats GET /v1/stats",
+    "main cmd/api/main.go:main"
+  ],
+  "links": [
+    "chiapp/router.go:createAccount -> chiapp/router.go:audit framework go.middleware",
+    "echoapp/server.go:getItem -> echoapp/server.go:auditMW framework go.middleware",
+    "ginapp/routes.go:getUser -> ginapp/routes.go:auth framework go.middleware",
+    "nethttp/server.go:createItem -> nethttp/server.go:logged framework go.middleware"
+  ]
+}

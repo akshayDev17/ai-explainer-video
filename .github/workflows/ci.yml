@@ -85,11 +85,11 @@ jobs:
       - run: npm test
 
   # trace.mjs end to end in the Linux sandbox: the bwrap profile probed from inside, the fixture suites traced
-  # (pytest and node --test; each socket test denied), the home folder and the original repo unreadable, a
-  # virtualenv and a node_modules inside the repo, unittest, the time limit, and the refusals. npm test skips the
-  # sandboxed half where
-  # no sandbox starts (as on the job above); here FM_TRACE_REQUIRE_SANDBOX turns a skip into a failure. The
-  # network is used only to install bwrap and pytest; the traced run itself has none.
+  # (pytest, node --test, go test and make test; each socket test denied), the home folder and the original repo
+  # unreadable, a virtualenv and a node_modules inside the repo, unittest, the time limit, and the refusals. npm test
+  # skips the sandboxed half where no sandbox starts (as on the job above) or the toolchain is missing; here
+  # FM_TRACE_REQUIRE_SANDBOX and FM_TRACE_REQUIRE_TOOLCHAINS turn a skip into a failure. The network is used only to
+  # install bwrap, pytest and Go; the traced run itself has none.
   trace-fixture:
     name: trace under bwrap
     runs-on: ubuntu-latest
@@ -97,6 +97,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with: { node-version: "22" }
+      - uses: actions/setup-go@v6
+        with: { go-version: "1.24", cache: false }
       - name: install bubblewrap and pytest
         run: |
           set -euo pipefail
@@ -106,8 +108,9 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
           python3 -c 'import pytest' || python3 -m pip install --break-system-packages pytest
           bwrap --version
-      - run: node --test test/trace.test.mjs test/trace-js.test.mjs
-        env: { FM_TRACE_REQUIRE_SANDBOX: "1" }
+          go version && cc --version | head -1 && make --version | head -1 && gcov --version | head -1
+      - run: node --test test/trace.test.mjs test/trace-js.test.mjs test/trace-native.test.mjs
+        env: { FM_TRACE_REQUIRE_SANDBOX: "1", FM_TRACE_REQUIRE_TOOLCHAINS: "1" }
 
   # skills/explainer-video-from-codebase/vendor/tree-sitter is COPIED from the pinned
   # devDependencies (Antigravity installs by git clone and never runs npm install). Like the

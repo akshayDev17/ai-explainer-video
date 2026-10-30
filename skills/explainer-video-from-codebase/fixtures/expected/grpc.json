@@ -1,0 +1,12 @@
+{
+  "entries": [
+    "main client/main.go:main",
+    "main server/main.go:main",
+    "rpc billing/billing.go:Server.Charge /Billing/Charge",
+    "rpc server/main.go:server.SayHello /greet.Greeter/SayHello"
+  ],
+  "links": [
+    "billing/billing.go:Pay -> billing/billing.go:Server.Charge http grpc.client",
+    "greetpb/greet_grpc.pb.go:greeterClient.SayHello -> server/main.go:server.SayHello http grpc.client"
+  ]
+}

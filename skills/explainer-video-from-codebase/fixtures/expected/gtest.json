@@ -1,0 +1,20 @@
+{
+  "entries": [],
+  "links": [
+    "tests/cart_test.cpp:CartTest.TotalsPrices -> tests/cart_test.cpp:CartTest.SetUp framework gtest.fixture",
+    "tests/test_util.c:test_clamp_high -> tests/test_util.c:setUp framework unity.setUp",
+    "tests/test_util.c:test_clamp_high -> tests/test_util.c:tearDown framework unity.setUp",
+    "tests/test_util.c:test_clamp_low -> tests/test_util.c:setUp framework unity.setUp",
+    "tests/test_util.c:test_clamp_low -> tests/test_util.c:tearDown framework unity.setUp"
+  ],
+  "tests": [
+    "tests/cart_test.cpp:CartTest.TotalsPrices [gtest] asserts 19,21 | mocked src/cart.cpp:shop.DbPrices.price | direct src/cart.cpp:shop.Cart.add/body,src/cart.cpp:shop.Cart.total/body,src/cart.cpp:shop.Cart.Cart/fixture",
+    "tests/cart_test.cpp:Discount.Large [gtest] asserts 25,26 | mocked  | direct src/cart.cpp:shop.discount/body",
+    "tests/test_catalog.cpp:prices come from the database [catch2] asserts 7,8 | mocked  | direct src/cart.cpp:shop.DbPrices.price/body | subtests a known sku,an empty sku",
+    "tests/test_util.c:test_clamp_low [c] asserts 7 | mocked  | direct src/util.c:clamp/body",
+    "tests/test_util.c:test_clamp_high [c] asserts 8 | mocked  | direct src/util.c:clamp/body"
+  ],
+  "mocks": [
+    "tests/cart_test.cpp:CartTest.SetUp gmock MockPrices (for PriceSource.price) -> src/cart.cpp:shop.DbPrices.price"
+  ]
+}

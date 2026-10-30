@@ -1,6 +1,6 @@
 ---
 name: explainer-video-from-codebase
-description: Under construction — will turn the major code flows of a codebase into a narrated explainer-video series. Today its first stages exist: mining a Python, TypeScript or JavaScript repo (or a mix) into one code map (files grouped as prod/test/eval/dev, call graph, entry points, framework links, tests as evidence, config facts), proposing one candidate flow per entry point and ranking them per group as evidence, an opt-in sandboxed trace of the repo's own test suite (pytest, unittest, node --test, jest, vitest), validating the agent's series proposal (flows.json), recording the user's approval of the flow list, planning the videos in the coursework plan's shape, and the on-screen code tools for a code video's scenes (verified code panels, test panels, diagram skeletons). Use only when the user asks to mine a codebase, rank its candidate flows, propose and plan a code-flow series, or cut code panels for its scenes.
+description: Under construction — will turn the major code flows of a codebase into a narrated explainer-video series. Today its first stages exist: mining a Python, TypeScript, JavaScript, Go, C or C++ repo (or a mix) into one code map (files grouped as prod/test/eval/dev, call graph, entry points, framework links, tests as evidence, config facts), proposing one candidate flow per entry point and ranking them per group as evidence, an opt-in sandboxed trace of the repo's own test suite (pytest, unittest, node --test, jest, vitest, go test, make test), validating the agent's series proposal (flows.json), recording the user's approval of the flow list, planning the videos in the coursework plan's shape, and the on-screen code tools for a code video's scenes (verified code panels, test panels, diagram skeletons). Use only when the user asks to mine a codebase, rank its candidate flows, propose and plan a code-flow series, or cut code panels for its scenes.
 ---
 
 # explainer-video-from-codebase — under construction
@@ -26,7 +26,7 @@ node <skill>/tools/mine.mjs <repo> --out out/<name> [--group 'glob=prod|test|eva
 ```
 
 It writes `out/<name>/codemap.json` and `out/<name>/codemap.md`. Exit 0 is done; exit 1 is
-a bad path or flag, or a repo with no Python, TypeScript or JavaScript; exit 2 is a failed self-check (a definition
+a bad path or flag, or a repo with no Python, TypeScript, JavaScript, Go, C or C++; exit 2 is a failed self-check (a definition
 the parser saw was not extracted, or two collapsed into one symbol) — report it, do not edit the output. Show the user
 `codemap.md` in full: every group with the rule that placed each file, every entry, every
 rule link with its evidence, the mocks every test runs under, config profiles, and any
@@ -37,8 +37,10 @@ guard reads, and a secret-looking key or value is shown as `set (redacted)`. If 
 self-check reports calls into imports named like in-repo directories, say so: those
 calls are not linked.
 
-Python and TypeScript / JavaScript are mined (into one code map: a frontend's HTTP calls link to the backend routes
-they hit, and its UI routes are entries); Go, C and C++ are grouped and listed as "not mined yet".
+Python, TypeScript / JavaScript, Go, C and C++ are mined into one code map: a frontend's or a client's HTTP calls
+link to the routes they hit in any language (FastAPI, Express, Next.js, net/http, gin, echo, chi), UI routes, gRPC
+methods and C / C++ command tables are entries, and each language's tests (pytest, jest / vitest, go test, gtest,
+Catch2, C test functions) are evidence. `--lang python,typescript,go,c,cpp` limits it to some of them.
 
 ### Propose and rank
 
@@ -64,6 +66,9 @@ per mined commit, and only when both hold:
   runner installed in the repo's `node_modules`, at its root or in the package below it that holds the tests, such as
   `frontend/` (tracing never installs one; paths are then given as you would from that package); plus the arguments
   its own config or docs use (a jest or vitest flag's value as `-t=name` or `-t name`; any other flag is boolean, so a path after it stays a path);
+  or `go test ./...` (or `go -C <module dir> test ./...` when the repo holds several Go modules) with the `go` on
+  PATH; or `make test` / `make check` (or `make -C <dir> test`) when the repo's Makefile builds and runs its C / C++
+  tests with `$(CC)` / `$(CXX)`, and `cc`, `make` and `gcov` are installed;
 - this platform has a sandbox: macOS (`sandbox-exec`) or Linux with `bwrap` (bubblewrap). Elsewhere, do not offer it.
 
 Ask with exactly this text, filling in the command and the test count from `codemap.md`:
@@ -71,7 +76,7 @@ Ask with exactly this text, filling in the command and the test count from `code
 > This repo has a test suite (`<command>`, N tests). I can run it once, under a profiler, to mark which call paths
 > the tests actually exercise. It runs the repo's test code on this machine, inside a sandbox, on a copy of the files
 > git does not ignore: no network, no writes outside a scratch folder, no inherited environment variables, no
-> handing work to a program outside the sandbox (opening a URL or an app, scripting another app), and no reads of your home folder or the original repo folder (only the copy, the Python interpreter and its virtualenv, or node and the repo's node_modules). It
+> handing work to a program outside the sandbox (opening a URL or an app, scripting another app), and no reads of your home folder or the original repo folder (only the copy, the Python interpreter and its virtualenv, node and the repo's node_modules, or, for Go, exactly the two folders `go env` names as GOROOT and GOMODCACHE, read-only, even inside your home folder; never anything else of it). It
 > can still read system files outside those folders. Anything it prints that looks like a credential is redacted from
 > its log. Run it?
 
@@ -88,12 +93,13 @@ writes outside scratch, no program outside the sandbox acting for it, no reads o
 repo, an empty environment, no bytecode or cache
 writes, a time limit. It writes `out/<name>/trace.json`, an overlay the code map is never edited for, and
 `trace.log`, the run's output (credential-shaped strings redacted). Exit 0 is done; 5 is the time limit (the partial
-trace is kept and marked); 1, 3 and 4 are refusals (no opt-in flag or no installed jest / vitest; not a test command; no sandbox): report them and
+trace is kept and marked); 1, 3 and 4 are refusals (no opt-in flag, no installed jest / vitest, several Go modules and no `-C`, a GOROOT or GOMODCACHE that is or holds the home folder, no Makefile, no gcov; not a test command; no sandbox): report them and
 never work around one, least of all by running the tests yourself. Exit 2 means no test ran: show the user
 `trace.log`'s end.
 
 Tell the user the outcome (passed / failed / errors), the static edges observed, the share of direct test links that
-ran under their own test, the callback links it confirmed, the calls that ran with no static edge, and **every test in
+ran under their own test (for jest / vitest, go test and make: coverage says what ran in each test file, test or
+test binary, the trace's `granularity`, and no caller → callee pair), the callback links it confirmed, the calls that ran with no static edge, and **every test in
 `deniedBySandbox`**: those need a service or a file the sandbox refused (a database, a socket, the network, a file
 in the home folder or one git ignores), so they mark code the suite cannot exercise offline. Failing tests are data:
 never retry one, never weaken the sandbox, never install anything to make them pass. A trace says what ran under the test configuration; narrate it as "observed in the test
