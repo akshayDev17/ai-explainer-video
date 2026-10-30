@@ -19,6 +19,10 @@
      • several `focus` acts per panel, one per narrated sentence
      • a `pause` act: an on-screen badge while the narration asks the viewer to
        pause and read a whole block
+     • `segment: <key>`: the acts are timed from that segment's window (scene time
+       = line time + lead, as lines.json and excerpt-check measure it), so the host
+       subtracts the window's start from the video time render passes; such a scene
+       draws no progress bar
 
    Contract: window.CodeScenes.create({ root, config }) -> { renderAt(t) }
    ========================================================================== */
@@ -140,6 +144,17 @@
     return { foc, active, k };
   }
 
+  /* The clock a scene plays on. A coursework scene is timed on the video clock and
+     spans its own `total`; a scene naming its `segment` is timed from that window's
+     start, read from the measured timeline, and spans the whole timeline like the
+     diagram and svg hosts. A named segment with no window is an error, never t + 0. */
+  function clockOf(cfg, timeline) {
+    if (cfg.segment == null) return { offset: 0, total: cfg.total };
+    const w = timeline && timeline.windows && timeline.windows[cfg.segment];
+    if (!w) throw new Error(`scene names segment "${cfg.segment}" but the timeline has no window for it (run build-audio, and open the host with ?work=)`);
+    return { offset: w.start, total: timeline.total };
+  }
+
   /* ---------------- factory ---------------- */
   function create(opts) {
     const root = opts.root;
@@ -147,6 +162,7 @@
     const W = (cfg.meta && cfg.meta.width) || 1920;
     const H = (cfg.meta && cfg.meta.height) || 1080;
     const TOTAL = cfg.total;
+    const PROGRESS = cfg.segment == null;
 
     root.innerHTML = '';
 
@@ -178,7 +194,7 @@
     chrome.innerHTML =
       `<div class="hdr"><span class="hdr-dot"></span><span>${esc((cfg.chrome && cfg.chrome.header) || '')}</span></div>` +
       `<div class="stage-badge" id="stageBadge"></div>` +
-      `<div class="prog"><div class="prog-fill" id="progFill"></div></div>`;
+      (PROGRESS ? `<div class="prog"><div class="prog-fill" id="progFill"></div></div>` : '');
     root.appendChild(chrome);
 
     /* --- panels --- */
@@ -352,12 +368,12 @@
       }
 
       /* progress */
-      root.querySelector('#progFill').style.width = (W * clamp01(t / TOTAL)).toFixed(1) + 'px';
+      if (PROGRESS) root.querySelector('#progFill').style.width = (W * clamp01(t / TOTAL)).toFixed(1) + 'px';
     }
 
     render(0);
     return { renderAt: render };
   }
 
-  window.CodeScenes = { create, highlight, panelLinesHtml, focusState };
+  window.CodeScenes = { create, clockOf, highlight, panelLinesHtml, focusState };
 })();

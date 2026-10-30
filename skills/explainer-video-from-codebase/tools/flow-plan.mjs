@@ -83,9 +83,11 @@ const L = [];
 L.push(`# ${(v.root || '').split('/').pop()} — code-flow video plan`, '');
 L.push(plan.approval ? `Approved by **${plan.approval.by}** at ${plan.approval.at}: "${plan.approval.note}" (flows.validated.json sha256 ${plan.approval.flowsHash.slice(0, 12)}…)`
   : '**Estimate only: this flow list is not approved.** No plan is written until the user approves it.', '');
-L.push('> Every constant in this estimate except the narration pace (WPM, EXPANSION) is **uncalibrated**: ' +
-  `frame ${MODEL.frame}, hop ${MODEL.hopBase} + ${MODEL.wpl} words per narrated line (≤ ${MODEL.lineCap}), crossing ${MODEL.boundary}, taught branch ${MODEL.branch}, ` +
-  `cited test ${MODEL.test} (≤ ${MODEL.maxTests} per video), overview ${MODEL.overview} words. The pilot measures them.`, '');
+const B = MODEL.basis;
+L.push(`> Calibrated on ${B.videos} narrated pilot video (${B.hops} hops, ${B.narratedLines} narrated lines, ${B.branches} taught branches, ` +
+  `${B.citedTests} cited tests, ${B.words} words): frame ${MODEL.frame}, hop ${MODEL.hopBase} + ${MODEL.wpl} words per narrated line (≤ ${MODEL.lineCap}), ` +
+  `taught branch ${MODEL.branch}, cited test ${MODEL.test} (≤ ${MODEL.maxTests} per video). Still **uncalibrated**: crossing ${MODEL.boundary} ` +
+  `(the pilot crossed no boundary) and the overview's ${MODEL.overview} words.`, '');
 L.push(`## ${p.totals.videos} videos, ${p.totals.seriesMinutes} min (longest ${p.totals.longestVideoMin} min, cap ${maxMin} min)`, '');
 L.push('| # | Title | Form | Group | Hops | Crossings | Branches | Cited tests | Words | Min |', '|---|---|---|---|---|---|---|---|---|---|');
 for (const x of p.videos) L.push(`| ${x.index} | ${x.title} | \`${x.form}\` | ${x.group} | ${x.evidence.hops ?? '—'} | ${x.evidence.crossings ?? '—'} | ${x.evidence.branches ?? '—'} | ${x.evidence.citedTests ?? '—'} | ${x.words} | ${x.minutes} |`);

@@ -147,8 +147,8 @@ It writes `plan.json` and `plan.md` beside the validated flows: an overview vide
 in order, split under the cap (25 minutes by default) at `break` hops, else at the latest crossing. Exit 5 means
 no matching approval (none, or the list changed after it): go back to stage 1b′, never work around it. Exit 2 is
 an orphaned hop or a video over the cap; exit 4 would overwrite the plan an enriched plan was built from (rerun
-with `--force`, then rerun apply-enrichment). Show the user every planned video with the plan's "uncalibrated"
-banner. `--estimate` prints the plan without an approval and writes nothing.
+with `--force`, then rerun apply-enrichment). Show the user every planned video with the plan's calibration
+banner (what is still uncalibrated). `--estimate` prints the plan without an approval and writes nothing.
 
 The plan has the coursework plan's shape: `craft-video-enrich` (apply-enrichment reads the plan's `forms`:
 overview, flow, core) and the per-video stages run on it. A script's `covers` names its video's `sections`
@@ -176,7 +176,10 @@ narrow them or split the hop. `--test` cuts the test's side of a "pinned by" pai
 calls the hop, its assertion lines); it exits 2 for a test that mocks the hop or only reaches it. Give each panel
 one `focus` act per sentence that names the narration line it is synced to (`"narration": <line>` or
 `[from, to]`, indices into the segment's lines in `lines.json`), starting at that line's onset; a pause segment
-also gets a `pause` act over its spoken prompt (the on-screen badge).
+also gets a `pause` act over its spoken prompt (the on-screen badge). Every code scene names its segment
+(`segment: "<key>"`): its acts are timed from that segment's window (line time + `lead`), and the code host
+subtracts the window's start, read from the work dir's `timeline.js`, from the video time assembly renders at.
+Such a scene draws no progress bar.
 
 ```sh
 node <skill>/tools/excerpt-check.mjs --work out/<name>/<NN> --repo <repo> --script out/<name>/scripts/<NN>-*.json
@@ -184,7 +187,8 @@ node <skill>/tools/excerpt-check.mjs --work out/<name>/<NN> --repo <repo> --scri
 
 Stage 5 is not done until it exits 0. Exit 2 is drift: a panel that is not byte-identical to the file as mined
 (or was typed, or hides lines without a marker); re-excerpt it. Exit 3 is a shown line outside every
-narration-synced focus window (outside the ≤ 3 pause segments), or a pause badge out of place.
+narration-synced focus window (outside the ≤ 3 pause segments), a pause badge out of place, or a scene that does not
+name its own segment.
 
 **Diagram skeletons.** The boxes and arrows come from the validated flows, the layout and beats from you:
 

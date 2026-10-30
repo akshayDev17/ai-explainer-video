@@ -527,5 +527,5 @@ if (problems.length) {
   process.exit(2);
 }
 writeFileSync(VALIDATED, JSON.stringify(validated, null, 1) + '\n');
-console.log(`[apply-flows] estimate (uncalibrated): ${estimate.videos.length} videos, ${estimate.totals.seriesMinutes} min, longest ${estimate.totals.longestVideoMin} min (cap ${estimate.totals.capMinutes})`);
+console.log(`[apply-flows] estimate: ${estimate.videos.length} videos, ${estimate.totals.seriesMinutes} min, longest ${estimate.totals.longestVideoMin} min (cap ${estimate.totals.capMinutes})`);
 console.log(`[apply-flows] 0 problems · wrote ${relative(process.cwd(), OUT) || '.'}/flows.{validated.json,md}: show the user the approval table in flows.md before approve-flows`);

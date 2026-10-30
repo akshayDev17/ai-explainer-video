@@ -100,6 +100,7 @@ const PIN = panel('--symbol', BORROW, '--test', 'tests.test_service:test_borrow_
 const LINES = { lead: 0.5, lines: [{ line: 0, start: 0, end: 1.4 }, { line: 1, start: 1.6, end: 4.4 }, { line: 2, start: 4.6, end: 6.8 }] };
 const goodScene = () => ({
   total: 8,
+  segment: 'hop2',
   panels: [{ id: 'hop', ...structuredClone(HOP) }, { id: 'pin', ...structuredClone(PIN) }],
   acts: [
     { op: 'show', panel: 'hop', from: 0, to: 0.5 },
@@ -176,6 +177,17 @@ test('focus exits 3: a shown line no focus window covers, a window off the narra
   const ru = check(work(unbound));
   assert.equal(ru.status, 3);
   assert.match(ru.stdout, /names no narration line/);
+});
+
+test('focus exits 3: a code scene that names no segment, or another one, would play on the wrong clock', () => {
+  const none = goodScene(); delete none.segment;
+  const r = check(work(none));
+  assert.equal(r.status, 3);
+  assert.match(r.stdout, /hop2: the scene names no segment \(set `segment: "hop2"`\)/);
+  const other = goodScene(); other.segment = 'hop3';
+  const ro = check(work(other));
+  assert.equal(ro.status, 3);
+  assert.match(ro.stdout, /hop2: the scene names segment "hop3"/);
 });
 
 test('a pause segment may show a whole block unfocused, with its badge; at most three per video', () => {

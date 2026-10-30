@@ -64,6 +64,31 @@ test('focus: an excerpt panel has one window per sentence, chained without flash
   assert.equal(CodeScenes.focusState(acts, 'r', true, 1), null);
 });
 
+test('clock: a coursework scene keeps the video clock and its own total; a scene naming its segment plays from that window', () => {
+  const TL = { total: 120, windows: { hook: { start: 0, end: 30 }, hop2: { start: 30, end: 75 } } };
+  const clock = (cfg, tl) => ({ ...CodeScenes.clockOf(cfg, tl) });   // out of the vm realm, for deepEqual
+  assert.deepEqual(clock({ total: 8 }, TL), { offset: 0, total: 8 });
+  assert.deepEqual(clock({ total: 8 }, undefined), { offset: 0, total: 8 }, 'no timeline is fine for a coursework scene');
+  assert.deepEqual(clock({ total: 45, segment: 'hop2' }, TL), { offset: 30, total: 120 });
+  assert.throws(() => CodeScenes.clockOf({ total: 45, segment: 'hop9' }, TL), /no window for it/);
+  assert.throws(() => CodeScenes.clockOf({ total: 45, segment: 'hop2' }, undefined), /no window for it/);
+});
+
+test('progress bar: a coursework scene draws and fills it; a scene naming its segment draws none', () => {
+  // the smallest DOM create() touches for a scene with no panels: a root that finds ids in its children's markup
+  const el = () => ({ style: {}, innerHTML: '', textContent: '', children: [], setAttribute() {}, appendChild(c) { this.children.push(c); return c; } });
+  const stage = () => {
+    const root = el(), found = {};
+    root.querySelector = sel => root.children.some(c => c.innerHTML.includes(`id="${sel.slice(1)}"`)) ? (found[sel] ||= el()) : null;
+    return { root, found };
+  };
+  const doc = { createElement: el, createElementNS: el };
+  const scene = cfg => { const s = stage(); load('scene-code.js', { document: doc }).CodeScenes.create({ root: s.root, config: cfg }).renderAt(4); return s.found; };
+  assert.equal(scene({ total: 8 })['#progFill'].style.width, '960.0px', 'a coursework scene fills the bar on its own total');
+  assert.equal(scene({ total: 8, segment: 'hop2' })['#progFill'], undefined);
+  assert.equal(scene({ total: 8, segment: 'hop2', progress: true })['#progFill'], undefined, 'no flag brings the bar back');
+});
+
 /* ---------------- scene-core: primitives.sequence ---------------- */
 // the smallest DOM the SVG helpers touch: elements record their attributes, children and text
 const node = tag => ({ tag, attrs: {}, children: [], textContent: '', setAttribute(k, v) { this.attrs[k] = String(v); }, appendChild(c) { this.children.push(c); return c; } });
