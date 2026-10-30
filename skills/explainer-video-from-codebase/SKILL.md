@@ -37,7 +37,8 @@ guard reads, and a secret-looking key or value is shown as `set (redacted)`. If 
 self-check reports calls into imports named like in-repo directories, say so: those
 calls are not linked.
 
-Only Python is mined; other languages are grouped and listed as "not mined yet".
+Python and TypeScript / JavaScript are mined (into one code map: a frontend's HTTP calls link to the backend routes
+they hit, and its UI routes are entries); Go, C and C++ are grouped and listed as "not mined yet".
 
 ### Propose and rank
 
@@ -59,7 +60,9 @@ nothing but the test suite is ever traced: not a server, a sample request or an 
 per mined commit, and only when both hold:
 
 - the repo has a test command you can name: `pytest`, `python -m pytest` or `python -m unittest`, run with the repo's
-  own interpreter (its `.venv/bin/python` when it has one), plus the arguments its own config or docs use;
+  own interpreter (its `.venv/bin/python` when it has one); or `node --test`, `npx jest` or `npx vitest run`, with the
+  runner installed in the repo's `node_modules` (tracing never installs one); plus the arguments its own config or docs
+  use;
 - this platform has a sandbox: macOS (`sandbox-exec`) or Linux with `bwrap` (bubblewrap). Elsewhere, do not offer it.
 
 Ask with exactly this text, filling in the command and the test count from `codemap.md`:
@@ -67,7 +70,7 @@ Ask with exactly this text, filling in the command and the test count from `code
 > This repo has a test suite (`<command>`, N tests). I can run it once, under a profiler, to mark which call paths
 > the tests actually exercise. It runs the repo's test code on this machine, inside a sandbox, on a copy of the files
 > git does not ignore: no network, no writes outside a scratch folder, no inherited environment variables, no
-> handing work to a program outside the sandbox (opening a URL or an app, scripting another app), and no reads of your home folder or the original repo folder (only the copy, the Python interpreter and its virtualenv). It
+> handing work to a program outside the sandbox (opening a URL or an app, scripting another app), and no reads of your home folder or the original repo folder (only the copy, the Python interpreter and its virtualenv, or node and the repo's node_modules). It
 > can still read system files outside those folders. Anything it prints that looks like a credential is redacted from
 > its log. Run it?
 

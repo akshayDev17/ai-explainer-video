@@ -1,0 +1,22 @@
+{
+  "entries": [
+    "http api.main:count_items GET /api/v1/items/count",
+    "http api.main:delete_item DELETE /api/v1/items/{item_id}",
+    "http api.main:get_item GET /api/v1/items/{item_id}",
+    "http api.main:health GET /api/v1/health",
+    "http api.main:list_items GET /api/v1/items",
+    "http api.main:put_item PUT /api/v1/items/{item_id}",
+    "http api.main:search_items GET /api/v1/items/search",
+    "http api.main:tag_item POST /api/v1/items/{item_id}/tags"
+  ],
+  "links": [
+    "web/src/items.ts:addTag -> api.main:tag_item http js.http-client [prod]",
+    "web/src/items.ts:countItems -> api.main:count_items http js.http-client [prod]",
+    "web/src/items.ts:getItem -> api.main:get_item http js.http-client [prod]",
+    "web/src/items.ts:health -> api.main:health http js.http-client [prod]",
+    "web/src/items.ts:listItems -> api.main:list_items http js.http-client [prod]",
+    "web/src/items.ts:putItem -> api.main:put_item http js.http-client [prod]",
+    "web/src/items.ts:removeItem -> api.main:delete_item http js.http-client [prod]",
+    "web/src/items.ts:searchItems -> api.main:search_items http js.http-client [prod]"
+  ]
+}

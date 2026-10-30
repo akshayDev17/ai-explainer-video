@@ -52,7 +52,7 @@ test('exit 1: refuses an --out that reaches the repo through a symlink', () => {
 
 test('exit 1: a bad --group or an unmined --lang', () => {
   assert.equal(run(RESOLVER, '--out', out(), '--group', 'x/**=staging').status, 1);
-  assert.match(run(RESOLVER, '--out', out(), '--lang', 'go').stderr, /only python/);
+  assert.match(run(RESOLVER, '--out', out(), '--lang', 'go').stderr, /mined languages are python and typescript/);
 });
 
 test('the repo is never written to, and two runs produce identical code maps', () => {
@@ -83,7 +83,7 @@ test('the self-check passes on every fixture and reports unresolved calls by ori
     assert.equal(status, 0, dir);
     assert.equal(codemap.selfCheck.ok, true, dir);
     assert.equal(codemap.selfCheck.defsExtracted, codemap.selfCheck.defNodes, dir);
-    assert.equal(codemap.symbols.filter(s => s.kind !== 'main').length, codemap.selfCheck.defScopes, `${dir}: one symbol per distinct definition`);
+    assert.equal(codemap.symbols.filter(s => s.kind !== 'main' && s.file.endsWith('.py')).length, codemap.selfCheck.defScopes, `${dir}: one symbol per distinct definition`);
     assert.deepEqual(Object.keys(codemap.selfCheck.unresolvedByOrigin).sort(), ['builtin', 'external', 'inRepo', 'local']);
   }
 });

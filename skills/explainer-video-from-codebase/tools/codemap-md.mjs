@@ -14,7 +14,9 @@ export function renderCodemap(m) {
   out.push(`# Code map: ${m.root.split('/').pop()}`, '',
     `- root: \`${m.root}\`${m.commit ? ` at \`${m.commit.slice(0, 7)}\`` : ''} · tree ${m.treeHash.slice(0, 19)}…`,
     `- tools: ${Object.entries(m.tool.versions).map(([k, v]) => `${k}@${v}`).join(', ')}`,
-    `- ${m.files.length} files: ${m.languages.python.files} Python (${m.languages.python.parseErrors} with syntax errors), ${m.unsupported.files} not mined yet ${JSON.stringify(m.unsupported.byExt)}`,
+    `- ${m.files.length} files: ${m.languages.python.files} Python (${m.languages.python.parseErrors} with syntax errors)` +
+      (m.languages.typescript ? `, ${m.languages.typescript.files} TypeScript (${m.languages.typescript.parseErrors} with syntax errors), ${m.languages.javascript.files} JavaScript (${m.languages.javascript.parseErrors} with syntax errors)` : '') +
+      `, ${m.unsupported.files} not mined yet ${JSON.stringify(m.unsupported.byExt)}`,
     `- ${m.symbols.length} symbols · ${m.edges.length} edges · ${m.entries.length} entries · ${ts.tests} tests`, '');
 
   out.push('## Self-check', '',
@@ -27,7 +29,10 @@ export function renderCodemap(m) {
       sc.crossRootImports.map(x => `\`${x.name}\` → \`${x.root}/\` ${x.calls}`).join(', ')] : []),
     ...(sc.externalLikeRepoDirs.calls ? [`- **${sc.externalLikeRepoDirs.calls} calls (${(sc.externalLikeRepoDirs.rate * 100).toFixed(1)}%) go to imports resolved as external although an in-repo directory with no \`__init__.py\` has their name**: ` +
       sc.externalLikeRepoDirs.names.map(x => `\`${x.name}\` ${x.calls} (${x.dirs.map(d => `\`${d}/\``).join(', ')})`).join(', ') + ' — if these are in-repo namespace packages, these calls are not linked'] : []),
-    `- files with syntax errors: ${sc.filesWithErrors.length ? sc.filesWithErrors.map(f => `\`${f}\``).join(', ') : 'none'}`,
+    ...(sc.typescript ? [`- TypeScript / JavaScript: ${sc.typescript.defsExtracted} of ${sc.typescript.defNodes} parsed definitions extracted · ${sc.typescript.symbols} symbols · calls: ${sc.typescript.calls.resolved} resolved · unresolved by origin ${JSON.stringify(sc.typescript.unresolvedByOrigin)} · in-repo miss rate ${(sc.typescript.inRepoMissRate * 100).toFixed(1)}%`,
+      ...(sc.typescript.unresolvedImports.length ? [`- **${sc.typescript.unresolvedImports.length} relative imports name no file in the repo** (their calls are not linked): ` +
+        sc.typescript.unresolvedImports.slice(0, 20).map(x => `\`${x.spec}\` in \`${x.from}\``).join(', ') + (sc.typescript.unresolvedImports.length > 20 ? ', …' : '')] : [])] : []),
+    `- files with syntax errors: ${(m.files.filter(f => f.parseError).map(f => f.path)).length ? m.files.filter(f => f.parseError).map(f => `\`${f.path}\``).join(', ') : 'none'}`,
     ...(sc.dependencyFilesNotParsed.length ? [`- **dependency files that are not valid TOML, their names read line by line**: ${sc.dependencyFilesNotParsed.map(f => `\`${f}\``).join(', ')}`] : []), '');
 
   out.push('## Groups', '', 'Rules, first match wins (a `--group` override wins over all of them):', '', ...m.groups.rules.map((r, i) => `${i + 1}. ${r}`), '',
@@ -42,7 +47,7 @@ export function renderCodemap(m) {
   for (const g of G) {
     const es = m.entries.filter(e => e.group === g);
     out.push(`### ${g} (${es.length})`, '', table(['kind', 'entry', 'route / key / via', 'where', 'rule'],
-      es.map(e => [e.kind, `\`${short(e.id)}\``, e.path ? `${e.method} ${e.path}` : e.key || e.via || '', loc(e.file, e.line), e.rule || 'python'])), '');
+      es.map(e => [e.kind, `\`${short(e.id)}\``, e.path ? [e.method, e.path].filter(Boolean).join(' ') + (e.alsoAt ? ` (also ${e.alsoAt.join(', ')})` : '') : e.key || e.via || '', loc(e.file, e.line), e.rule || 'python'])), '');
   }
 
   out.push('## Rule links', '');
@@ -58,11 +63,18 @@ export function renderCodemap(m) {
   const unlinked = m.rules.pyHttp.filter(h => !h.handler);
   if (m.rules.pyHttp.length) out.push(`### HTTP client calls with no matching route (${unlinked.length} of ${m.rules.pyHttp.length})`, '',
     table(['from', 'call', 'where'], unlinked.map(h => [`\`${short(h.from)}\``, `${h.method} ${h.url}`, loc(h.file, h.line)])), '');
+  const jsUnlinked = (m.rules.jsHttp || []).filter(h => !h.handler);
+  if (m.rules.jsHttp?.length) out.push(`### TypeScript / JavaScript HTTP client calls (${m.rules.jsHttp.length - jsUnlinked.length} of ${m.rules.jsHttp.length} linked)`, '',
+    'A URL is folded from literals and consts (`folded`); one whose leading base could not be folded is linked only when exactly one route has its tail (`tail match`).', '',
+    table(['from', 'client', 'call', 'route handler', 'how', 'where'], m.rules.jsHttp.map(h => [`\`${short(h.from)}\``, h.client, `${h.method} ${h.url}`, h.handler ? `\`${short(h.handler)}\`` : '**no matching route**',
+      [h.folded ? `folded ${h.folded.join(', ')}` : '', h.env ? `env ${h.env.join(', ')}` : '', h.match === 'suffix' ? 'tail match' : ''].filter(Boolean).join(' · '), loc(h.file, h.line)])), '');
+  if (m.rules.routeAliases?.length) out.push('### Handlers a second route also reaches', '', table(['route', 'handler', 'where'],
+    m.rules.routeAliases.map(r => [`${r.method} ${r.path}`, `\`${short(r.id)}\``, loc(r.file, r.line)])), '');
   const onFailure = m.edges.filter(e => e.onFailure);
   out.push(`### Calls on failure paths (${onFailure.length})`, '', 'Calls inside an `except` clause run only when the guarded code raised.', '',
     table(['from', 'to', 'on failure', 'where'], onFailure.map(e => [`\`${short(e.from)}\``, `\`${short(e.to)}\``, e.onFailure, loc(fileOf(e.from), e.line)])), '');
   out.push('### Frameworks imported without a rule pack', '', m.frameworksWithoutPack.length
-    ? m.frameworksWithoutPack.map(f => `- \`${f.name}\` (first seen in \`${f.firstSeen}\`): its wiring is not linked; declare links where a flow needs them`).join('\n') : '_none_', '');
+    ? m.frameworksWithoutPack.map(f => `- \`${f.name}\`${f.lang ? ` (${f.lang})` : ''} (first seen in \`${f.firstSeen}\`): its wiring is not linked; declare links where a flow needs them`).join('\n') : '_none_', '');
 
   out.push('## Tests', '',
     `${ts.tests} tests (${ts.asserting} with at least one assertion) · ${ts.fixtures} fixtures (${ts.autouse} autouse) · ${ts.fixtureLinks} fixture links · ` +
@@ -73,7 +85,7 @@ export function renderCodemap(m) {
   const autouseMocks = m.mocks.filter(x => autouse.has(x.fn));
   out.push('### Mocks every test in scope runs under', '', 'No test is evidence for what these replace; narration must not call it "tested".', '',
     table(['mock', 'replaces', 'set up in', 'applies to'], [
-      ...session.map(x => [x.how, `\`${x.target ? short(x.target) : x.raw}\``, loc(fileOf(x.fn), x.line) + ` (\`${short(x.fn)}\`)`, `every test under \`${x.conftest}\` (session-wide)`]),
+      ...session.map(x => [x.how, `\`${x.target ? short(x.target) : x.raw}\``, loc(fileOf(x.fn), x.line) + ` (\`${short(x.fn)}\`)`, x.covers != null ? `every test under \`${x.covers || '.'}/\` (session-wide, set up in \`${x.conftest}\`)` : `every test under \`${x.conftest}\` (session-wide)`]),
       ...autouseMocks.map(x => [x.how, `\`${x.target ? short(x.target) : x.raw}\``, loc(fileOf(x.fn), x.line) + ` (\`${short(x.fn)}\`)`, 'every test in scope (autouse fixture)'])]), '');
   const binds = new Map(); for (const b of m.fixtureBindings) binds.set(b.fixture, (binds.get(b.fixture) || 0) + 1);
   out.push('### Fixtures', '', table(['fixture', 'where', 'autouse', 'bound by'], m.fixtures.map(f => [`\`${short(f.id)}\``, loc(f.file, f.line), f.autouse ? 'yes' : '', binds.get(f.id) || 0])), '');
@@ -84,6 +96,8 @@ export function renderCodemap(m) {
     ...m.config.notGitWorkTree.map(d => `**Config not read from \`${d}\`: not a git work tree, so no config file can be proven tracked.**`), ...(m.config.notGitWorkTree.length ? [''] : []),
     'A value is kept only for a key a dispatch guard reads; a secret-looking key or value is shown as `set (redacted)`.', '',
     table(['config file', 'group', 'reader', 'facts'], m.config.files.map(f => [`\`${f.path}\``, f.group, f.reader, f.facts])), '',
+    ...(m.config.envReads ? ['### Environment variables the TypeScript / JavaScript code reads', '', 'A default is the literal after `??` or `||`; a secret-looking one is shown as `set (redacted)`.', '',
+      table(['variable', 'via', 'default', 'where', 'group'], m.config.envReads.map(r => [r.key, r.via, r.default ?? '', loc(r.file, r.line), r.group])), ''] : []),
     '### Profiles', '', table(['profile', 'group', 'keys a guard reads'], m.config.profiles.map(p => [p.name, p.group, p.keys.join(', ')])), '',
     '### Config-selected dispatch', '');
   for (const s of m.config.sites) {

@@ -1,0 +1,15 @@
+{
+  "entries": [
+    "http api/src/server.ts:GET /{orderId} GET /v2/orders/{orderId}",
+    "http server/app.js:GET /health GET /health",
+    "http server/app.js:login POST /api/login",
+    "http server/routes/users.js:createUser POST /api/users",
+    "http server/routes/users.js:getUser GET /api/users/{id}",
+    "http server/routes/users.js:listUsers GET /api/users",
+    "main server/app.js:<main>"
+  ],
+  "links": [
+    "api/src/server.ts:<module> -> api/src/server.ts:GET /decoy static js.callback",
+    "server/app.js:login -> server/middleware.js:requireAuth framework express.middleware"
+  ]
+}

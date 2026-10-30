@@ -1,0 +1,58 @@
+{
+  "granularity": "test-file",
+  "outcome": {
+    "collected": 5,
+    "passed": 4,
+    "failed": 1,
+    "errors": 0,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0
+  },
+  "byFile": {
+    "test/cart.test.mjs": "src/cart.mjs:Cart.add, src/cart.mjs:Cart.constructor, src/cart.mjs:Cart.total, src/cart.mjs:applyDiscount, src/cart.mjs:discountFor, test/cart.test.mjs:Cart > applies the discount over 100, test/cart.test.mjs:Cart > beforeEach",
+    "test/discount.test.mjs": "src/cart.mjs:discountFor, test/discount.test.mjs:no discount under 100",
+    "test/jobs.test.mjs": "src/cart.mjs:Cart.add, src/cart.mjs:Cart.constructor, src/cart.mjs:Cart.total, src/cart.mjs:applyDiscount, src/cart.mjs:discountFor, src/jobs.mjs:nightlyTotal, src/jobs.mjs:runWithRetry, test/jobs.test.mjs:the nightly total runs the body",
+    "test/net.test.mjs": "src/net.mjs:ping, test/net.test.mjs:ping reaches the cache",
+    "test/price.test.ts": "src/price.ts:lineTotal, test/price.test.ts:a line costs its quantity times the unit price"
+  },
+  "byTest": {
+    "test/cart.test.mjs:Cart > applies the discount over 100": "passed: 2/2",
+    "test/discount.test.mjs:no discount under 100": "passed: 1/1",
+    "test/jobs.test.mjs:the nightly total runs the body": "passed: 3/3",
+    "test/net.test.mjs:ping reaches the cache": "failed: 1/1",
+    "test/price.test.ts:a line costs its quantity times the unit price": "passed: 1/1"
+  },
+  "directLinksPerTest": {
+    "tests": 5,
+    "observed": 8,
+    "total": 8,
+    "prod": {
+      "observed": 8,
+      "total": 8
+    },
+    "granularity": "test-file"
+  },
+  "fixtureLinks": {
+    "observed": 1,
+    "total": 1
+  },
+  "functionsRan": {
+    "prod": {
+      "ran": 9,
+      "total": 10
+    },
+    "eval": {
+      "ran": 0,
+      "total": 0
+    },
+    "test": {
+      "ran": 6,
+      "total": 6
+    },
+    "dev": {
+      "ran": 0,
+      "total": 0
+    }
+  }
+}

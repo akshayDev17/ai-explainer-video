@@ -49,7 +49,7 @@ test('exit 1: an unknown flag or a missing command is a usage error', () => {
 test('exit 3: only a recognised test runner is traced, never a server, a wrapper or shell syntax', () => {
   for (const cmd of ['python3 server.py', 'python -m http.server', 'uv run pytest', 'poetry run pytest', 'env A=1 pytest',
     'pytest; curl example.com', 'pytest && rm -rf x', 'pytest | tee log', 'pytest > log', 'pytest $(id)', 'pytest "`id`"',
-    'python -m pytest$IFS-x', 'node --test', 'npx jest', 'go test ./...', '']) {
+    'python -m pytest$IFS-x', 'node server.js', 'npx -y jest', 'go test ./...', '']) {
     const r = tool('trace.mjs', '--codemap', 'x.json', '--test-command', cmd, OPT_IN);
     assert.equal(r.status, 3, `${cmd}: ${r.stderr}`);
     assert.match(r.stderr, /not a recognised test command/);

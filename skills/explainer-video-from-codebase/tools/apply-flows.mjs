@@ -459,7 +459,7 @@ const triage = nonTest.map(e => {
   else if (e.group === 'dev' && !promoted.has(e.id) && c?.continues?.length) { status = 'continuation'; by = c.continues.join(', '); reason = 'continues a dev row, filtered with it'; }
   else if (e.group === 'dev' && !promoted.has(e.id)) status = 'dev-filtered';
   if (rule && status === 'excluded') rule.matched.push(e.id);
-  return { id: e.id, group: e.group, kind: e.kind, route: e.path ? `${e.method} ${e.path}` : e.key || null, rank: rankOf.get(e.id)?.rank ?? null,
+  return { id: e.id, group: e.group, kind: e.kind, route: e.path ? [e.method, e.path].filter(Boolean).join(' ') : e.key || null, rank: rankOf.get(e.id)?.rank ?? null,
     continues: c?.continues || null, promoted: promoted.has(e.id), status, reason, by };
 });
 for (const t of triage) if (!t.status) problem(`entry ${t.id}`, `(${t.group}${t.rank ? ` #${t.rank}` : ''}) is untriaged: make it a flow, a variant, skip it with a reason, or exclude it with a reason${t.group === 'eval' ? ' (eval rows are never triaged implicitly)' : t.promoted ? ' (it is promoted)' : ''}`);
