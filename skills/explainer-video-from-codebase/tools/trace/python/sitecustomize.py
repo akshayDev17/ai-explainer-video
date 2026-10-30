@@ -215,7 +215,10 @@ def _on_term(signum, frame):
 
 
 def _wrap_unittest():
+    import traceback
     import unittest.case
+    import unittest.result
+    import unittest.suite
 
     run = unittest.case.TestCase.run
     kinds = ("errors", "failures", "skipped", "expectedFailures", "unexpectedSuccesses")
@@ -247,6 +250,43 @@ def _wrap_unittest():
                 OUTCOMES[key] = rec
 
     unittest.case.TestCase.run = traced_run
+
+    # a failing setUpModule, setUpClass, tearDownClass or tearDownModule is reported outside any TestCase.run, under
+    # unittest's own name for it (`setUpClass (pkg.mod.Class)`): record it as an error, and make it current while it
+    # runs, so its network attempts and a cut-off there are recorded under that name too
+    add_error = unittest.result.TestResult.addError
+
+    def traced_add_error(self, test, err):
+        if isinstance(test, unittest.suite._ErrorHolder):
+            last = traceback.format_exception_only(err[0], err[1])[-1].strip()
+            OUTCOMES["unittest::" + test.id()] = {"call": "error", "message": last[:200], "permission": denied(err[1])}
+        return add_error(self, test, err)
+
+    unittest.result.TestResult.addError = traced_add_error
+
+    def strclass(cls):
+        return "%s.%s" % (cls.__module__, cls.__qualname__)
+
+    def previous(result):
+        return getattr(result, "_previousTestClass", None)
+
+    def fixture(method, name, parent):
+        handle = getattr(unittest.suite.TestSuite, method)
+
+        def traced(self, *args):
+            prev, p = CURRENT[0], parent(*args)
+            CURRENT[0] = "unittest::%s (%s)" % (name, p) if p else prev
+            try:
+                return handle(self, *args)
+            finally:
+                CURRENT[0] = prev
+
+        setattr(unittest.suite.TestSuite, method, traced)
+
+    fixture("_handleClassSetUp", "setUpClass", lambda test, result: strclass(test.__class__))
+    fixture("_tearDownPreviousClass", "tearDownClass", lambda test, result: previous(result) and strclass(previous(result)))
+    fixture("_handleModuleFixture", "setUpModule", lambda test, result: test.__class__.__module__)
+    fixture("_handleModuleTearDown", "tearDownModule", lambda result: previous(result) and previous(result).__module__)
 
 
 def _run_shadowed_sitecustomize():

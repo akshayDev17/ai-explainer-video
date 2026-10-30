@@ -1,11 +1,27 @@
 """trace.mjs's pytest plugin: tells the collector which test is running, so a call made by a framework (a fixture, a DI
 provider, a route reached through a test client thread) is still attributed to the test it ran under; and records each
 test's outcome per phase, with whether the sandbox denied it (a permission error, or a hidden path not found). Loaded
-with PYTEST_PLUGINS=fmtrace_plugin."""
+with PYTEST_PLUGINS=fmtrace_plugin.
+It records only the repo's own run: the first pytest config in the first pytest process. A pytest run inside a test
+(pytester, in process or in a child process, which inherits PYTEST_PLUGINS) records no outcome and moves no current
+test; the collector still records its calls."""
 import os
 
 import pytest
 import sitecustomize as fm
+
+_BOUND = "FM_TRACE_PYTEST_BOUND"
+_CONFIG = [None]
+
+
+def pytest_configure(config):
+    if _CONFIG[0] is None and not os.environ.get(_BOUND):
+        _CONFIG[0] = config
+        os.environ[_BOUND] = "1"
+
+
+def _ours(config):
+    return config is _CONFIG[0]
 
 
 def _key(item):
@@ -24,6 +40,9 @@ def _last_line(longrepr):
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item, nextitem):
+    if not _ours(item.config):
+        yield
+        return
     fm.CURRENT[0] = _key(item)
     fm.OUTCOMES.setdefault(fm.CURRENT[0], {"nodeid": item.nodeid})
     yield
@@ -33,6 +52,8 @@ def pytest_runtest_protocol(item, nextitem):
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
     outcome = yield
+    if not _ours(item.config):
+        return
     rep = outcome.get_result()
     rec = fm.OUTCOMES.setdefault(_key(item), {"nodeid": item.nodeid})
     rec[rep.when] = rep.outcome
@@ -44,10 +65,14 @@ def pytest_runtest_makereport(item, call):
             rec["permission"] = True
 
 
-def pytest_collectreport(report):
-    if report.failed:
+@pytest.hookimpl(hookwrapper=True)
+def pytest_make_collect_report(collector):
+    outcome = yield
+    report = outcome.get_result()
+    if _ours(collector.config) and report.failed:
         fm.COLLECT_ERRORS.append({"nodeid": report.nodeid, "message": _last_line(report.longrepr)})
 
 
 def pytest_collection_finish(session):
-    fm.COLLECTED[0] = len(session.items)
+    if _ours(session.config):
+        fm.COLLECTED[0] = len(session.items)
