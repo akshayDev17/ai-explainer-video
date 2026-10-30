@@ -285,7 +285,8 @@ virtualenv.
 
 A JavaScript / TypeScript runner is run once per test file (the code map's test files that match the runner's own
 default pattern, selected by the command's positionals as the runner reads them: a path or directory for node, a
-case-insensitive regex over the path for jest, a case-insensitive substring of it for vitest), each in its own
+case-insensitive regex over the path for jest, as is jest's `--testPathPattern` (never passed on, since
+`--runTestsByPath` ignores it), a case-insensitive substring of it for vitest), each in its own
 sandboxed process under V8 precise coverage (`NODE_V8_COVERAGE`), on the `node` the command names by path, else the one on PATH, with the repo's
 `node_modules` linked into the copy entry by entry and exposed read-only; a workspace package's link (a symlink into
 the repo, such as `node_modules/@app/shared -> ../../packages/shared`) points at its copy, never at the hidden repo.

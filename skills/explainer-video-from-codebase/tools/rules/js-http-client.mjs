@@ -18,25 +18,26 @@ const isParam = s => /^\{[^}]+\}$/.test(s);
 const fits = (rs, cs) => rs.length === cs.length && rs.every((r, i) => isParam(r) ? cs[i] !== '' : r === cs[i]);
 const literal = rs => rs.filter(s => !isParam(s)).length;
 
-// the route `best` picks among those serving the method; when the method is unknown, the one handler every method the
-// routes serve would pick, else { ambiguous: the routes it could be }
+// the route `best` picks among those serving the method (`best` gives [] for none, [route], or the routes that tie);
+// when the method is unknown, the one handler every method the routes serve would pick, with no tie for any of them,
+// else { ambiguous: the routes it could be }
 function byMethod(routes, method, best) {
   const serving = m => routes.filter(r => r.method === '*' || r.method === m);
-  if (method) return { route: best(serving(method)) };
-  const picks = [...new Set(routes.map(r => r.method))].map(m => best(serving(m))).filter(Boolean);
-  if (new Set(picks.map(r => r.id)).size <= 1) return { route: picks[0] || null };
-  return { route: null, ambiguous: [...new Set(picks.map(r => `${r.method} ${r.path}`))].sort() };
+  if (method) { const c = best(serving(method)); return { route: c.length === 1 ? c[0] : null }; }
+  const picks = [...new Set(routes.map(r => r.method))].map(m => best(serving(m))), all = picks.flat();
+  if (picks.every(c => c.length <= 1) && new Set(all.map(r => r.id)).size <= 1) return { route: all[0] || null };
+  return { route: null, ambiguous: [...new Set(all.map(r => `${r.method} ${r.path}`))].sort() };
 }
 
 export function matchRoute(routes, method, path, { suffix = false } = {}) {
   const cs = segsOf(path);
   const result = (r, match) => r.route ? { route: r.route, match } : r.ambiguous ? { route: null, ambiguous: r.ambiguous } : null;
-  const exact = byMethod(routes, method, rs => rs.filter(r => fits(r.segs, cs)).sort((a, b) => literal(b.segs) - literal(a.segs))[0] || null);
+  const exact = byMethod(routes, method, rs => rs.filter(r => fits(r.segs, cs)).sort((a, b) => literal(b.segs) - literal(a.segs)).slice(0, 1));
   if (exact.route || exact.ambiguous || !suffix || !cs.some(s => s !== '{}')) return result(exact, 'exact');
   // the tail match must be unambiguous: one route, or one with more literal segments in its tail than any other
   const tailLit = r => literal(r.segs.slice(r.segs.length - cs.length));
   const tailOf = rs => { const tail = rs.filter(r => r.segs.length > cs.length && fits(r.segs.slice(r.segs.length - cs.length), cs)).sort((a, b) => tailLit(b) - tailLit(a));
-    return tail.length && (tail.length === 1 || tailLit(tail[0]) > tailLit(tail[1])) ? tail[0] : null; };
+    return tail.filter(r => tailLit(r) === tailLit(tail[0])); };
   return result(byMethod(routes, method, tailOf), 'suffix');
 }
 

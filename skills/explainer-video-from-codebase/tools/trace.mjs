@@ -133,9 +133,9 @@ const bin = lang === 'js' && runner !== 'node-test' ? runnerBin(ROOT, runner) : 
 if (lang === 'js' && runner !== 'node-test' && !bin)
   fail(1, `refused: ${runner} is not installed in the repo (no node_modules/.bin/${runner}): tracing runs only the repo's own installed test runner and never installs packages`);
 const jsFiles = lang === 'js' ? jsTestFiles(m, runner, testArgs) : [];
-if (lang === 'js' && !jsFiles.length) fail(2, `no test file in the code map matches ${runner}'s test-file pattern${testArgs.some(a => !a.startsWith('-')) ? ' among the files the paths or filters given select' : ''}: nothing to trace`);
+if (lang === 'js' && !jsFiles.length) fail(2, `no test file in the code map matches ${runner}'s test-file pattern${passThrough(runner, testArgs).length < testArgs.length ? ' among the files the paths or filters given select' : ''}: nothing to trace`);
 const runArgs = runner === 'pytest' && !testArgs.some((a, i) => a === 'no:cacheprovider' && testArgs[i - 1] === '-p') ? [...testArgs, '-p', 'no:cacheprovider'] : testArgs;
-const testArgv = lang === 'js' ? fileArgv({ runner, node: exe, bin, flags: passThrough(testArgs), file: '<test file>', report: '<report>' })
+const testArgv = lang === 'js' ? fileArgv({ runner, node: exe, bin, flags: passThrough(runner, testArgs), file: '<test file>', report: '<report>' })
   : /^(pytest|py\.test)$/.test(head) ? [exe, ...runArgs] : [exe, '-m', runner, ...runArgs];
 
 // what the sandbox must still let the run read: the interpreter's prefix, its virtualenv and the prefix that
@@ -290,7 +290,7 @@ async function runJs({ copied, changedFiles, shown }) {
       NODE_V8_COVERAGE: cov, NODE_OPTIONS: `--require ${JSON.stringify(join(SCRATCH, 'trace', 'fmtrace-net.cjs'))}`,
       FM_TRACE_OUT: TRACE_OUT, FM_TRACE_FILE: file, CI: '1', NO_COLOR: '1', FORCE_COLOR: '0',
     };
-    const argv = fileArgv({ runner, node: exe, bin, flags: passThrough(testArgs), file, report: rep });
+    const argv = fileArgv({ runner, node: exe, bin, flags: passThrough(runner, testArgs), file, report: rep });
     const run = await runSandboxed(argv, env, { box: box.kind, readOnly: shown, limitMs: left });
     logs.push(`== ${file} (exit ${run.status ?? run.signal}${run.timedOut ? ', cut off by the time limit' : ''})\n${run.log.toString('utf8')}`);
     if (run.status && !exitCode) exitCode = run.status;

@@ -62,7 +62,13 @@ test('a split value of a flag that takes one is joined to it; after a boolean fl
   assert.deepEqual(r('npx vitest run --config vitest.config.ts cart'), { runner: 'vitest', args: ['--config=vitest.config.ts', 'cart'] });
   assert.deepEqual(r('npx jest --verbose src/cart'), { runner: 'jest', args: ['--verbose', 'src/cart'] });
   assert.deepEqual(r('npx vitest run --silent src'), { runner: 'vitest', args: ['--silent', 'src'] });
-  assert.deepEqual(passThrough(r('npx jest -t adds src').args), ['-t=adds']);
+  assert.deepEqual(passThrough('jest', r('npx jest -t adds src').args), ['-t=adds']);
+  const jestCmd = r('npx jest --testPathPattern src/cart --silent');
+  assert.deepEqual(jestCmd.args, ['--testPathPattern=src/cart', '--silent']);
+  const cartAndMore = { tests: ['src/cart/a.test.ts', 'src/checkout.test.ts', 'src/other.test.ts'].map(file => ({ file })) };
+  assert.deepEqual(jsTestFiles(cartAndMore, 'jest', jestCmd.args), ['src/cart/a.test.ts'], '--testPathPattern selects as a regex over the path');
+  assert.deepEqual(jsTestFiles(cartAndMore, 'jest', ['--testPathPatterns=other', 'checkout']), ['src/checkout.test.ts', 'src/other.test.ts'], 'with positionals, either selects');
+  assert.deepEqual(passThrough('jest', jestCmd.args), ['--silent'], '--runTestsByPath ignores it, so it is never passed on');
   assert.deepEqual(jsTestFiles({ tests: [{ file: 'src/a.test.ts' }, { file: 'lib/b.test.ts' }] }, 'jest', r('npx jest -t adds src').args), ['src/a.test.ts'], 'the value is no path');
   assert.deepEqual(r('npx jest --reporters default src').args, ['--reporters=default', 'src']);
   for (const cmd of ['npx vitest run --reporter dot src', 'npx jest --watch src', 'npm test']) assert.equal(r(cmd), null, cmd);

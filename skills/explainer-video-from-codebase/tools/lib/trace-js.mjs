@@ -7,9 +7,10 @@
      killed before it can write its coverage; worker threads write theirs).
    A split value of a jest or vitest flag that takes one (`-t adds`, `--config vitest.config.ts`) is joined to it;
    every other flag is boolean, so a word after it is a test path or filter. A positional selects test files as the
-   runner does: a path or directory for node, a case-insensitive regex over the path for jest, a case-insensitive
-   substring of it for vitest. jest and vitest run with --passWithNoTests, so a file the repo's
-   own config does not collect exits 0 instead of failing. */
+   runner does: a path or directory for node, a case-insensitive regex over the path for jest (as is a
+   --testPathPattern value, which is not passed on: --runTestsByPath ignores it), a case-insensitive substring of it
+   for vitest. jest and vitest run with --passWithNoTests, so a file the repo's own config does not collect exits 0
+   instead of failing. */
 import { existsSync, readFileSync, readdirSync, lstatSync, realpathSync } from 'node:fs';
 import { join, basename, relative, sep } from 'node:path';
 
@@ -54,12 +55,14 @@ const SELECTS = {
   jest: p => { let re; try { re = new RegExp(p, 'i'); } catch { return () => false; } return f => re.test(f); },
   vitest: p => f => f.toLowerCase().includes(p.toLowerCase()),
 };
+// what an argument selects test files by: a positional, or jest's --testPathPattern(s) (which --runTestsByPath ignores)
+const selectorOf = (runner, a) => !a.startsWith('-') ? a : runner === 'jest' && /^--testPathPatterns?=/.test(a) ? a.slice(a.indexOf('=') + 1) : null;
 export function jsTestFiles(m, runner, args) {
-  const selects = args.filter(a => !a.startsWith('-')).map(a => SELECTS[runner](a.replace(/^\.\//, '').replace(/\/$/, '')));
+  const selects = args.map(a => selectorOf(runner, a)).filter(p => p != null).map(p => SELECTS[runner](p.replace(/^\.\//, '').replace(/\/$/, '')));
   const files = [...new Set((m.tests || []).filter(t => /\.[cm]?[jt]sx?$/.test(t.file)).map(t => t.file))].sort();
   return files.filter(f => PATTERNS[runner](f) && (!selects.length || selects.some(sel => sel(f))));
 }
-export const passThrough = args => args.filter(a => a.startsWith('-'));
+export const passThrough = (runner, args) => args.filter(a => selectorOf(runner, a) == null);
 
 // the runner's entry in the repo's node_modules: a node script (run with node) or a shell shim (run as is)
 export function runnerBin(root, runner) {

@@ -104,9 +104,10 @@ test('express: a mount prefix named by a const, and a router a factory returns, 
 test('js-http-client: a method that cannot be known is never GET by default, and links only when every method the path serves leads to one handler', () => {
   const m = mineFiles({
     'server/app.js': ["const express = require('express');", 'const app = express();', "app.get('/api/users', listUsers);", "app.post('/api/users', createUser);",
-      "app.get('/api/health', health);", "app.all('/api/echo', echo);",
+      "app.get('/api/health', health);", "app.all('/api/echo', echo);", "app.get('/v1/items', listV1);", "app.get('/v2/items', listV2);", "app.post('/v2/items', create);",
       'function listUsers(req, res) { res.json([]); }', 'function createUser(req, res) { res.json({}); }', 'function health(req, res) { res.send("ok"); }',
-      'function echo(req, res) { res.send(""); }', 'module.exports = app;', ''].join('\n'),
+      'function echo(req, res) { res.send(""); }', 'function listV1(req, res) { res.json([]); }', 'function listV2(req, res) { res.json([]); }',
+      'function create(req, res) { res.json({}); }', 'module.exports = app;', ''].join('\n'),
     'web/src/api.ts': ["import axios from 'axios';",
       "export function list() { return fetch('/api/users'); }",
       "export function create(body: string) { const opts = { method: 'POST', body }; return fetch('/api/users', opts); }",
@@ -115,7 +116,8 @@ test('js-http-client: a method that cannot be known is never GET by default, and
       "export function byConfig(cfg: { method: string }) { return axios.request({ url: '/api/users', method: cfg.method }); }",
       "export function byAxiosArg(cfg: object) { return axios('/api/users', cfg); }",
       "export function ping(method: string) { return fetch('/api/health', { method }); }",
-      "export function echoAny(method: string) { return fetch('/api/echo', { method }); }", ''].join('\n'),
+      "export function echoAny(method: string) { return fetch('/api/echo', { method }); }",
+      "export function tailAny(method: string) { return fetch(`${process.env.API_URL}/items`, { method }); }", ''].join('\n'),
   });
   const by = Object.fromEntries(m.rules.jsHttp.map(h => [h.from.split(':').pop(), [h.method, h.handler?.split(':').pop() ?? null]]));
   assert.deepEqual(by.list, ['GET', 'listUsers'], 'no options: GET');
@@ -126,6 +128,8 @@ test('js-http-client: a method that cannot be known is never GET by default, and
     assert.equal(unlinked[f], 'the method is unknown and the path is served by GET /api/users, POST /api/users', f);
   }
   assert.deepEqual([by.ping, by.echoAny], [[null, 'health'], [null, 'echo']], 'one handler serves the path, whatever the method');
+  assert.deepEqual(by.tailAny, [null, null], 'a GET tail match ties, so the POST tail match does not win');
+  assert.equal(unlinked.tailAny, 'the method is unknown and the path is served by GET /v1/items, GET /v2/items, POST /v2/items');
   assert.equal(m.edges.some(e => e.kind === 'http' && /listUsers|createUser/.test(e.to) && /byParam|bySpread|byConfig|byAxiosArg/.test(e.from)), false);
 });
 
