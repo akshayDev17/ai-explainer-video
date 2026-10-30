@@ -48,6 +48,31 @@ section` error — or any other error — means the script is incomplete.
 `videoIndex`, `title`, `form`, `planTargetMinutes`, `sources`, `artefacts` are copied
 from the enriched plan's video; only `text`, `style`, `visual`, `covers` are authored.
 
+<!-- sync:stage3-addendum -->
+**Code-flow videos only.** A code-flow video's plan, `plan.json` or `plan.enriched.json`, carries
+`"kind": "codebase"`, and its `forms` are `overview`, `flow` and `core`. A coursework plan has no `kind`; nothing
+in this block applies to its videos.
+
+A code video's narration is the reading time: a panel shows only the lines being narrated, each highlighted while
+its sentence plays. The script for a code video adds these rules:
+
+- **Open** on the concrete request, UI action or command that starts the flow.
+- **One hop per segment.** Name identifiers in words; spoken text holds no code, no URLs and no markdown.
+- **Narrate every line a panel will show**: the hop's narrated lines (`sectionSpans[].lines` in the plan, or the
+  lines you choose when that is `null`, at most 22), plus a cited test's def, call and assertion lines.
+- **Branches.** Teach each `teach` branch in its own segment, naming its selector: the setting, flag or profile
+  that picks it.
+- **Tests.** Describe a cited test by what it asserts. Call a hop "tested" or "pinned" only for a direct, unmocked
+  link, never for a `"strength": "reachable"` citation. For a traced run say "observed in the test suite", never
+  "in production".
+- **Evals.** An eval hop that drives a production flow names that flow's video instead of re-narrating it.
+- **Pause prompts** are rare and bounded, only for a block that must be read whole.
+  - The segment's text says "pause" out loud.
+  - It carries `"pause": {"dwell": <s>}`, with 0 < dwell ≤ 2 and `pad` equal to the dwell.
+  - A video has at most 3. `script-check` errors on a fourth, so split the video instead.
+- **Secrets.** Never say a secret or a redacted value.
+<!-- /sync:stage3-addendum -->
+
 ## Maintenance
 
 > If you modify this file, or the user asks to change this stage, tell the user that the

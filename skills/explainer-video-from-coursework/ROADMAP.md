@@ -18,7 +18,7 @@ assemble stages written into `SKILL.md`; video 6 (SOLID) completed end-to-end.
 
 `SKILL.md` — all eight stages (plan, enrich, script, audio, scene, publish, render,
 assemble), each with its command, its `done when` gate, and the visual-check
-protocol (vision gate + the `LOOK` step). Distributed as one plugin of nine skills
+protocol (vision gate + the `LOOK` step). Distributed as one plugin of sixteen skills
 (`plugin.json` + `skills/`) — see §2.3.
 
 ### The stage skills
@@ -716,6 +716,10 @@ material comes from:
 | `explainer-video` | no source — a narrow-to-broad topic description | author the study material first (a pre-stage that builds the notes), then feed it through the same plan→video pipeline |
 | `explainer-video-from-codebase` | a codebase's major code flows (Python, TS/JS, Go, C, C++, or a mix) | mine the code (tree-sitter, grouped prod/test/eval/dev, tests as evidence), propose candidate flows, the agent proposes the series with reasons, the user approves the flow list, then a coursework-shaped plan reuses stages 3–8 |
 
-`explainer-video-from-codebase` is being built one milestone at a time (stage 1's mine,
-propose and rank tools exist); the other two are not started. Recorded here so the naming is reserved and
+`explainer-video-from-codebase` exists: its `SKILL.md` is the contract of record for the
+whole code-flow pipeline, and four stage skills ship beside it, `craft-codeflow-mine`
+(stages 1 and 1t), `craft-codeflow-flows` (1b and 1b′), `craft-codeflow-plan` (1c) and
+`craft-codeflow-scene` (5). They are held to the dual-file rule by
+`scripts/check-skill-sync.mjs` in CI, and stages 2–4b and 6–8 are this skill's own stage
+skills. The plugin is renamed once the skill works. The other two are not started. Recorded here so the naming is reserved and
 the "from coursework" scope of this skill stays explicit.

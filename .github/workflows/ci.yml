@@ -72,6 +72,12 @@ jobs:
       - name: Marketplace pins track the package version
         run: node scripts/check-marketplace-pins.mjs
 
+      # The dual-file rule: each main SKILL.md is the contract of record and every stage also ships as its own
+      # skill. Fails when a stage skill and its section drift: a Maintenance note naming no section, a different
+      # tool or flag (codebase pipeline), or a <!-- sync:<id> --> passage that differs.
+      - name: Stage skills in step with their main skill
+        run: node scripts/check-skill-sync.mjs
+
   # The miner's behaviour on small synthetic repos: group rules, each rule pack against its
   # golden links, the resolver fixes, test-to-code links, the CLI contract. Offline and
   # dependency-free: the tools run on the vendored tree-sitter, so no npm install.

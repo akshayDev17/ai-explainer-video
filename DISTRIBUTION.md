@@ -1,7 +1,7 @@
 # Distribution & installation
 
 **One** npm package and one git repo serve all four platforms. Each consumer reads its own
-manifest surface out of the same package and ignores the rest, so the twelve skills exist once
+manifest surface out of the same package and ignores the rest, so the sixteen skills exist once
 and nothing can drift out of step.
 
 ## Packages
@@ -76,10 +76,11 @@ agy plugin install https://github.com/akshayDev17/ai-explainer-video
   the harness supplies `dsh-skill-filesystem` through its own module fallback, verified end
   to end. That keeps the manifest Claude Code and Codex install free of it.
 
-All four surfaces resolve the same **twelve** skills: `explainer-video-from-coursework`, its
-nine `craft-video-<stage>` siblings, the vendored `coursework-author`, and the in-progress
+All four surfaces resolve the same **sixteen** skills: `explainer-video-from-coursework`, its
+nine `craft-video-<stage>` siblings, the vendored `coursework-author`,
 `explainer-video-from-codebase` (its tree-sitter runtime and grammars are vendored inside it,
-so no host needs `npm install`) — all top-level under
+so no host needs `npm install`), and its four `craft-codeflow-<stage>` siblings
+(`-mine`, `-flows`, `-plan`, `-scene`) — all top-level under
 `skills/` so a single-level scan finds every one.
 
 Each catalogue pins the version a host installs from npm (`source: npm`, `version: ^x.y.z`).
