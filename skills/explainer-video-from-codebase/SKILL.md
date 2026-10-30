@@ -1,6 +1,6 @@
 ---
 name: explainer-video-from-codebase
-description: Under construction — will turn the major code flows of a codebase into a narrated explainer-video series. Today its first stages exist: mining a Python repo into a code map (files grouped as prod/test/eval/dev, call graph, entry points, framework links, tests as evidence, config facts), proposing one candidate flow per entry point and ranking them per group as evidence, an opt-in sandboxed trace of the repo's own test suite (Python), validating the agent's series proposal (flows.json), recording the user's approval of the flow list, planning the videos in the coursework plan's shape, and the on-screen code tools for a code video's scenes (verified code panels, test panels, diagram skeletons). Use only when the user asks to mine a codebase, rank its candidate flows, propose and plan a code-flow series, or cut code panels for its scenes.
+description: Under construction — will turn the major code flows of a codebase into a narrated explainer-video series. Today its first stages exist: mining a Python, TypeScript or JavaScript repo (or a mix) into one code map (files grouped as prod/test/eval/dev, call graph, entry points, framework links, tests as evidence, config facts), proposing one candidate flow per entry point and ranking them per group as evidence, an opt-in sandboxed trace of the repo's own test suite (pytest, unittest, node --test, jest, vitest), validating the agent's series proposal (flows.json), recording the user's approval of the flow list, planning the videos in the coursework plan's shape, and the on-screen code tools for a code video's scenes (verified code panels, test panels, diagram skeletons). Use only when the user asks to mine a codebase, rank its candidate flows, propose and plan a code-flow series, or cut code panels for its scenes.
 ---
 
 # explainer-video-from-codebase — under construction
@@ -26,7 +26,7 @@ node <skill>/tools/mine.mjs <repo> --out out/<name> [--group 'glob=prod|test|eva
 ```
 
 It writes `out/<name>/codemap.json` and `out/<name>/codemap.md`. Exit 0 is done; exit 1 is
-a bad path or flag, or a repo with no Python; exit 2 is a failed self-check (a definition
+a bad path or flag, or a repo with no Python, TypeScript or JavaScript; exit 2 is a failed self-check (a definition
 the parser saw was not extracted, or two collapsed into one symbol) — report it, do not edit the output. Show the user
 `codemap.md` in full: every group with the rule that placed each file, every entry, every
 rule link with its evidence, the mocks every test runs under, config profiles, and any
@@ -88,7 +88,7 @@ writes outside scratch, no program outside the sandbox acting for it, no reads o
 repo, an empty environment, no bytecode or cache
 writes, a time limit. It writes `out/<name>/trace.json`, an overlay the code map is never edited for, and
 `trace.log`, the run's output (credential-shaped strings redacted). Exit 0 is done; 5 is the time limit (the partial
-trace is kept and marked); 1, 3 and 4 are refusals (no opt-in flag; not a test command; no sandbox): report them and
+trace is kept and marked); 1, 3 and 4 are refusals (no opt-in flag or no installed jest / vitest; not a test command; no sandbox): report them and
 never work around one, least of all by running the tests yourself. Exit 2 means no test ran: show the user
 `trace.log`'s end.
 
