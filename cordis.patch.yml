@@ -3,5 +3,5 @@
 # (see dsh-app-boot `anchorInsertedPluginNames`), so './lib/index.js' resolves
 # to this package's plugin module wherever it is installed.
 - insert:
-    - id: explainer-video-from-coursework
+    - id: explainer-video
       name: './lib/index.js'

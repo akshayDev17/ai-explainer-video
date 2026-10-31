@@ -164,7 +164,7 @@ jobs:
           VERSION: ${{ steps.release.outputs.version }}
           RELEASE_LOG: ${{ runner.temp }}/release.log
           START_EPOCH: ${{ steps.start.outputs.epoch }}
-          PACKAGE: explainer-video-from-coursework
+          PACKAGE: explainer-video
           SMTP_HOST: ${{ vars.SMTP_HOST }}
           SMTP_PORT: ${{ vars.SMTP_PORT }}
           SMTP_USER: ${{ vars.SMTP_USER }}

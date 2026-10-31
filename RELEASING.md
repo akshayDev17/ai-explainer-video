@@ -5,7 +5,7 @@ publishes it on demand. No npm token exists anywhere, and no publish ever runs o
 
 | package | read by |
 |---|---|
-| `explainer-video-from-coursework` | Claude Code, Codex (npm) · DeepSeek Harness (npm) · Antigravity (git) |
+| `explainer-video` | Claude Code, Codex (npm) · DeepSeek Harness (npm) · Antigravity (git) |
 
 The one package carries three manifest surfaces, and each consumer reads only its own:
 
@@ -58,7 +58,7 @@ second gate was pure friction.
 ## One-time setup: a Trusted Publisher
 
 npm has to be told which workflow may publish. Once, for this one package, at
-`https://www.npmjs.com/package/explainer-video-from-coursework/access`:
+`https://www.npmjs.com/package/explainer-video/access`:
 
 | field | value |
 |---|---|
@@ -71,6 +71,37 @@ npm has to be told which workflow may publish. Once, for this one package, at
 | Allow npm dist-tag | **leave unchecked** — see below |
 
 The filename and environment must match the workflow exactly, or npm rejects the request.
+
+### The first release under the `explainer-video` name
+
+The package was renamed from `explainer-video-from-coursework` to `explainer-video`, and **a new
+name cannot be published by this workflow the first time**. A Trusted Publisher hangs off an
+existing package, and npm says so: *"The package you're configuring must already exist on the npm
+registry"* ([`npm trust`](https://docs.npmjs.com/cli/v11/commands/npm-trust)). The web setup
+starts from the package's own settings page
+([trusted publishers](https://docs.npmjs.com/trusted-publishers)), and an initial publish over
+OIDC is an open npm feature request ([npm/cli#8544](https://github.com/npm/cli/issues/8544)).
+So the first release is three manual steps, once:
+
+1. **Publish the first version by hand**, from a clean checkout of `main` at the current version
+   (0.4.0), logged in as the maintainer with 2FA:
+   `npm publish --otp <2FA_OTP>`. That creates `explainer-video` on the registry. It carries no
+   provenance — only OIDC runs emit it — which is acceptable for this one bootstrap version. The
+   marketplace catalogues already pin `^0.4.0`, so hosts can install from the moment it lands.
+   Until then, a host that installs `explainer-video` from the catalogue finds nothing on npm, so
+   do this soon after the rename merges.
+2. **Configure the Trusted Publisher** for `explainer-video` with the table above, on the
+   package's access page or with `npx npm@11.15.0 trust github explainer-video --file release.yml
+   --repo akshayDev17/ai-explainer-video --allow-publish` (npm ≥ 11.15.0, 2FA enabled).
+3. **Release normally within two days.** *"A newly created trusted publisher configuration must
+   complete its first successful publish within 2 days"*
+   ([trusted publishers](https://docs.npmjs.com/trusted-publishers)), so dispatch the release
+   workflow (it computes 0.4.1 from the `v0.4.0` tag) soon after step 2.
+
+The old package `explainer-video-from-coursework` stays published at 0.4.0 and receives nothing
+new. Deprecating it with a pointer — `npm deprecate explainer-video-from-coursework "renamed to
+explainer-video"` — is a separate maintainer decision; until then its install still works and
+still gets 0.4.0.
 
 ## Why OIDC instead of a token
 
@@ -216,7 +247,7 @@ The renderer has a dry run that needs no credentials:
 python -m pip install jinja2
 GITHUB_REPOSITORY=akshayDev17/ai-explainer-video GITHUB_RUN_ID=1 GITHUB_SHA=abc1234 \
 GITHUB_ACTOR=you GITHUB_REF_NAME=main VERSION=0.2.0 RELEASED=true RELEASE_OUTCOME=success \
-PACKAGE=explainer-video-from-coursework \
+PACKAGE=explainer-video \
 python .github/scripts/notify.py --dry-run --out /tmp/preview
 ```
 
@@ -287,7 +318,7 @@ when a rollback workflow exists.
   Re-dispatch with an explicit `version` equal to the published one: the workflow sees it already on
   the registry, skips the publish, and only does the commit + tag.
 - **Published and bad** — npm will not let you republish that version. Release the next one and
-  `npm deprecate explainer-video-from-coursework@X.Y.Z "broken — use <next>"`.
+  `npm deprecate explainer-video@X.Y.Z "broken — use <next>"`.
 
 ## Deliberately not wired
 
