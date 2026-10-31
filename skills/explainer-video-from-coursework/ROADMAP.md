@@ -721,5 +721,5 @@ whole code-flow pipeline, and four stage skills ship beside it, `craft-codeflow-
 (stages 1 and 1t), `craft-codeflow-flows` (1b and 1b′), `craft-codeflow-plan` (1c) and
 `craft-codeflow-scene` (5). They are held to the dual-file rule by
 `scripts/check-skill-sync.mjs` in CI, and stages 2–4b and 6–8 are this skill's own stage
-skills. The plugin is renamed once the skill works. The other two are not started. Recorded here so the naming is reserved and
+skills. The plugin that ships both entry skills is now named `explainer-video`; the skill names are unchanged. The other two are not started. Recorded here so the naming is reserved and
 the "from coursework" scope of this skill stays explicit.
