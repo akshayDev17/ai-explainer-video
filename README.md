@@ -1,7 +1,7 @@
-# explainer-video-from-coursework
+# explainer-video
 
-Turn a directory of structured coursework notes into a narrated, animated
-explainer-video series.
+Turn a directory of structured coursework notes, or a codebase's major code flows,
+into a narrated, animated explainer-video series.
 
 A skill for AI coding agents — Claude Code, Codex, DeepSeek Harness and
 Antigravity. Point it at a folder of course notes: it plans the series, writes
@@ -33,24 +33,33 @@ video end to end is a valid stopping point — a pilot, or a single-target run.
 
 ## Install
 
+> **Renamed.** This plugin was published as `explainer-video-from-coursework`; it is now
+> `explainer-video`. The skills inside are unchanged — `/explainer-video-from-coursework` and
+> `/explainer-video-from-codebase` keep their names. If you installed the old name, uninstall it
+> and install the new one: `claude plugin uninstall explainer-video-from-coursework@akshaydev17`
+> then `claude plugin marketplace update akshaydev17` and the install line below (Codex and
+> DeepSeek Harness: remove the old name the same way, then add `explainer-video`). Antigravity
+> installs from git and needs nothing. The old npm package stays published but receives no new
+> releases.
+
 **Claude Code**
 
 ```sh
 claude plugin marketplace add akshayDev17/ai-explainer-video
-claude plugin install explainer-video-from-coursework@akshaydev17
+claude plugin install explainer-video@akshaydev17
 ```
 
 **Codex**
 
 ```sh
 codex plugin marketplace add akshayDev17/ai-explainer-video
-codex plugin add explainer-video-from-coursework@akshaydev17
+codex plugin add explainer-video@akshaydev17
 ```
 
 **DeepSeek Harness**
 
 ```sh
-dsh plugin --profile web add explainer-video-from-coursework
+dsh plugin --profile web add explainer-video
 ```
 
 **Antigravity**
