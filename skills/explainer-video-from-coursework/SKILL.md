@@ -1,20 +1,20 @@
 ---
 name: explainer-video-from-coursework
-description: Plan an explainer-video series from a directory of coursework notes — decompose into videos (proving nothing is dropped), retitle and curate, write the narration, synthesize the audio, author the visuals, then render and assemble the finished cut. Use when the user wants to turn structured coursework notes into explainer videos.
+description: Plan an explainer-video series from a directory of coursework notes — decompose into videos (proving nothing is dropped), retitle and curate, write the narration, synthesize the audio, author the visuals, design the upload thumbnail, then render and assemble the finished cut. Use when the user wants to turn structured coursework notes into explainer videos.
 ---
 
-# explainer-video-from-coursework — plan, enrich, script, audio, scene, publish, render, assemble
+# explainer-video-from-coursework — plan, enrich, script, audio, scene, publish, thumbnail, render, assemble
 
 Turn a notes directory into a **video series**. Stage 0 gathers the source and the
 destination; stages 1–2 run once over the whole directory and plan the series (the
 planner decomposes and proves completeness; you retitle and curate); stages 3–8 then
 run **once per video** — write the narration, TTS turns it into measured audio, you
-author the visuals, generate the publishing metadata, then render and assemble that
-video's finished cut.
+author the visuals, generate the publishing metadata, design the thumbnail, then render
+and assemble that video's finished cut.
 
 The skill's own files (`tools/`, `src/`, `scenes/`) live in **this skill's folder** — resolve
 `tools/<tool>.mjs` against it; the tools then self-locate everything else, so they run
-regardless of cwd. The eight `craft-video-<stage>` skills sit beside this one under `skills/`.
+regardless of cwd. The `craft-video-<stage>` skills, one per stage, sit beside this one under `skills/`.
 But the work and scratch paths (`out/`, `--work`, `--out`, `<notesDir>`) resolve against the
 **current directory**, so run every command from the **scratch root** — the directory that
 holds `out/`. Stage 0 fixes it once, defaulting beside the source. Never run from the skill's
@@ -72,7 +72,7 @@ section, then re-run.
   run). The series is the full deliverable, but each video is produced
   independently.
 
-## Stage 0 — `/inputs`: source, destination, scratch
+## Stage 0 — `/inputs`: source, destination, scratch, playlist
 
 Ask for what the user must decide; everything else is the skill's. If the invocation
 already names them, skip. Ask **together, one prompt, with defaults** for destination
@@ -82,8 +82,8 @@ and scratch so the user only adjusts, never invents:
   otherwise list candidate directories that contain `.md` files and let them pick.
 - **Destination** — where the finished video(s) land. Default: `videos/` beside the
   source. Each finished video lands in its **own folder** under the destination —
-  `<destination>/<NN>-<slug>/` — holding the `.mp4`, `title.txt`, `description.md`
-  and `captions.srt`. The folder name is derived from the plan's `videoIndex` (the
+  `<destination>/<NN>-<slug>/` — holding the `.mp4`, `title.txt`, `description.md`,
+  `captions.srt` and `thumbnail.png`. The folder name is derived from the plan's `videoIndex` (the
   consumption order) and a slug of the title, so a series sorts into watch order and
   a shared destination can never collide across videos. If the user puts it **inside**
   the source — `<source>/videos/` is a common choice — Stage 1 must `--exclude` it, or
@@ -94,13 +94,17 @@ and scratch so the user only adjusts, never invents:
   Not a throwaway: a series runs to hundreds of MB of WAV and MP4, so it is worth one
   line in the prompt rather than a surprise later. Say plainly that the default is
   fine; the user should not have to think about it.
+- **Playlist name** (optional) — the playlist the series is published under, if any.
+  Stage 6b prints it on every thumbnail as `<playlist name>-Part X, <title>`. It has **no
+  default** and is never guessed: blank means a standalone video, with no label. Carry
+  the answer to stage 6b as `--playlist "<name>"`, or `--standalone` when blank.
 
 Then `cd` to the scratch root once and stay there. It is the only cwd that makes the
 `out/<name>/…` paths below resolve. If that root is inside a git work tree, `planner`
 verifies `out/` is ignored and appends a rule when it is not, printing what it changed;
 outside a repo there is nothing to ignore and it stays silent.
 
-Proceed to Stage 1 only once all three are set. After Stage 1, show the plan's own
+Proceed to Stage 1 only once source, destination and scratch root are set. After Stage 1, show the plan's own
 numbers as a free confirmation — *"`<source>` → N markdown files → M videos, landing
 in `<destination>`"* — before Stage 2 and the `Choose the scope` gate spend anything.
 
@@ -651,6 +655,141 @@ sprawl out of watch order.
 node tools/stamp.mjs end --out out/<name> --video <NN> --stage 6
 ```
 
+## Stage 6b — `/thumbnail`: the upload thumbnail
+
+```bash
+node tools/stamp.mjs begin --out out/<name> --video <NN> --stage 6b
+```
+
+
+It sits after `/publish` and before `/render` because it needs the final upload title
+(`title.txt`) and the stage-5 visuals, but not the finished MP4. Like stage 6, it costs no
+TTS, so a thumbnail can be argued with while a fix is still cheap.
+
+The output is `--dest/<NN>-<slug>/thumbnail.png`, beside `title.txt`: a 1280x720 PNG of at
+most 2,000,000 bytes, exactly what `upload_yt_video` picks up. The upload takes
+`thumbnail.png`, `.jpg` or `.jpeg` from the video's folder, PNG or JPG only, refuses a file
+over 2 MB and ignores `thumbnail.svg`. It is rendered from an HTML template
+(`src/thumbnail.html`) by the pipeline's own headless Chromium, never by a paid
+image-generation API.
+
+### The brief
+
+A viewer reads the thumbnail and the title together, in a fraction of a second, usually at
+phone size. Every thumbnail follows the owner's brief:
+
+- **Mildly tacky, attractive.** Loud on purpose: fat outlined type, a hard drop shadow, one
+  bright accent, a tilted sticker. But one hook and one visual, nothing else competing:
+  tacky is the energy, not clutter.
+- **One clear hook.** At most 5 big words (32 characters) that make a viewer want the
+  answer: a tension, a surprise, a stake ("The bug nobody catches", "Your data is lying").
+  It **complements the upload title and never repeats it**: the title says what the video
+  is, the hook says why it is worth the click. Highlight the one word that carries the
+  punch. Never promise what the video does not deliver, the same rule as the title.
+- **High contrast.** White type with a black stroke over a darkened wedge, and one accent
+  colour (default yellow `#FFD400`) picked to stand out against the still, not to match it.
+- **A strong visual from the video itself.** A still rendered from one of this video's own
+  stage-5 scenes, at the beat that shows the idea at its most dramatic (the failure, the
+  reveal, the before and after), cropped with `focus` so its subject sits clear of the hook.
+  Never stock art, never a logo on its own.
+- **Readable at small mobile size.** If the hook cannot be read in the 320x180 preview, it
+  is too long: cut words.
+
+### The series label
+
+When the video belongs to a series or an intended playlist, a band across the top reads
+**`<playlist name>-Part X, <title>`**: the first link of chronology a new viewer sees.
+
+- **The playlist name comes only from the user**: the Stage 0 answer. Never guess it, never
+  default it, never derive it from the notes. A blank Stage 0 answer means a standalone
+  video: pass `--standalone`, and there is no label.
+- **Unset for a series means ask.** With neither `--playlist` nor `--standalone`, a plan of
+  more than one video exits **3**. Ask the user whether the series is published as a
+  playlist and under what name, then re-run with `--playlist "<name>"` or `--standalone`.
+- **Part X** is computed by the tool: the video's 1-based position in
+  `plan.enriched.json`'s `videos` list, its index after curation's skips and merges. It is
+  not the raw `videoIndex`, which keeps the gaps curation left.
+- **The title** is the final upload title, read from `title.txt`.
+
+### Pick the still, write `thumbnail.json`
+
+Choose the beat from the scenes you authored at stage 5, then render that instant with the
+segment's own host:
+
+```bash
+node tools/render.mjs --shots <t> --work out/<name>/<NN> \
+     --scene "src/scene-diagram.html?scene=<name>" --shot-dir out/<name>/<NN>/thumbnail
+```
+
+Then write `out/<name>/<NN>/thumbnail.json`:
+
+```json
+{
+  "hook": "The bug nobody catches",
+  "highlight": "nobody",
+  "still": "thumbnail/t000042.png",
+  "focus": { "x": 0.7, "y": 0.45, "zoom": 1.3 },
+  "accent": "#FFD400",
+  "badge": "8 MIN"
+}
+```
+
+- `hook` (required) — at most 5 words and 32 characters; it must not repeat the upload title.
+- `highlight` (optional) — a word of the hook, or a list of them, drawn in the accent colour.
+- `still` (required) — the PNG from the step above, relative to the work dir.
+- `focus` (optional) — the still's point to keep in view, `x` and `y` as fractions (0–1),
+  and a `zoom` of 1–4. The hook sits on the left, so frame the subject to the right.
+- `accent` (optional) — a hex colour for the highlight, the label band, the badge and the bar.
+- `badge` (optional) — a short tilted sticker, 1–16 characters ("8 MIN", "FIXED").
+
+### Render and check
+
+```bash
+node tools/thumbnail.mjs --work out/<name>/<NN> \
+     --script out/<name>/scripts/<NN>-*.json --plan out/<name>/plan.enriched.json \
+     --dest <destination> [--playlist "<name>" | --standalone]
+```
+
+It validates `thumbnail.json`, adds the series label, photographs `src/thumbnail.html` at
+1280x720, checks the PNG and copies it into `--dest/<NN>-<slug>/`. It also writes
+`out/<name>/<NN>/thumbnail.small.png`, a 320x180 copy for the phone-size look.
+
+| Exit | Meaning |
+|---|---|
+| 0 | written: `thumbnail.png` in the work dir and in `--dest/<NN>-<slug>/` |
+| 1 | a missing input or prerequisite: no `thumbnail.json`, no `title.txt` (run `/publish` first), a video not in the enriched plan, no Chromium |
+| 2 | a check failed: the hook, the still, the crop, or the PNG (not 1280x720, not a PNG, over 2,000,000 bytes) |
+| 3 | a series with no playlist decision: ask the user, never invent a name |
+
+`--check <file>` re-validates any thumbnail on its own (dimensions, format, size), such as
+one the user edited by hand:
+
+```bash
+node tools/thumbnail.mjs --check <destination>/<NN>-<slug>/thumbnail.png
+```
+
+### The visual check
+
+The tool checks the shape of the thumbnail, never its appeal. **Vision gate:** read
+`thumbnail.png` as an image. If that fails, you are on a text-only model: ask the user
+whether to switch to a vision model or to skip the visual check. Never "look" blind.
+
+Read both `thumbnail.png` and `thumbnail.small.png`, and check:
+
+- the hook reads in the small copy, and the highlighted word is the punch;
+- the hook does not cover the still's subject (move `focus`, or pick another still);
+- the label, when there is one, is whole and names the right part and title;
+- nothing is clipped at an edge, and the accent stands out against the still;
+- it is loud and a little tacky, and still one idea, not a collage.
+
+**Done when:** `thumbnail` exits 0, `thumbnail.png` sits in `--dest/<NN>-<slug>/` beside
+`title.txt`, and both PNGs have been looked at, or the user skipped the visual check.
+
+
+```bash
+node tools/stamp.mjs end --out out/<name> --video <NN> --stage 6b
+```
+
 ## Stage 7 — `/render`: frames to MP4
 
 ```bash
@@ -739,7 +878,8 @@ video's scene (verified — byte-identical frames, exit 0, a valid MP4 of the wr
 video). This is why the per-video agent can own stage 8 end to end on its own port.
 
 With `--dest`, the finished MP4 lands in `<destination>/<NN>-<slug>/<output>.mp4` —
-the same folder `publish` (stage 6) wrote `description.md` and `captions.srt` into.
+the same folder `publish` (stage 6) wrote `description.md` and `captions.srt` into, and
+`thumbnail` (stage 6b) wrote `thumbnail.png` into.
 
 Per segment: render its own window through its own host + config, **silent** — parts
 are silent on purpose, because muxing narration onto each one would restart the whole

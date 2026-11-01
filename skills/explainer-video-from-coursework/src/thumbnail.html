@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Thumbnail host — stage 6b</title>
+<style>
+  html, body { margin:0; padding:0; width:1280px; height:720px; overflow:hidden; background:#0b0b12; }
+  #frame { position:relative; width:1280px; height:720px; overflow:hidden; }
+  /* the still: a frame of the video's own scene, cropped to its strongest part and pushed louder */
+  #still { position:absolute; inset:0; width:1280px; height:720px; object-fit:cover;
+           filter:saturate(1.35) contrast(1.12) brightness(0.9); }
+  /* a dark wedge behind the hook, so white type reads at any size */
+  #shade { position:absolute; inset:0;
+           background:linear-gradient(100deg, rgba(0,0,0,.86) 0%, rgba(0,0,0,.62) 42%, rgba(0,0,0,0) 74%),
+                      linear-gradient(0deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,0) 32%); }
+  #label { position:absolute; left:0; right:0; top:0; padding:14px 40px 16px; box-sizing:border-box;
+           color:#111; font:800 40px/1.12 "Helvetica Neue", Helvetica, Arial, sans-serif;
+           letter-spacing:-0.01em; box-shadow:0 6px 0 rgba(0,0,0,.55); }
+  #hook { position:absolute; left:52px; width:780px; display:flex; flex-direction:column; justify-content:center;
+          transform:rotate(-2.5deg); transform-origin:left center; }
+  #hook .t { margin:0; color:#fff; text-transform:uppercase; line-height:0.98; letter-spacing:0.01em;
+             font-family:Impact, Haettenschweiler, "Arial Narrow Bold", "Arial Black", sans-serif; font-weight:900;
+             -webkit-text-stroke:0.085em #000; paint-order:stroke fill; text-shadow:0.06em 0.07em 0 #000;
+             overflow-wrap:normal; word-break:keep-all; }
+  #badge { position:absolute; right:46px; padding:14px 26px; transform:rotate(7deg);
+           color:#111; font:900 44px/1 Impact, Haettenschweiler, "Arial Black", sans-serif; text-transform:uppercase;
+           border:6px solid #fff; border-radius:18px; box-shadow:8px 9px 0 #000; }
+  #bar { position:absolute; left:0; right:0; bottom:0; height:16px; }
+</style>
+</head>
+<body>
+<!--
+  Stage 6b's thumbnail host. tools/thumbnail.mjs passes the resolved config as JSON in `?c=`:
+
+    { hook, highlight[], label|null, still (file URL), focus {x, y, zoom}, accent, badge|null }
+
+  and photographs the page at 1280x720 with the headless Chromium. Everything is laid out
+  synchronously before the load event, so the screenshot never races the layout.
+-->
+<div id="frame">
+  <img id="still" alt="">
+  <div id="shade"></div>
+  <div id="hook"><p class="t"></p></div>
+  <div id="bar"></div>
+</div>
+<script>
+  var C = JSON.parse(new URLSearchParams(location.search).get('c') || '{}');
+  var frame = document.getElementById('frame');
+  var accent = C.accent || '#FFD400';
+
+  var still = document.getElementById('still');
+  var f = C.focus || {};
+  var zoom = f.zoom || 1;
+  still.style.objectPosition = (100 * (f.x == null ? 0.5 : f.x)) + '% ' + (100 * (f.y == null ? 0.5 : f.y)) + '%';
+  still.style.transformOrigin = still.style.objectPosition;
+  still.style.transform = 'scale(' + zoom + ')';
+  if (C.still) still.src = C.still;
+
+  document.getElementById('bar').style.background = accent;
+
+  // shrink a box's font until nothing overflows its width and its content fits h; returns the size it settled on
+  function fit(el, max, min, h) {
+    var lo = min, hi = max;
+    var padR = parseFloat(getComputedStyle(el).paddingRight) || 0;   // an overflowing line's scrollWidth leaves it out
+    while (hi - lo > 1) {
+      var mid = (lo + hi) >> 1;
+      el.style.fontSize = mid + 'px';
+      if (el.scrollWidth + padR <= el.clientWidth && el.scrollHeight <= h) lo = mid; else hi = mid;
+    }
+    el.style.fontSize = lo + 'px';
+    return lo;
+  }
+
+  var y0 = 40;   // where the hook may start: below the label when there is one (never `top`, which is window.top)
+  if (C.label) {
+    var label = document.createElement('div');
+    label.id = 'label';
+    label.style.background = accent;
+    label.textContent = C.label;
+    frame.appendChild(label);
+    // one line when it fits at a readable size, else two
+    label.style.whiteSpace = 'nowrap';
+    if (fit(label, 40, 18, 200) < 30) { label.style.whiteSpace = "normal"; fit(label, 36, 18, 112); }
+    y0 = label.offsetHeight + 34;
+  }
+
+  if (C.badge) {
+    var badge = document.createElement('div');
+    badge.id = 'badge';
+    badge.style.background = accent;
+    badge.style.top = (y0 + 6) + 'px';
+    badge.textContent = C.badge;
+    frame.appendChild(badge);
+  }
+
+  var hook = document.getElementById('hook');
+  var text = hook.querySelector('.t');
+  var marked = (C.highlight || []).map(function (w) { return String(w).toLowerCase(); });
+  String(C.hook || '').split(/\s+/).filter(Boolean).forEach(function (word, i) {
+    if (i) text.appendChild(document.createTextNode(' '));
+    var span = document.createElement('span');
+    span.textContent = word;
+    if (marked.indexOf(word.toLowerCase().replace(/[^a-z0-9']/g, '')) !== -1) span.style.color = accent;
+    text.appendChild(span);
+  });
+  var hookH = 720 - y0 - 64;
+  hook.style.top = y0 + 'px';
+  hook.style.height = hookH + 'px';
+  fit(text, 230, 48, hookH);
+  document.body.setAttribute('data-ready', '1');
+</script>
+</body>
+</html>

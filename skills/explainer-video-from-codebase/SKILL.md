@@ -1,6 +1,6 @@
 ---
 name: explainer-video-from-codebase
-description: Turn the major code flows of a codebase (Python, TypeScript / TSX, JavaScript, Go, C, C++, or a mix such as a Python backend with a TypeScript frontend) into a narrated explainer-video series. Mine the repo into a grouped code map, rank candidate flows as evidence, optionally trace the test suite in a sandbox, propose the series with a reason per flow for the user to approve, plan the videos under a 25-minute cap, then script, voice, animate (verified code panels and generated flow diagrams), publish, render and assemble each one. Use when the user wants explainer videos of how a codebase works.
+description: Turn the major code flows of a codebase (Python, TypeScript / TSX, JavaScript, Go, C, C++, or a mix such as a Python backend with a TypeScript frontend) into a narrated explainer-video series. Mine the repo into a grouped code map, rank candidate flows as evidence, optionally trace the test suite in a sandbox, propose the series with a reason per flow for the user to approve, plan the videos under a 25-minute cap, then script, voice, animate (verified code panels and generated flow diagrams), publish, design the thumbnail, render and assemble each one. Use when the user wants explainer videos of how a codebase works.
 ---
 
 # explainer-video-from-codebase — mine, propose, approve, plan, then the per-video stages
@@ -14,10 +14,10 @@ scratch root. Stages 1–1c run once over the whole repo:
 - code plans the videos in the coursework plan's shape.
 
 Stages 2–8 are `explainer-video-from-coursework`'s own stages, run on that plan: retitle once, then per video
-write the narration, synthesize the audio, author the visuals, generate the publishing metadata, render and
-assemble. Three places differ for code. Stage 3 adds the code-video rules below, and stages 6–8 add a render and
-a title rule. Stage 5 uses `craft-codeflow-scene`: code panels cut from the repo and diagrams generated from the
-validated flows.
+write the narration, synthesize the audio, author the visuals, generate the publishing metadata, design the
+thumbnail, render and assemble. Four places differ for code. Stage 3 adds the code-video rules below, stages 6–8
+add a render and a title rule, and stage 6b adds a hook and a still rule. Stage 5 uses `craft-codeflow-scene`: code
+panels cut from the repo and diagrams generated from the validated flows.
 
 **Paths.** `<skill>` is this skill's folder and `<coursework>` is the sibling `../explainer-video-from-coursework`,
 both resolved against this skill's folder. The tools self-locate everything else, so they run regardless of cwd.
@@ -35,8 +35,9 @@ the **scratch root** that Stage 0 fixes. The scratch root is always **outside th
 >
 > Each is a complete contract for its stage, top-level under `skills/` so any stage can be re-run alone.
 > Stages 2–4b and 6–8 are the coursework `craft-video-<stage>` skills. Stages 2, 4 and 4b are unchanged for code;
-> `craft-video-script` (stage 3) and `craft-video-publish`, `-render` and `-assemble` (stages 6–8) also carry this
-> file's code-video rules for their stage, in a sync block that opens **Code-flow videos only**. Every
+> `craft-video-script` (stage 3), `craft-video-publish`, `-render` and `-assemble` (stages 6–8) and
+> `craft-video-thumbnail` (stage 6b) also carry this file's code-video rules for their stage, in a sync block that
+> opens **Code-flow videos only**. Every
 > `craft-codeflow-*` skill ends with a **Maintenance** note naming its section here. **If you change a stage, update
 > both files.**
 > `scripts/check-skill-sync.mjs` (CI) fails when they drift:
@@ -111,9 +112,9 @@ what is missing and the install steps from the matching `SETUP.md` section, then
 | 3 | `/script` | per video | `craft-video-script` (its code-flow block, the addendum below) | `script-check` exits 0 (pause rule included) |
 | 4, 4b | `/audio`, `/align` | per video | `craft-video-audio`, `craft-video-align` | unchanged |
 | 5 | `/scene` | per video | **`craft-codeflow-scene`** | `excerpt-check` and `pacing-check` exit 0; the stills looked at |
-| 6–8 | `/publish`, `/render`, `/assemble` | per video | `craft-video-publish`, `-render`, `-assemble` (their code-flow block) | unchanged |
+| 6, 6b, 7, 8 | `/publish`, `/thumbnail`, `/render`, `/assemble` | per video | `craft-video-publish`, `-thumbnail`, `-render`, `-assemble` (their code-flow block) | unchanged; 6b writes `thumbnail.png`, looked at |
 
-## Stage 0 — `/inputs`: repo, destination, scratch
+## Stage 0 — `/inputs`: repo, destination, scratch, playlist
 
 Ask for what the user must decide. If the invocation already names them, skip the question. Ask **together, in
 one prompt, with defaults**, so the user only adjusts and never invents:
@@ -125,6 +126,10 @@ one prompt, with defaults**, so the user only adjusts and never invents:
   folder beside the repo, `<repo>/../<repo name>-videos/`. It must be outside the repo, since the tools refuse to
   write there. A series runs to hundreds of MB of WAV and MP4, so it is worth one line in the prompt. Say
   plainly that the default is fine.
+- **Playlist name** (optional) — the playlist the series is published under, if any. Stage 6b prints it on every
+  thumbnail as `<playlist name>-Part X, <title>`. It has **no default** and is never guessed, least of all from the
+  repo's name: blank means a standalone video, with no label. Carry the answer to stage 6b as `--playlist "<name>"`,
+  or `--standalone` when blank.
 
 Note, without asking unless the user raises them, the optional scope flags stage 1 takes:
 
@@ -133,7 +138,8 @@ Note, without asking unless the user raises them, the optional scope flags stage
 - `--group 'glob=prod|test|eval|dev'` for a file the group rules misplace;
 - `--config-root` for config kept outside the repo, such as a deploy repo's Helm values.
 
-Then change to the scratch root once and stay there. Proceed to stage 1 only once all three are set.
+Then change to the scratch root once and stay there. Proceed to stage 1 only once the repo, destination and scratch
+root are set.
 
 ## Stage 1 — `/mine`: code map, candidates, ranking
 
@@ -623,7 +629,8 @@ node <coursework>/tools/stamp.mjs end --out out/<name> --video <NN> --stage 5
 
 ## Stages 6–8 — `/publish`, `/render`, `/assemble`
 
-Run `craft-video-publish`, `craft-video-render` and `craft-video-assemble`, each with its code-flow block:
+Run `craft-video-publish`, then `craft-video-thumbnail` (stage 6b, below), then `craft-video-render` and
+`craft-video-assemble`, each with its code-flow block:
 
 <!-- sync:codeflow-publish-render -->
 **Code-flow videos only.** A code-flow video's plan, `plan.json` or `plan.enriched.json`, carries
@@ -639,6 +646,36 @@ in this block applies to its videos. A code-flow video adds these rules at stage
 
 **Done when:** each stage's own gate holds, ending in `assemble`'s `[done] …<output>.mp4` with `audio ok`, and
 the assembled frames have been looked at.
+
+## Stage 6b — `/thumbnail`: the code-flow hook
+
+Run `craft-video-thumbnail` after `/publish` and before `/render`: it needs the final upload title (`title.txt`)
+and the stage-5 scenes, not the finished MP4. It writes `<destination>/<NN>-<slug>/thumbnail.png`, a 1280x720 PNG
+of at most 2,000,000 bytes, beside `title.txt`, where `upload_yt_video` picks it up.
+
+```sh
+node <coursework>/tools/thumbnail.mjs --work out/<name>/<NN> --script out/<name>/scripts/<NN>-*.json \
+     --plan out/<name>/plan.enriched.json --dest <destination> [--playlist "<name>" | --standalone]
+```
+
+The brief, the series label and the visual check are the coursework stage's. Part X is the video's 1-based
+position in `plan.enriched.json`'s `videos`, and the playlist name is only ever the user's Stage 0 answer: exit 3
+means a series with no answer, so ask. A code-flow video adds:
+
+<!-- sync:codeflow-thumbnail -->
+**Code-flow videos only.** A code-flow video's plan, `plan.json` or `plan.enriched.json`, carries
+`"kind": "codebase"`, and its `forms` are `overview`, `flow` and `core`. A coursework plan has no `kind`; nothing
+in this block applies to its videos. A code-flow video adds these rules at stage 6b:
+
+- **Hook.** Name the flow in the viewer's terms, such as what a request does, what breaks or what a command runs
+  ("One click, three services"). Never use a module path, a file name or an identifier: `thumbnail` refuses a hook
+  word with a `/`, `::`, `()`, `_`, a file extension or camelCase.
+- **Still.** Take it from a diagram beat (the overview's system map, a flow's sequence, an eval's hand-off), never
+  from a code panel: a wall of code is unreadable texture at thumbnail size.
+- **Secrets.** Never put a secret or a redacted value on the thumbnail.
+<!-- /sync:codeflow-thumbnail -->
+
+**Done when:** `thumbnail` exits 0 and `thumbnail.png` and `thumbnail.small.png` have been looked at.
 
 ## Reference
 

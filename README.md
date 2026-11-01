@@ -15,7 +15,8 @@ content-bearing section is assigned to a video or classified as navigation
 ## The pipeline
 
 Stage 0 (`/inputs`) collects the two things only you can decide — the source
-notes directory, and where the finished videos land.
+notes directory, and where the finished videos land — plus, optionally, the playlist
+name a series is published under (blank means standalone; it is never guessed).
 
 | # | stage | what it does | cost |
 |---|-------|--------------|------|
@@ -25,6 +26,7 @@ notes directory, and where the finished videos land.
 | 4 | `/audio` | TTS → a measured timeline | **network — spends the Gemini key** |
 | 5 | `/scene` | author the visuals (`diagram` / `code` / `svg`) | free, agent |
 | 6 | `/publish` | YouTube chapters + captions | free — no TTS, no Chromium |
+| 6b | `/thumbnail` | a 1280x720 `thumbnail.png`: one hook over a still from the video's own scenes, plus a `<playlist>-Part X, <title>` label for a series | free — one Chromium screenshot |
 | 7 | `/render` | frames → H.264 MP4 | local CPU |
 | 8 | `/assemble` | per-segment parts → the finished cut | local CPU |
 
@@ -118,7 +120,7 @@ plugin.json                              Agent Plugins manifest (Codex, Antigrav
 .agents/plugins/                         marketplace.json (Codex)
 cordis.patch.yml + lib/index.js          DSH bundle plugin (serves this package's skills/)
 skills/explainer-video-from-coursework/  the main skill: SKILL.md, tools/, src/, scenes/, SETUP.md
-skills/craft-video-<stage>/              the 9 stage skills, separately invocable
+skills/craft-video-<stage>/              the 10 stage skills, separately invocable
 skills/coursework-author/                the companion skill: authoring the coursework (vendored copy)
 skills/explainer-video-from-codebase/    the code-flow skill: SKILL.md, FLOWS.md, tools/, vendored tree-sitter
 skills/craft-codeflow-<stage>/           its 4 stage skills (mine, flows, plan, scene), separately invocable

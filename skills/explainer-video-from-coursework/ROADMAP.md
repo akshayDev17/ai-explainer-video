@@ -50,6 +50,8 @@ source notes
    │            tools/pacing-check.mjs ........ reveal rate + dead air        [code]
    ├─ /publish  agent writes publish.json
    │            tools/publish.mjs ............. chapters + captions           [code]
+   ├─ /thumbnail agent writes thumbnail.json
+   │            tools/thumbnail.mjs ........... 1280x720 PNG + series label   [code]
    ├─ /render   tools/render.mjs .............. Chromium frames + ffmpeg      [code]
    └─ /assemble tools/assemble.mjs ............ per-segment render + concat   [code]
                 tools/verify-audio.mjs ........ sample-level audio match      [code]

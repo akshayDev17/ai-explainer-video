@@ -29,6 +29,8 @@ judgment to a *second* LLM via an API call is strictly worse:
 | audio — TTS | **code** | **Gemini TTS API** ← the only API call in the pipeline |
 | publish config — chapter grouping, titles, blurb | **agent** | none |
 | `publish.mjs` — resolve timecodes, emit chapters/captions, validate | **code** | none |
+| thumbnail config — the hook, the still, the crop | **agent** | none |
+| `thumbnail.mjs` — series label, Chromium screenshot, PNG check | **code** | none |
 | `render.mjs` — Chromium frames, ffmpeg | **code** | none |
 
 Everything except audio runs offline. The planner and the merge/validate step

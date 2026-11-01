@@ -222,6 +222,27 @@ however valid the list. Its description timestamps still work as jump-to-section
 what is missing is the segmented progress bar and Google key moments. Nothing in
 `description.md` can change this, so absent chapters are not a formatting fault.
 
+### 6b · `/thumbnail` — the upload thumbnail
+
+| | |
+|---|---|
+| **Agent writes** | `out/<name>/<NN>/thumbnail.json` — the `hook` (≤5 words), a `still` rendered from one of the video's own scenes, an optional `focus` crop, `accent` and `badge` |
+| Tool | `tools/thumbnail.mjs` + the host `src/thumbnail.html` |
+| Out | `thumbnail.png` (1280x720, ≤2,000,000 bytes) — copied to `--dest/<NN>-<slug>/` beside `title.txt`; `thumbnail.small.png` (320x180) in the work dir for the phone-size look |
+| Asserts | the hook is ≤5 words / 32 chars and does not repeat the upload title · a code-flow hook names no code · the still exists · the PNG is a real PNG, exactly 1280x720, within the upload's 2 MB · a series has a playlist decision (exit 3 otherwise) |
+| Network | none |
+
+Placed **after** `/publish` because the label carries the final upload title, read from
+`title.txt`, and **before** `/render` because it needs only the stage-5 scenes, not the
+finished MP4. It is one headless-Chromium screenshot of an HTML template, so iterating on
+it is as cheap as stage 6.
+
+For a series, a band reads `<playlist name>-Part X, <title>`, the first link of chronology
+a new viewer sees. The playlist name is only ever the user's Stage 0 answer: the tool has
+no default, and a plan of more than one video with neither `--playlist` nor `--standalone`
+exits 3 so the agent asks. Part X is the video's 1-based position in
+`plan.enriched.json`'s `videos`, after curation, never the raw `videoIndex`.
+
 ### 7 · `/render` — frames to MP4
 
 | | |
@@ -258,6 +279,7 @@ whole track at every segment boundary — a bug this stage used to have.
 | `src/scene-diagram.html` | host; selects the config via `?scene=<name>` |
 | `src/scene-code.js` | code + refactor renderer — code panels, before/after |
 | `src/scene-code.html` | host; selects the config via `?scene=<name>` |
+| `src/thumbnail.html` | stage 6b's 1280x720 thumbnail template; `tools/thumbnail.mjs` passes its config as `?c=<json>` |
 | `<work>/timeline.js` | **generated** by stage 4 into the per-video work dir; browser-loadable measured timeline |
 
 ---
@@ -281,6 +303,10 @@ node tools/pacing-check.mjs --scene out/lld/06/scenes/<name>.js --timeline out/l
 
 # 6 — publish (agent writes publish.json: chapters + blurb)
 node tools/publish.mjs --work out/lld/06 --script out/lld/scripts/06-*.json --dest <destination>
+
+# 6b — thumbnail (agent renders a still, writes thumbnail.json: hook + still)
+node tools/thumbnail.mjs --work out/lld/06 --script out/lld/scripts/06-*.json \
+     --plan out/lld/plan.enriched.json --dest <destination> --playlist "<name>"
 
 # 7 + 8 — render and assemble
 node tools/assemble.mjs --script out/lld/scripts/06-*.json --work out/lld/06 --name video6-solid
