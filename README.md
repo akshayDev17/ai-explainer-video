@@ -94,9 +94,9 @@ Invoke the skill with the notes directory:
 /explainer-video-from-coursework path/to/your/notes/
 ```
 
-You get one `.mp4` per video, plus `description.md` (blurb and a paste-ready
-chapter block) and `captions.srt`, copied to the destination you chose — by
-default `videos/` beside the source. Scratch stays in a gitignored
+You get one `.mp4` per video, plus `title.txt`, `description.md` (blurb and a
+paste-ready chapter block), `captions.srt` and a `thumbnail.png`, copied to the
+destination you chose — by default `videos/` beside the source. Scratch stays in a gitignored
 `out/<name>/<NN>/`.
 
 For a codebase, invoke the code-flow skill with the repo root instead:

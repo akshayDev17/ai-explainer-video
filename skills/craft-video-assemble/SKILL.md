@@ -48,7 +48,8 @@ windows tile the timeline with no gaps · the finished audio matches the narrati
 
 **Done when:** the run exits **0** and prints `[done] …<output>.mp4` with `audio ok`.
 The MP4 is copied into the video's own folder, `--dest/<NN>-<slug>/`, alongside the
-`description.md` and `captions.srt` that publish wrote.
+`description.md` and `captions.srt` that publish wrote and the `thumbnail.png` that
+thumbnail (stage 6b) wrote.
 
 <!-- sync:codeflow-publish-render -->
 **Code-flow videos only.** A code-flow video's plan, `plan.json` or `plan.enriched.json`, carries
