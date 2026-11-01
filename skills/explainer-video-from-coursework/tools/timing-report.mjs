@@ -65,7 +65,7 @@ const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
   .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const fmtDur = (n) => n < 60 ? `${round1(n)}s` : `${Math.floor(n / 60)}m${Math.round(n % 60)}s`;
 
-const STAGE_NAMES = { '3': 'script', '4': 'audio', '4b': 'align', '5': 'scene', '6': 'publish', '7': 'render', '8': 'assemble' };
+const STAGE_NAMES = { '3': 'script', '4': 'audio', '4b': 'align', '5': 'scene', '6': 'publish', '6b': 'thumbnail', '7': 'render', '8': 'assemble' };
 const PALETTE = ['#4f46e5', '#0ea5e9', '#14b8a6', '#f59e0b', '#ef4444', '#8b5cf6',
                  '#ec4899', '#10b981', '#f97316', '#6366f1', '#a855f7', '#22c55e'];
 

@@ -16,15 +16,15 @@ assemble stages written into `SKILL.md`; video 6 (SOLID) completed end-to-end.
 
 ### The skill
 
-`SKILL.md` — all eight stages (plan, enrich, script, audio, scene, publish, render,
-assemble), each with its command, its `done when` gate, and the visual-check
-protocol (vision gate + the `LOOK` step). Distributed as one plugin of sixteen skills
+`SKILL.md` — every stage (plan, enrich, script, audio, align, scene, publish, thumbnail,
+render, assemble), each with its command, its `done when` gate, and the visual-check
+protocol (vision gate + the `LOOK` step). Distributed as one plugin
 (`plugin.json` + `skills/`) — see §2.3.
 
 ### The stage skills
 
-Eight sibling skills, one per stage, at `skills/craft-video-<stage>/SKILL.md` — top-level
-under `skills/`, so every platform that reads the plugin discovers all nine. Each is a
+One sibling skill per stage, at `skills/craft-video-<stage>/SKILL.md` — top-level
+under `skills/`, so every platform that reads the plugin discovers them all. Each is a
 complete contract for its stage — prerequisites, command, what the agent writes, hard
 checks, `done when` — and each is separately invocable, so one stage can be re-run alone.
 They reach the pipeline's tools as `../explainer-video-from-coursework/tools/<tool>.mjs`,
@@ -50,6 +50,8 @@ source notes
    │            tools/pacing-check.mjs ........ reveal rate + dead air        [code]
    ├─ /publish  agent writes publish.json
    │            tools/publish.mjs ............. chapters + captions           [code]
+   ├─ /thumbnail agent writes thumbnail.json
+   │            tools/thumbnail.mjs ........... 1280x720 PNG + series label   [code]
    ├─ /render   tools/render.mjs .............. Chromium frames + ffmpeg      [code]
    └─ /assemble tools/assemble.mjs ............ per-segment render + concat   [code]
                 tools/verify-audio.mjs ........ sample-level audio match      [code]

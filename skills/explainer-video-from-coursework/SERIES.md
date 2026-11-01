@@ -52,6 +52,7 @@ unmeasured — see *Open parameter* at the end.
 {
   "plan": "out/<name>/plan.enriched.json",
   "destination": "videos/",
+  "playlist": "Systems 101",
   "parallel": 2,
   "portBase": 9333,
   "videos": [
@@ -73,6 +74,13 @@ It lives in this file rather than being a flag because a resumed session must no
 different value: `parallel` determines port allocation, and changing it mid-run
 invalidates every port already claimed.
 
+`playlist` is the user's playlist name, verbatim, or `null` only when the user explicitly
+said the series has no playlist. A blank Stage 0 answer is neither: before writing this
+file, the orchestrator asks the user the question stage 6b's exit 3 asks (is the series a
+playlist, and under what name). It is recorded here once so that every per-video agent
+prints the same `<playlist>-Part X, <title>` label on its thumbnail (stage 6b) without
+asking again; it is never guessed or filled in by the orchestrator.
+
 Titles are **not** duplicated here — they live in `plan.enriched.json`, which stays the
 single source of truth for content. Two copies would drift.
 
@@ -88,20 +96,22 @@ single source of truth for content. Two copies would drift.
     "4b": { "done": true, "attempts": 1, "ended_at": "…" },
     "5":  { "done": true, "attempts": 1, "ended_at": "…" },
     "6":  { "done": true, "attempts": 1, "ended_at": "…" },
+    "6b": { "done": true, "attempts": 1, "ended_at": "…" },
     "7":  { "done": true, "attempts": 1, "ended_at": "…" },
     "8":  { "done": false, "attempts": 1, "last_error": null }
   },
   "artefacts": {
     "script": "…", "lines": "…", "beats": "…", "manifest": "…",
     "mp4": "videos/<slug>/<name>.mp4",
-    "description": "videos/<slug>/description.md", "captions": "videos/<slug>/captions.srt"
+    "description": "videos/<slug>/description.md", "captions": "videos/<slug>/captions.srt",
+    "thumbnail": "videos/<slug>/thumbnail.png"
   },
   "render": { "port": 9333, "attempts": 1 },
   "qa": { "stills_checked": true, "beats_audited": 48, "verdict": "accept" }
 }
 ```
 
-`status` ∈ `queued · authoring · audio · aligning · scenes · publishing · rendering ·
+`status` ∈ `queued · authoring · audio · aligning · scenes · publishing · thumbnail · rendering ·
 qa · done · failed · needs-fresh`.
 
 **One writer per file** — that video's agent. Write atomically (temp + `renameSync`).
@@ -146,6 +156,7 @@ Each stage, in order, with its gate:
 | **5** | Author `scenes/` + `manifest.json` + `intent.md`; `resolve-beats`; `pacing-check` per segment | pacing is sound for every segment |
 | **5·QA** | **Stills gate** — `render --shots` at 3–5 mid-segment times on the assigned port, then **look at them** | no collision, no missing heading, nothing cropped |
 | **6** | `publish.json` → `publish` | chapters and cues validate |
+| **6b** | `thumbnail.json` → `thumbnail --playlist "<series.json playlist>"` (or `--standalone` when it is `null`), then **look at it** | exits 0; the full and phone-size PNGs eyeballed |
 | **7–8** | `assemble --dest videos` | exits 0 with `audio ok` |
 
 Then: sample the finished MP4, look, and either accept or fix-and-re-render.

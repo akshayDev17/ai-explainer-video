@@ -15,7 +15,8 @@ content-bearing section is assigned to a video or classified as navigation
 ## The pipeline
 
 Stage 0 (`/inputs`) collects the two things only you can decide — the source
-notes directory, and where the finished videos land.
+notes directory, and where the finished videos land — plus, optionally, the playlist
+name a series is published under (it is never guessed; a series left blank is asked about at 6b).
 
 | # | stage | what it does | cost |
 |---|-------|--------------|------|
@@ -25,6 +26,7 @@ notes directory, and where the finished videos land.
 | 4 | `/audio` | TTS → a measured timeline | **network — spends the Gemini key** |
 | 5 | `/scene` | author the visuals (`diagram` / `code` / `svg`) | free, agent |
 | 6 | `/publish` | YouTube chapters + captions | free — no TTS, no Chromium |
+| 6b | `/thumbnail` | a 1280x720 `thumbnail.png`: one hook over a still from the video's own scenes, plus a `<playlist>-Part X, <title>` label for a series | free — one Chromium screenshot |
 | 7 | `/render` | frames → H.264 MP4 | local CPU |
 | 8 | `/assemble` | per-segment parts → the finished cut | local CPU |
 
@@ -60,7 +62,7 @@ agy plugin install https://github.com/akshayDev17/ai-explainer-video
 ```
 
 All four commands install the **same** npm package — one package, three manifest surfaces,
-one copy of all sixteen skills: the ten video skills, `coursework-author`, the companion
+one copy of all seventeen skills: the eleven video skills, `coursework-author`, the companion
 skill for writing the coursework these videos come from, and the five code-flow skills:
 `explainer-video-from-codebase`, which makes explainer videos of a codebase's major code flows
 (Python, TypeScript / JavaScript, Go, C, C++, or a mix), and its four stage skills. It mines the
@@ -92,9 +94,9 @@ Invoke the skill with the notes directory:
 /explainer-video-from-coursework path/to/your/notes/
 ```
 
-You get one `.mp4` per video, plus `description.md` (blurb and a paste-ready
-chapter block) and `captions.srt`, copied to the destination you chose — by
-default `videos/` beside the source. Scratch stays in a gitignored
+You get one `.mp4` per video, plus `title.txt`, `description.md` (blurb and a
+paste-ready chapter block), `captions.srt` and a `thumbnail.png`, copied to the
+destination you chose — by default `videos/` beside the source. Scratch stays in a gitignored
 `out/<name>/<NN>/`.
 
 For a codebase, invoke the code-flow skill with the repo root instead:
@@ -118,7 +120,7 @@ plugin.json                              Agent Plugins manifest (Codex, Antigrav
 .agents/plugins/                         marketplace.json (Codex)
 cordis.patch.yml + lib/index.js          DSH bundle plugin (serves this package's skills/)
 skills/explainer-video-from-coursework/  the main skill: SKILL.md, tools/, src/, scenes/, SETUP.md
-skills/craft-video-<stage>/              the 9 stage skills, separately invocable
+skills/craft-video-<stage>/              the 10 stage skills, separately invocable
 skills/coursework-author/                the companion skill: authoring the coursework (vendored copy)
 skills/explainer-video-from-codebase/    the code-flow skill: SKILL.md, FLOWS.md, tools/, vendored tree-sitter
 skills/craft-codeflow-<stage>/           its 4 stage skills (mine, flows, plan, scene), separately invocable

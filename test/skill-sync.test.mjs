@@ -32,7 +32,7 @@ const replaceOnce = (text, from, to) => { assert.ok(text.includes(from), `fixtur
 test('the codebase skill and its four stage skills are in step, and so are the coursework stage skills', () => {
   const r = check();
   assert.equal(r.status, 0, r.stderr);
-  for (const child of ['craft-codeflow-mine', 'craft-codeflow-flows', 'craft-codeflow-plan', 'craft-codeflow-scene', 'craft-video-scene'])
+  for (const child of ['craft-codeflow-mine', 'craft-codeflow-flows', 'craft-codeflow-plan', 'craft-codeflow-scene', 'craft-video-scene', 'craft-video-thumbnail'])
     assert.match(r.stdout, new RegExp(`✓ skills/${child}/SKILL.md in step`));
   assert.equal(drifted((d, t) => t).status, 0, 'an unchanged copy passes');
 });
@@ -87,6 +87,9 @@ test('a code-flow block in a coursework stage skill is held to the codebase skil
   assert.equal(main.status, 1);
   for (const c of ['publish', 'render', 'assemble'])
     assert.match(main.stderr, new RegExp(`craft-video-${c}/SKILL\\.md: sync block "codeflow-publish-render" differs`));
+  const thumb = drifted(only('craft-video-thumbnail', t => replaceOnce(t, 'never\n  from a code panel', 'or\n  from a code panel')));
+  assert.equal(thumb.status, 1);
+  assert.match(thumb.stderr, /craft-video-thumbnail\/SKILL\.md: sync block "codeflow-thumbnail" differs from skills\/explainer-video-from-codebase\/SKILL\.md/);
   const dropped = drifted((d, t) => (/^craft-video-(publish|render|assemble)$/.test(d) ? t.replace(/<!-- sync:codeflow-publish-render -->[\s\S]*?<!-- \/sync:codeflow-publish-render -->\n/, '') : t));
   assert.equal(dropped.status, 1);
   assert.match(dropped.stderr, /explainer-video-from-codebase\/SKILL\.md: sync block "codeflow-publish-render" is in no child skill/);

@@ -26,7 +26,7 @@ const argv = process.argv.slice(2);
 const cmd = argv[0];
 const flag = (n, d) => { const i = argv.indexOf('--' + n); return i === -1 ? d : argv[i + 1]; };
 
-const STAGES = new Set(['3', '4', '4b', '5', '6', '7', '8']);
+const STAGES = new Set(['3', '4', '4b', '5', '6', '6b', '7', '8']);
 const outDir = flag('out');
 const video = flag('video');
 const stage = flag('stage');
