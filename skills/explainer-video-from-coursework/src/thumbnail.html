@@ -58,14 +58,18 @@
 
   document.getElementById('bar').style.background = accent;
 
-  // shrink a box's font until nothing overflows its width and its content fits h; returns the size it settled on
-  function fit(el, max, min, h) {
+  // shrink a box's font until nothing overflows its width and its content fits h; returns the size it settled on.
+  // With `text` (an inline child holding the words), the width test is the text's own width against the box's
+  // content width, so the box's side padding stays clear; scrollWidth alone cannot see into the right padding.
+  function fit(el, max, min, h, text) {
     var lo = min, hi = max;
-    var padR = parseFloat(getComputedStyle(el).paddingRight) || 0;   // an overflowing line's scrollWidth leaves it out
+    var cs = getComputedStyle(el);
+    var room = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
     while (hi - lo > 1) {
       var mid = (lo + hi) >> 1;
       el.style.fontSize = mid + 'px';
-      if (el.scrollWidth + padR <= el.clientWidth && el.scrollHeight <= h) lo = mid; else hi = mid;
+      var wide = text ? text.getBoundingClientRect().width > room : el.scrollWidth > el.clientWidth;
+      if (!wide && el.scrollHeight <= h) lo = mid; else hi = mid;
     }
     el.style.fontSize = lo + 'px';
     return lo;
@@ -76,11 +80,13 @@
     var label = document.createElement('div');
     label.id = 'label';
     label.style.background = accent;
-    label.textContent = C.label;
+    var words = document.createElement('span');
+    words.textContent = C.label;
+    label.appendChild(words);
     frame.appendChild(label);
     // one line when it fits at a readable size, else two
     label.style.whiteSpace = 'nowrap';
-    if (fit(label, 40, 18, 200) < 30) { label.style.whiteSpace = "normal"; fit(label, 36, 18, 112); }
+    if (fit(label, 40, 18, 200, words) < 30) { label.style.whiteSpace = "normal"; fit(label, 36, 18, 112, words); }
     y0 = label.offsetHeight + 34;
   }
 

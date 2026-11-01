@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { deflateSync } from 'node:zlib';
 import { ROOT, scratch, cleanup } from './helpers.mjs';
 
@@ -127,6 +128,23 @@ test('the render lands a valid thumbnail.png beside title.txt, labelled for its 
   assert.ok(existsSync(out));
   assert.deepEqual(checkThumbnail(readFileSync(out)), []);
   cleanup(root);
+});
+
+// lay the host page out in the headless Chromium and read back the series label's settled font size and wrapping
+function labelLayout(label) {
+  const url = pathToFileURL(join(ROOT, 'skills', 'explainer-video-from-coursework', 'src', 'thumbnail.html')).href +
+    '?c=' + encodeURIComponent(JSON.stringify({ hook: 'The bug nobody catches', marked: [], label }));
+  const r = spawnSync(chromium, ['--headless', '--disable-gpu', '--no-sandbox', '--hide-scrollbars', '--force-device-scale-factor=1',
+    '--window-size=1280,720', '--dump-dom', url], { encoding: 'utf8', timeout: 60_000 });
+  const style = (r.stdout.match(/<div id="label" style="([^"]*)"/) || [])[1] || '';
+  return { size: parseFloat((style.match(/font-size:\s*([\d.]+)px/) || [])[1]), wrap: (style.match(/white-space:\s*([a-z]+)/) || [])[1] };
+}
+test('the series label is sized to fit: a short label sits on one line at a readable size, a long one still fits', { skip: !chromium && 'no headless Chromium' }, () => {
+  const short = labelLayout('Sys-Part 2, Caches');
+  assert.equal(short.wrap, 'nowrap', 'a short label stays on one line');
+  assert.ok(short.size >= 30, `a short label is readable, not the 18px minimum (got ${short.size}px)`);
+  const long = labelLayout('Event-Driven Systems-Part 3, How One Event Bus Feeds Five Systems And Then Some More Of Them');
+  assert.ok(long.size > 18 && long.size <= short.size, `a long label shrinks but stays above the minimum (got ${long.size}px)`);
 });
 
 test('stamp accepts the thumbnail stage between publish and render', () => {
