@@ -61,7 +61,8 @@ test('the hook is a few big words that add to the title, and a code-flow hook ne
     'Why getUser lies', 'Open ./config first', 'Past ../lib/db', 'Through src/api/users', 'Inside os.path.join', 'Why fn() blocks', '"getUser" lies'])
     assert.match(checkConfig({ hook, still: 's.png' }, { title, codebase: true }).errors.join('\n'), /names code/, hook);
   for (const hook of ['One click, three services', 'Why TypeScript lies', 'GitHub hides this', 'JavaScript vs PostgreSQL', 'macOS breaks it',
-    'gRPC under load', 'WebSocket drops silently', 'Where I/O blocks', 'CI/CD in one push', 'TCP/IP, step by step', 'Up 24/7, really?'])
+    'gRPC under load', 'WebSocket drops silently', 'Where I/O blocks', 'CI/CD in one push', 'TCP/IP, step by step', 'Up 24/7, really?',
+    'Rated 4.5/5', 'Scored 9.5/10'])
     assert.deepEqual(checkConfig({ hook, still: 's.png' }, { title, codebase: true }).errors, [], hook);
   assert.deepEqual(checkConfig({ hook: 'Read handle_order', still: 's.png' }, { title }).errors, [], 'the code rule is for code-flow plans only');
 });

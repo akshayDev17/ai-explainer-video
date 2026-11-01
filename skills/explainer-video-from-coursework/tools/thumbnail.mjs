@@ -86,7 +86,7 @@ export function markedWords(hook, highlight) {
 // a hook word that is code, not the viewer's terms: a path, an identifier, a module path or a call
 const CODE = [
   (w) => /^\.{1,2}\//.test(w),
-  (w) => w.includes('/') && w.split('/').some((s) => /^[\w-]+\.[A-Za-z0-9]{1,5}$/.test(s)),
+  (w) => w.includes('/') && w.split('/').some((s) => /^[\w-]+\.[A-Za-z][A-Za-z0-9]{0,4}$/.test(s)),
   (w) => /[A-Za-z_][\w-]*(\/[A-Za-z_][\w-]*){2,}/.test(w),
   (w) => /^[a-z][a-z0-9]+[A-Z][a-z]/.test(w),
   (w) => /[A-Za-z0-9]_[A-Za-z0-9]/.test(w),
