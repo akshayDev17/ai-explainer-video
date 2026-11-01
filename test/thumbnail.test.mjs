@@ -10,7 +10,7 @@ import { deflateSync } from 'node:zlib';
 import { ROOT, scratch, cleanup } from './helpers.mjs';
 
 const TOOLS = join(ROOT, 'skills', 'explainer-video-from-coursework', 'tools');
-const { pngInfo, checkThumbnail, partOf, seriesLabel, checkConfig, MAX_BYTES } = await import(join(TOOLS, 'thumbnail.mjs'));
+const { pngInfo, checkThumbnail, partOf, seriesLabel, checkConfig, markedWords, MAX_BYTES } = await import(join(TOOLS, 'thumbnail.mjs'));
 const { findChromium } = await import(join(TOOLS, 'chromium.mjs'));
 const run = (args, cwd) => spawnSync(process.execPath, [join(TOOLS, 'thumbnail.mjs'), ...args], { cwd, encoding: 'utf8' });
 
@@ -31,34 +31,12 @@ function png(width, height, rgb = [40, 60, 120]) {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
-test('a 1280x720 PNG under 2 MB passes; the wrong size, a JPEG, an oversized file and a missing one fail loudly', () => {
-  const dir = scratch();
-  const write = (name, buf) => { const p = join(dir, name); writeFileSync(p, buf); return p; };
+test('a 1280x720 PNG under 2 MB passes; the wrong size, a JPEG and an oversized file fail loudly', () => {
   assert.deepEqual(pngInfo(png(1280, 720)), { width: 1280, height: 720 });
   assert.deepEqual(checkThumbnail(png(1280, 720)), []);
-
-  const ok = run(['--check', write('thumbnail.png', png(1280, 720))]);
-  assert.equal(ok.status, 0, ok.stderr);
-  assert.match(ok.stdout, /✓ .*PNG 1280x720/);
-
-  const big = run(['--check', write('big.png', png(1920, 1080))]);
-  assert.equal(big.status, 2);
-  assert.match(big.stderr, /1920x1080; a thumbnail is 1280x720/);
-
-  const jpeg = run(['--check', write('jpeg.png', Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64)]))]);
-  assert.equal(jpeg.status, 2);
-  assert.match(jpeg.stderr, /a JPEG named as a PNG/);
-
-  const heavy = run(['--check', write('heavy.png', Buffer.concat([png(1280, 720), Buffer.alloc(MAX_BYTES)]))]);
-  assert.equal(heavy.status, 2);
-  assert.match(heavy.stderr, /the upload refuses more than 2,000,000/);
-
-  const named = run(['--check', write('thumbnail.jpg', png(1280, 720))]);
-  assert.equal(named.status, 2, 'a PNG the upload would not look for is still a failure');
-  assert.match(named.stderr, /the upload picks thumbnail\.png/);
-
-  assert.equal(run(['--check', join(dir, 'absent.png')]).status, 1);
-  cleanup(dir);
+  assert.match(checkThumbnail(png(1920, 1080)).join('\n'), /1920x1080; a thumbnail is 1280x720/);
+  assert.match(checkThumbnail(Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64)])).join('\n'), /a JPEG named as a PNG/);
+  assert.match(checkThumbnail(Buffer.concat([png(1280, 720), Buffer.alloc(MAX_BYTES)])).join('\n'), /the upload refuses more than 2,000,000/);
 });
 
 test('Part X is the position among the videos curation kept, and the label reads "<playlist>-Part X, <title>"', () => {
@@ -79,10 +57,22 @@ test('the hook is a few big words that add to the title, and a code-flow hook ne
   assert.match(checkConfig({ hook: 'Read this', still: 's.png', highlight: 'that' }, { title }).errors.join('\n'), /"highlight" word "that" is not in the hook/);
   assert.match(checkConfig({ hook: 'Read this' }, { title }).errors.join('\n'), /"still" is missing/);
   assert.match(checkConfig({ hook: 'Read this', still: 's.png', accent: 'red; x' }, { title }).errors.join('\n'), /hex colour/);
-  for (const hook of ['Inside api/routes.py', 'Who calls handle_order', 'processPayment breaks', 'Svc::run explained'])
+  for (const hook of ['Inside api/routes.py', 'Who calls handle_order', 'processPayment breaks', 'Svc::run explained',
+    'Why getUser lies', 'Open ./config first', 'Past ../lib/db', 'Through src/api/users', 'Inside os.path.join', 'Why fn() blocks', '"getUser" lies'])
     assert.match(checkConfig({ hook, still: 's.png' }, { title, codebase: true }).errors.join('\n'), /names code/, hook);
-  assert.deepEqual(checkConfig({ hook: 'One click, three services', still: 's.png' }, { title, codebase: true }).errors, []);
+  for (const hook of ['One click, three services', 'Why TypeScript lies', 'GitHub hides this', 'JavaScript vs PostgreSQL', 'macOS breaks it',
+    'gRPC under load', 'WebSocket drops silently', 'Where I/O blocks', 'CI/CD in one push', 'TCP/IP, step by step', 'Up 24/7, really?'])
+    assert.deepEqual(checkConfig({ hook, still: 's.png' }, { title, codebase: true }).errors, [], hook);
   assert.deepEqual(checkConfig({ hook: 'Read handle_order', still: 's.png' }, { title }).errors, [], 'the code rule is for code-flow plans only');
+});
+
+test('a highlight names a whole hook word, so a hyphenated word can be marked and half of one cannot', () => {
+  const title = 'Why Your Cache Serves Stale Data';
+  assert.deepEqual(checkConfig({ hook: 'Zero-copy beats memcpy', highlight: 'Zero-copy', still: 's.png' }, { title }).errors, []);
+  assert.deepEqual(markedWords('Zero-copy beats memcpy', 'zero-copy'), [0]);
+  assert.match(checkConfig({ hook: 'Zero-copy beats memcpy', highlight: 'copy', still: 's.png' }, { title }).errors.join('\n'), /"highlight" word "copy" is not in the hook/);
+  assert.deepEqual(markedWords('Zero-copy beats memcpy', 'copy'), [], 'nothing the template would colour');
+  assert.deepEqual(markedWords('The naïve fix, nobody!', ['naïve', 'NOBODY']), [1, 3]);
 });
 
 // a scratch root with an enriched plan of `videos`, video 2's script and work dir, and (unless `noTitle`) its title.txt

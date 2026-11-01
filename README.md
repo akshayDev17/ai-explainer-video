@@ -16,7 +16,7 @@ content-bearing section is assigned to a video or classified as navigation
 
 Stage 0 (`/inputs`) collects the two things only you can decide — the source
 notes directory, and where the finished videos land — plus, optionally, the playlist
-name a series is published under (blank means standalone; it is never guessed).
+name a series is published under (it is never guessed; a series left blank is asked about at 6b).
 
 | # | stage | what it does | cost |
 |---|-------|--------------|------|
@@ -62,7 +62,7 @@ agy plugin install https://github.com/akshayDev17/ai-explainer-video
 ```
 
 All four commands install the **same** npm package — one package, three manifest surfaces,
-one copy of all sixteen skills: the ten video skills, `coursework-author`, the companion
+one copy of all seventeen skills: the eleven video skills, `coursework-author`, the companion
 skill for writing the coursework these videos come from, and the five code-flow skills:
 `explainer-video-from-codebase`, which makes explainer videos of a codebase's major code flows
 (Python, TypeScript / JavaScript, Go, C, C++, or a mix), and its four stage skills. It mines the

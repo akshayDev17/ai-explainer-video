@@ -19,15 +19,14 @@
      node tools/thumbnail.mjs --work out/<name>/<NN> --script out/<name>/scripts/<NN>-*.json \
                               --plan out/<name>/plan.enriched.json --dest <destination> \
                               [--playlist "<name>" | --standalone]
-     node tools/thumbnail.mjs --check <file.png>
 
-   Exit: 0 written (or the file passes) · 1 a missing input or prerequisite · 2 the config
+   Exit: 0 written · 1 a missing input or prerequisite · 2 the config
    or the PNG fails a check · 3 a series with no playlist decision (ask the user).
    ========================================================================== */
 
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromiumBinOrExit } from './chromium.mjs';
 import { videoDir } from './naming.mjs';
@@ -75,6 +74,29 @@ const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').replac
 const words = (s) => norm(s).split(' ').filter(Boolean);
 const STOP = new Set(['a', 'an', 'the', 'of', 'to', 'in', 'on', 'and', 'or', 'is', 'it', 'for', 'how', 'why', 'what', 'your', 'you']);
 
+// one hook word as the template compares it: case and punctuation dropped, so "Zero-copy" and "zero-copy!" are one word
+const wordKey = (w) => String(w).toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
+
+// the positions of the hook's whitespace-separated words that a highlight names; the template colours exactly these
+export function markedWords(hook, highlight) {
+  const keys = new Set([].concat(highlight || []).map(wordKey).filter(Boolean));
+  return hook.split(' ').flatMap((w, i) => (keys.has(wordKey(w)) ? [i] : []));
+}
+
+// a hook word that is code, not the viewer's terms: a path, an identifier, a module path or a call
+const CODE = [
+  (w) => /^\.{1,2}\//.test(w),
+  (w) => w.includes('/') && w.split('/').some((s) => /^[\w-]+\.[A-Za-z0-9]{1,5}$/.test(s)),
+  (w) => /[A-Za-z_][\w-]*(\/[A-Za-z_][\w-]*){2,}/.test(w),
+  (w) => /^[a-z][a-z0-9]+[A-Z][a-z]/.test(w),
+  (w) => /[A-Za-z0-9]_[A-Za-z0-9]/.test(w),
+  (w) => /^[a-z_]\w*(\.[A-Za-z_]\w*){2,}/.test(w),
+  (w) => /\w::\w/.test(w),
+  (w) => /\w\(\)/.test(w),
+];
+export const codeWords = (hook) => hook.split(' ')
+  .filter((w) => { const bare = w.replace(/^[^\w./]+/, '').replace(/[^\w)]+$/, ''); return CODE.some((is) => is(bare)); });
+
 // { errors, warnings } for thumbnail.json against the upload title; `codebase` adds the code-flow rule
 export function checkConfig(cfg, { title = '', codebase = false } = {}) {
   const errors = [];
@@ -93,11 +115,11 @@ export function checkConfig(cfg, { title = '', codebase = false } = {}) {
       if (own.length && shared.length / own.length > 0.5) warnings.push(`"hook" shares most of its words with the upload title (${shared.join(', ')}); a hook that complements the title earns the click`);
     }
     if (codebase) {
-      const code = hook.split(' ').filter((w) => /[\\/]|::|\(\)|_|\.[a-z]{1,4}$|[a-z][A-Z]/.test(w));
+      const code = codeWords(hook);
       if (code.length) errors.push(`"hook" names code (${code.join(', ')}); a code-flow hook names the flow in the viewer's terms, never a module path or an identifier`);
     }
     for (const w of [].concat(cfg.highlight || [])) {
-      if (!words(hook).includes(norm(w))) errors.push(`"highlight" word "${w}" is not in the hook`);
+      if (!markedWords(hook, w).length) errors.push(`"highlight" word "${w}" is not in the hook`);
     }
   }
   if (cfg.highlight != null && !Array.isArray(cfg.highlight) && typeof cfg.highlight !== 'string') errors.push('"highlight" is a word of the hook or a list of them');
@@ -129,17 +151,6 @@ function main(argv) {
     }
   };
 
-  if (has('check')) {
-    const file = flag('check');
-    if (!file || !existsSync(file)) die(1, `usage: thumbnail.mjs --check <file.png> (no file at ${file})`);
-    const buf = readFileSync(file);
-    const problems = checkThumbnail(buf);
-    if (extname(file).toLowerCase() !== '.png') problems.push(`the file is named ${basename(file)}; the upload picks thumbnail.png`);
-    report(file, problems);
-    console.log(`[thumbnail] ✓ ${file} — PNG ${WIDTH}x${HEIGHT}, ${buf.length.toLocaleString('en-US')} bytes`);
-    return;
-  }
-
   const WORK = flag('work'), SCRIPT = flag('script'), PLAN = flag('plan'), DEST = flag('dest');
   if (!WORK || !SCRIPT || !PLAN || !DEST)
     die(1, 'usage: thumbnail.mjs --work <work-dir> --script <script.json> --plan <plan.enriched.json> --dest <dir> [--playlist "<name>" | --standalone]');
@@ -159,7 +170,7 @@ function main(argv) {
   /* The playlist name is the user's, never ours: no default, no guess. */
   const playlist = flag('playlist');
   if (playlist !== undefined && has('standalone')) die(1, 'pass --playlist or --standalone, not both');
-  if (playlist !== undefined && !String(playlist).trim()) die(1, '--playlist is empty: a blank Stage 0 answer means a standalone video, so pass --standalone');
+  if (playlist !== undefined && !String(playlist).trim()) die(1, '--playlist is empty: pass the user\'s playlist name, --standalone if they said there is none, or neither flag to be asked');
   if (playlist === undefined && !has('standalone') && where.of > 1)
     die(3, `this plan has ${where.of} videos, so video ${script.videoIndex} looks like part of a series, and no playlist name was given. ` +
       'Ask the user for the playlist name (or whether it is standalone), then re-run with --playlist "<name>" or --standalone. Never invent one.');
@@ -173,9 +184,10 @@ function main(argv) {
 
   /* Photograph the host: everything is laid out before the load event, so --screenshot never races it. */
   const bin = chromiumBinOrExit('thumbnail');
+  const hook = cfg.hook.replace(/\s+/g, ' ').trim();
   const config = {
-    hook: cfg.hook.replace(/\s+/g, ' ').trim(),
-    highlight: [].concat(cfg.highlight || []).map((w) => norm(w)),
+    hook,
+    marked: markedWords(hook, cfg.highlight),
     label,
     still: pathToFileURL(stillPath).href,
     focus: cfg.focus || null,

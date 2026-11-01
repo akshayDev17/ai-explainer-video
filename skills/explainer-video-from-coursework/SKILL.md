@@ -94,10 +94,12 @@ and scratch so the user only adjusts, never invents:
   Not a throwaway: a series runs to hundreds of MB of WAV and MP4, so it is worth one
   line in the prompt rather than a surprise later. Say plainly that the default is
   fine; the user should not have to think about it.
-- **Playlist name** (optional) — the playlist the series is published under, if any.
-  Stage 6b prints it on every thumbnail as `<playlist name>-Part X, <title>`. It has **no
-  default** and is never guessed: blank means a standalone video, with no label. Carry
-  the answer to stage 6b as `--playlist "<name>"`, or `--standalone` when blank.
+- **Playlist name** (optional) — the playlist the series is published under, or *none*
+  to say it has no playlist. Stage 6b prints it on every thumbnail as `<playlist
+  name>-Part X, <title>`. It has **no default** and is never guessed. Carry the answer to
+  stage 6b as `--playlist "<name>"`; pass `--standalone` only when the plan has one video
+  or the user explicitly said there is no playlist. Blank is not *none*: on a plan of
+  more than one video it passes neither flag, so stage 6b exits 3 and you ask.
 
 Then `cd` to the scratch root once and stay there. It is the only cwd that makes the
 `out/<name>/…` paths below resolve. If that root is inside a git work tree, `planner`
@@ -701,8 +703,9 @@ When the video belongs to a series or an intended playlist, a band across the to
 **`<playlist name>-Part X, <title>`**: the first link of chronology a new viewer sees.
 
 - **The playlist name comes only from the user**: the Stage 0 answer. Never guess it, never
-  default it, never derive it from the notes. A blank Stage 0 answer means a standalone
-  video: pass `--standalone`, and there is no label.
+  default it, never derive it from the notes. Pass `--standalone`, with no label, only
+  when the plan has one video or the user explicitly said there is no playlist; a blank
+  Stage 0 answer on a series is not that.
 - **Unset for a series means ask.** With neither `--playlist` nor `--standalone`, a plan of
   more than one video exits **3**. Ask the user whether the series is published as a
   playlist and under what name, then re-run with `--playlist "<name>"` or `--standalone`.
@@ -760,13 +763,6 @@ It validates `thumbnail.json`, adds the series label, photographs `src/thumbnail
 | 1 | a missing input or prerequisite: no `thumbnail.json`, no `title.txt` (run `/publish` first), a video not in the enriched plan, no Chromium |
 | 2 | a check failed: the hook, the still, the crop, or the PNG (not 1280x720, not a PNG, over 2,000,000 bytes) |
 | 3 | a series with no playlist decision: ask the user, never invent a name |
-
-`--check <file>` re-validates any thumbnail on its own (dimensions, format, size), such as
-one the user edited by hand:
-
-```bash
-node tools/thumbnail.mjs --check <destination>/<NN>-<slug>/thumbnail.png
-```
 
 ### The visual check
 

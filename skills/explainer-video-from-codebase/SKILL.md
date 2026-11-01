@@ -126,10 +126,11 @@ one prompt, with defaults**, so the user only adjusts and never invents:
   folder beside the repo, `<repo>/../<repo name>-videos/`. It must be outside the repo, since the tools refuse to
   write there. A series runs to hundreds of MB of WAV and MP4, so it is worth one line in the prompt. Say
   plainly that the default is fine.
-- **Playlist name** (optional) — the playlist the series is published under, if any. Stage 6b prints it on every
-  thumbnail as `<playlist name>-Part X, <title>`. It has **no default** and is never guessed, least of all from the
-  repo's name: blank means a standalone video, with no label. Carry the answer to stage 6b as `--playlist "<name>"`,
-  or `--standalone` when blank.
+- **Playlist name** (optional) — the playlist the series is published under, or *none* to say it has no playlist.
+  Stage 6b prints it on every thumbnail as `<playlist name>-Part X, <title>`. It has **no default** and is never
+  guessed, least of all from the repo's name. Carry the answer to stage 6b as `--playlist "<name>"`; pass
+  `--standalone` only when the plan has one video or the user explicitly said there is no playlist. Blank is not
+  *none*: on a plan of more than one video it passes neither flag, so stage 6b exits 3 and you ask.
 
 Note, without asking unless the user raises them, the optional scope flags stage 1 takes:
 
@@ -669,7 +670,8 @@ in this block applies to its videos. A code-flow video adds these rules at stage
 
 - **Hook.** Name the flow in the viewer's terms, such as what a request does, what breaks or what a command runs
   ("One click, three services"). Never use a module path, a file name or an identifier: `thumbnail` refuses a hook
-  word with a `/`, `::`, `()`, `_`, a file extension or camelCase.
+  word that is a path (`./x`, `dir/file.ext`, `a/b/c`), lowercase-first camelCase (`getUser`), snake_case, a dotted
+  module path (`pkg.mod.fn`), `::` or a call (`fn()`). Viewer words such as TypeScript, macOS, gRPC, I/O and CI/CD pass.
 - **Still.** Take it from a diagram beat (the overview's system map, a flow's sequence, an eval's hand-off), never
   from a code panel: a wall of code is unreadable texture at thumbnail size.
 - **Secrets.** Never put a secret or a redacted value on the thumbnail.

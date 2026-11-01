@@ -60,8 +60,9 @@ When the video belongs to a series or an intended playlist, a band across the to
 **`<playlist name>-Part X, <title>`**: the first link of chronology a new viewer sees.
 
 - **The playlist name comes only from the user**: the Stage 0 answer. Never guess it, never
-  default it, never derive it from the notes or the repo. A blank Stage 0 answer means a
-  standalone video: pass `--standalone`, and there is no label.
+  default it, never derive it from the notes or the repo. Pass `--standalone`, with no
+  label, only when the plan has one video or the user explicitly said there is no
+  playlist; a blank Stage 0 answer on a series is not that.
 - **Unset for a series means ask.** With neither `--playlist` nor `--standalone`, a plan of
   more than one video exits **3**. Ask the user whether the series is published as a
   playlist and under what name, then re-run with `--playlist "<name>"` or `--standalone`.
@@ -125,13 +126,6 @@ TTS and takes about a second, so iterate freely.
 | 2 | a check failed: the hook, the still, the crop, or the PNG (not 1280x720, not a PNG, over 2,000,000 bytes) |
 | 3 | a series with no playlist decision: ask the user, never invent a name |
 
-`--check <file>` re-validates any thumbnail on its own (dimensions, format, size), such as
-one the user edited by hand:
-
-```bash
-node ../explainer-video-from-coursework/tools/thumbnail.mjs --check <destination>/<NN>-<slug>/thumbnail.png
-```
-
 ### Look at it
 
 The tool checks the shape of the thumbnail, never its appeal. **Vision gate:** read
@@ -156,7 +150,8 @@ in this block applies to its videos. A code-flow video adds these rules at stage
 
 - **Hook.** Name the flow in the viewer's terms, such as what a request does, what breaks or what a command runs
   ("One click, three services"). Never use a module path, a file name or an identifier: `thumbnail` refuses a hook
-  word with a `/`, `::`, `()`, `_`, a file extension or camelCase.
+  word that is a path (`./x`, `dir/file.ext`, `a/b/c`), lowercase-first camelCase (`getUser`), snake_case, a dotted
+  module path (`pkg.mod.fn`), `::` or a call (`fn()`). Viewer words such as TypeScript, macOS, gRPC, I/O and CI/CD pass.
 - **Still.** Take it from a diagram beat (the overview's system map, a flow's sequence, an eval's hand-off), never
   from a code panel: a wall of code is unreadable texture at thumbnail size.
 - **Secrets.** Never put a secret or a redacted value on the thumbnail.

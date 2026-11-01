@@ -74,10 +74,12 @@ It lives in this file rather than being a flag because a resumed session must no
 different value: `parallel` determines port allocation, and changing it mid-run
 invalidates every port already claimed.
 
-`playlist` is the user's Stage 0 answer, verbatim, or `null` for standalone videos. It is
-recorded here once so that every per-video agent prints the same `<playlist>-Part X,
-<title>` label on its thumbnail (stage 6b) without asking again; it is never guessed or
-filled in by the orchestrator.
+`playlist` is the user's playlist name, verbatim, or `null` only when the user explicitly
+said the series has no playlist. A blank Stage 0 answer is neither: before writing this
+file, the orchestrator asks the user the question stage 6b's exit 3 asks (is the series a
+playlist, and under what name). It is recorded here once so that every per-video agent
+prints the same `<playlist>-Part X, <title>` label on its thumbnail (stage 6b) without
+asking again; it is never guessed or filled in by the orchestrator.
 
 Titles are **not** duplicated here — they live in `plan.enriched.json`, which stays the
 single source of truth for content. Two copies would drift.

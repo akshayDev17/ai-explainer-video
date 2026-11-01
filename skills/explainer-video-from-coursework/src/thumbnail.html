@@ -32,7 +32,7 @@
 <!--
   Stage 6b's thumbnail host. tools/thumbnail.mjs passes the resolved config as JSON in `?c=`:
 
-    { hook, highlight[], label|null, still (file URL), focus {x, y, zoom}, accent, badge|null }
+    { hook, marked[] (word positions in the hook), label|null, still (file URL), focus {x, y, zoom}, accent, badge|null }
 
   and photographs the page at 1280x720 with the headless Chromium. Everything is laid out
   synchronously before the load event, so the screenshot never races the layout.
@@ -95,12 +95,12 @@
 
   var hook = document.getElementById('hook');
   var text = hook.querySelector('.t');
-  var marked = (C.highlight || []).map(function (w) { return String(w).toLowerCase(); });
-  String(C.hook || '').split(/\s+/).filter(Boolean).forEach(function (word, i) {
+  var marked = C.marked || [];
+  String(C.hook || '').split(' ').forEach(function (word, i) {
     if (i) text.appendChild(document.createTextNode(' '));
     var span = document.createElement('span');
     span.textContent = word;
-    if (marked.indexOf(word.toLowerCase().replace(/[^a-z0-9']/g, '')) !== -1) span.style.color = accent;
+    if (marked.indexOf(i) !== -1) span.style.color = accent;
     text.appendChild(span);
   });
   var hookH = 720 - y0 - 64;

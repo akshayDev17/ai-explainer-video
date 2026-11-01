@@ -18,7 +18,7 @@ assemble stages written into `SKILL.md`; video 6 (SOLID) completed end-to-end.
 
 `SKILL.md` — all eight stages (plan, enrich, script, audio, scene, publish, render,
 assemble), each with its command, its `done when` gate, and the visual-check
-protocol (vision gate + the `LOOK` step). Distributed as one plugin of sixteen skills
+protocol (vision gate + the `LOOK` step). Distributed as one plugin of seventeen skills
 (`plugin.json` + `skills/`) — see §2.3.
 
 ### The stage skills

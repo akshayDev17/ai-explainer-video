@@ -1,7 +1,7 @@
 # Distribution & installation
 
 **One** npm package and one git repo serve all four platforms. Each consumer reads its own
-manifest surface out of the same package and ignores the rest, so the sixteen skills exist once
+manifest surface out of the same package and ignores the rest, so the seventeen skills exist once
 and nothing can drift out of step.
 
 ## Packages
