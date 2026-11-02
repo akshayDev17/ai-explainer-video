@@ -156,3 +156,9 @@ test('stamp accepts the thumbnail stage between publish and render', () => {
   assert.equal(JSON.parse(readFileSync(join(root, 'out/timing.jsonl'), 'utf8')).stage, '6b');
   cleanup(root);
 });
+
+test('a highlight matches a hook word whatever case either is written in, now the template no longer capitalises', () => {
+  assert.deepEqual(markedWords('Personal data stops here', 'stops'), [2]);
+  assert.deepEqual(markedWords('Personal data stops here', 'STOPS'), [2]);
+  assert.deepEqual(markedWords('Personal data stops here', ['personal', 'Here']), [0, 3]);
+});

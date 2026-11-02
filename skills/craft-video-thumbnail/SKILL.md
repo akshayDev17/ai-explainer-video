@@ -45,6 +45,10 @@ phone size. Every thumbnail follows the owner's brief:
   It **complements the upload title and never repeats it**: the title says what the video
   is, the hook says why it is worth the click. Highlight the one word that carries the
   punch. Never promise what the video does not deliver, the same rule as the title.
+- **Sentence case.** Write the hook and the badge in sentence case: the first word capitalised,
+  the rest lower case except proper nouns, acronyms and product names ("Your data is lying",
+  "Why TypeScript lies"). The template renders text exactly as written, so never type them in
+  all capitals.
 - **High contrast.** White type with a black stroke over a darkened wedge, and one accent
   colour (default yellow `#FFD400`) picked to stand out against the still, not to match it.
 - **A strong visual from the video itself.** A still rendered from one of this video's own
@@ -94,7 +98,7 @@ Write `out/<name>/<NN>/thumbnail.json`:
   "still": "thumbnail/t000042.png",
   "focus": { "x": 0.7, "y": 0.45, "zoom": 1.3 },
   "accent": "#FFD400",
-  "badge": "8 MIN"
+  "badge": "8 min"
 }
 ```
 
@@ -104,7 +108,7 @@ Write `out/<name>/<NN>/thumbnail.json`:
 - `focus` (optional) — the still's point to keep in view, `x` and `y` as fractions (0–1),
   and a `zoom` of 1–4. The hook sits on the left, so frame the subject to the right.
 - `accent` (optional) — a hex colour for the highlight, the label band, the badge and the bar.
-- `badge` (optional) — a short tilted sticker, 1–16 characters ("8 MIN", "FIXED").
+- `badge` (optional) — a short tilted sticker, 1–16 characters ("8 min", "Fixed"), in sentence case like the hook.
 
 ### Render and check
 
