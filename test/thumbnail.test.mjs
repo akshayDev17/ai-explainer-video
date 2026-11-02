@@ -165,3 +165,9 @@ test('the template renders the hook and the badge in the case they were written 
     assert.doesNotMatch(rule, /text-transform/, `${sel} keeps the case it was given`);
   }
 });
+
+test('a highlight matches a hook word whatever case either is written in, now the template no longer capitalises', () => {
+  assert.deepEqual(markedWords('Personal data stops here', 'stops'), [2]);
+  assert.deepEqual(markedWords('Personal data stops here', 'STOPS'), [2]);
+  assert.deepEqual(markedWords('Personal data stops here', ['personal', 'Here']), [0, 3]);
+});
