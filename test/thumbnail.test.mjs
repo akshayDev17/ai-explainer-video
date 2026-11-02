@@ -156,3 +156,12 @@ test('stamp accepts the thumbnail stage between publish and render', () => {
   assert.equal(JSON.parse(readFileSync(join(root, 'out/timing.jsonl'), 'utf8')).stage, '6b');
   cleanup(root);
 });
+
+test('the template renders the hook and the badge in the case they were written in, never forced to capitals', () => {
+  const html = readFileSync(join(ROOT, 'skills', 'explainer-video-from-coursework', 'src', 'thumbnail.html'), 'utf8');
+  for (const sel of ['#hook .t', '#badge']) {
+    const rule = (html.match(new RegExp(sel.replace(/[.#]/g, '\\$&') + '\\s*\\{([^}]*)\\}')) || [])[1];
+    assert.ok(rule, `${sel} has a style rule`);
+    assert.doesNotMatch(rule, /text-transform/, `${sel} keeps the case it was given`);
+  }
+});
