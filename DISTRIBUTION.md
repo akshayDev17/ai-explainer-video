@@ -8,7 +8,7 @@ and nothing can drift out of step.
 
 | package | read by | source |
 |---|---|---|
-| `explainer-video-from-coursework` | Claude Code, Codex, DeepSeek Harness | npm |
+| `explainer-video` | Claude Code, Codex, DeepSeek Harness | npm |
 | `akshayDev17/ai-explainer-video` | Antigravity + the marketplace catalogue | git |
 
 ## Publish — a dispatch, not a commit
@@ -34,18 +34,18 @@ bypasses the version computation, the catalogue pins and the tag, so treat it as
 ### Claude Code
 ```sh
 claude plugin marketplace add akshayDev17/ai-explainer-video
-claude plugin install explainer-video-from-coursework@akshaydev17
+claude plugin install explainer-video@akshaydev17
 ```
 
 ### Codex
 ```sh
 codex plugin marketplace add akshayDev17/ai-explainer-video
-codex plugin add explainer-video-from-coursework@akshaydev17
+codex plugin add explainer-video@akshaydev17
 ```
 
 ### DeepSeek Harness (DSH)
 ```sh
-dsh plugin --profile web add explainer-video-from-coursework
+dsh plugin --profile web add explainer-video
 ```
 
 ### Antigravity

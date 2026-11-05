@@ -9,11 +9,11 @@
   },
   "plugins": [
     {
-      "name": "explainer-video-from-coursework",
-      "description": "Turn structured coursework notes into a narrated, animated explainer-video series.",
+      "name": "explainer-video",
+      "description": "Turn structured coursework notes, or a codebase's major code flows, into a narrated, animated explainer-video series.",
       "source": {
         "source": "npm",
-        "package": "explainer-video-from-coursework",
+        "package": "explainer-video",
         "version": "^0.4.0"
       },
       "policy": {

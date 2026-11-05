@@ -136,7 +136,7 @@ def build_context() -> dict:
     actor = env("GITHUB_ACTOR")
     branch = env("GITHUB_REF_NAME")
     event = env("GITHUB_EVENT_NAME", "push")
-    package = env("PACKAGE", "explainer-video-from-coursework")
+    package = env("PACKAGE", "explainer-video")
     version = env("VERSION") or "unknown"
 
     release_outcome = env("RELEASE_OUTCOME")

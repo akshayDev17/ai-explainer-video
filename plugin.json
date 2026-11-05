@@ -1,13 +1,13 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "explainer-video-from-coursework",
+  "name": "explainer-video",
   "version": "0.4.0",
-  "description": "Turn structured coursework notes into a narrated, animated explainer-video series.",
+  "description": "Turn structured coursework notes, or a codebase's major code flows, into a narrated, animated explainer-video series.",
   "author": {
     "name": "Akshay Prabhakant"
   },
   "license": "MIT",
   "homepage": "https://github.com/akshayDev17/ai-explainer-video",
   "repository": "https://github.com/akshayDev17/ai-explainer-video",
-  "keywords": ["explainer-video", "coursework", "narration", "animation", "text-to-speech", "video"]
+  "keywords": ["explainer-video", "coursework", "codebase", "code-flow", "narration", "animation", "text-to-speech", "video"]
 }
