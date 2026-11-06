@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "explainer-video",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Turn structured coursework notes, or a codebase's major code flows, into a narrated, animated explainer-video series.",
   "author": {
     "name": "Akshay Prabhakant"
